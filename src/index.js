@@ -3,12 +3,24 @@ const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const express = require("express");
 const { handleMessage } = require("./handlers/messageHandler");
+const QRCode = require('qrcode');
+let currentQR = null;
 
 const app = express();
 app.use(express.json());
 
 // Health check for Railway
 app.get("/", (req, res) => res.send("ARIA Bot is running 🤖"));
+app.get('/qr', (req, res) => {
+  if (!currentQR) return res.send('<h3>No QR yet</h3><p>Restart service on Render to generate new QR</p>');
+  res.send(`
+    <div style="text-align:center;margin-top:50px;font-family:sans-serif">
+      <h2>Scan with WhatsApp</h2>
+      <p>WhatsApp > Settings > Linked Devices > Link a Device</p>
+      <img src="${currentQR}" style="width:300px;border:2px solid #ccc">
+    </div>
+  `);
+});
 
 // On Render, use their installed Chrome. Locally, let puppeteer find it automatically.
 const puppeteerConfig = {
@@ -36,9 +48,9 @@ const client = new Client({
 });
 
 // QR Code for first-time login
-client.on("qr", (qr) => {
-  console.log("\n📱 Scan this QR code with WhatsApp:\n");
-  qrcode.generate(qr, { small: true });
+client.on('qr', async (qr) => {
+  currentQR = await QRCode.toDataURL(qr);
+  console.log('QR generated! Open: https://wabot-ytal.onrender.com/qr');
 });
 
 client.on("ready", () => {

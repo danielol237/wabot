@@ -10,21 +10,29 @@ app.use(express.json());
 // Health check for Railway
 app.get("/", (req, res) => res.send("ARIA Bot is running 🤖"));
 
+// On Render, use their installed Chrome. Locally, let puppeteer find it automatically.
+const puppeteerConfig = {
+  headless: true,
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-accelerated-2d-canvas",
+    "--no-first-run",
+    "--no-zygote",
+    "--single-process",
+    "--disable-gpu",
+  ],
+};
+
+// Use bundled puppeteer's own Chrome on Render
+if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+  puppeteerConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+}
+
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: "./sessions" }),
-  puppeteer: {
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
-      "--single-process",
-      "--disable-gpu",
-    ],
-  },
+  puppeteer: puppeteerConfig,
 });
 
 // QR Code for first-time login

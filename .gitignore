@@ -1,6 +1,8 @@
 node_modules/
-sessions/
-temp/
+sessions/*
+!sessions/.gitkeep
+temp/*
+!temp/.gitkeep
 .env
 *.log
 .wwebjs_auth/

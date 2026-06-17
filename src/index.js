@@ -1,13 +1,13 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
-const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
-const qrcode = require("qrcode-terminal");
+const { Client, LocalAuth } = require("whatsapp-web.js");
+const qrcodeTerminal = require("qrcode-terminal");
 const QRCode = require("qrcode");
 const express = require("express");
 const { handleMessage } = require("./handlers/messageHandler");
 
-// Ensure required folders exist (Render/fresh clones won't have them)
+// Ensure required folders exist
 const TEMP_DIR = path.join(__dirname, "../temp");
 const SESSIONS_DIR = path.join(__dirname, "../sessions");
 [TEMP_DIR, SESSIONS_DIR].forEach((dir) => {
@@ -17,48 +17,37 @@ const SESSIONS_DIR = path.join(__dirname, "../sessions");
 const app = express();
 app.use(express.json());
 
-// Stores the latest QR as a base64 data URL so the webpage can always show the freshest one
 let latestQrDataUrl = null;
 let qrGeneratedAt = null;
 let isReady = false;
+let lastError = null;
 
-// Health check
-app.get("/", (req, res) => res.send("ARIA Bot is running 🤖"));
-
-// Auto-refreshing QR page — keeps polling for the newest QR so you never miss the scan window
-app.get("/qr", (req, res) => {
-  if (isReady) {
-    return res.send(`
-      <html><body style="background:#111;color:#0f0;font-family:sans-serif;text-align:center;padding-top:100px;">
-        <h1>✅ ARIA is already connected!</h1>
-        <p>No need to scan anything.</p>
-      </body></html>
-    `);
-  }
-
-  if (!latestQrDataUrl) {
-    return res.send(`
-      <html><head><meta http-equiv="refresh" content="2"></head>
-      <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
-        <h2>⏳ Waiting for QR code to generate...</h2>
-        <p>This page refreshes automatically.</p>
-      </body></html>
-    `);
-  }
-
-  const ageSeconds = Math.floor((Date.now() - qrGeneratedAt) / 1000);
-  res.send(`
-    <html><head><meta http-equiv="refresh" content="3"></head>
-    <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:40px;">
-      <h2>📱 Scan this QR with WhatsApp</h2>
-      <img src="${latestQrDataUrl}" style="width:300px;height:300px;" />
-      <p>Generated ${ageSeconds}s ago — page auto-refreshes every 3s</p>
-      <p style="color:#888;font-size:12px;">If it's been more than 20s, wait for the next refresh — a new QR is coming.</p>
-    </body></html>
-  `);
+app.get("/", (req, res) => {
+  res.send(`ARIA Bot — status: ${isReady ? "✅ connected" : "⏳ waiting for QR scan"}`);
 });
 
-// On Render, use their installed Chrome. Locally, let puppeteer find it automatically.
+app.get("/qr", (req, res) => {
+  if (isReady) {
+    return res.send(`<html><body style="background:#111;color:#0f0;font-family:sans-serif;text-align:center;padding-top:100px;">
+      <h1>✅ ARIA is connected!</h1></body></html>`);
+  }
+  if (lastError) {
+    return res.send(`<html><body style="background:#111;color:#f55;font-family:sans-serif;text-align:center;padding-top:60px;">
+      <h2>⚠️ Error occurred</h2><pre style="white-space:pre-wrap;padding:0 20px;">${lastError}</pre></body></html>`);
+  }
+  if (!latestQrDataUrl) {
+    return res.send(`<html><head><meta http-equiv="refresh" content="2"></head>
+      <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
+      <h2>⏳ Waiting for QR code to generate...</h2></body></html>`);
+  }
+  const ageSeconds = Math.floor((Date.now() - qrGeneratedAt) / 1000);
+  res.send(`<html><head><meta http-equiv="refresh" content="3"></head>
+    <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:40px;">
+    <h2>📱 Scan this QR with WhatsApp</h2>
+    <img src="${latestQrDataUrl}" style="width:300px;height:300px;" />
+    <p>Generated ${ageSeconds}s ago — page auto-refreshes every 3s</p></body></html>`);
+});
+
 const puppeteerConfig = {
   headless: true,
   args: [
@@ -73,24 +62,22 @@ const puppeteerConfig = {
   ],
 };
 
-// Use bundled puppeteer's own Chrome on Render
 if (process.env.PUPPETEER_EXECUTABLE_PATH) {
   puppeteerConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
 }
 
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: "./sessions" }),
+  authStrategy: new LocalAuth({ dataPath: SESSIONS_DIR }),
   puppeteer: puppeteerConfig,
 });
 
-// QR Code for first-time login
 client.on("qr", async (qr) => {
-  console.log("\n📱 New QR generated! Visit /qr to scan it.\n");
-  qrcode.generate(qr, { small: true });
-
+  console.log("📱 New QR generated! Visit /qr to scan it.");
+  qrcodeTerminal.generate(qr, { small: true });
   try {
     latestQrDataUrl = await QRCode.toDataURL(qr, { width: 300 });
     qrGeneratedAt = Date.now();
+    lastError = null;
   } catch (err) {
     console.error("QR image generation failed:", err.message);
   }
@@ -100,18 +87,28 @@ client.on("ready", () => {
   console.log("✅ ARIA is online and ready!");
   isReady = true;
   latestQrDataUrl = null;
+  lastError = null;
 });
 
 client.on("auth_failure", (msg) => {
   console.error("❌ Auth failed:", msg);
+  lastError = `Auth failure: ${msg}`;
+  isReady = false;
 });
 
 client.on("disconnected", (reason) => {
   console.log("⚠️ Client disconnected:", reason);
-  client.initialize(); // auto reconnect
+  isReady = false;
+  latestQrDataUrl = null;
+  // Give it a moment before reinitializing to avoid rapid crash loops
+  setTimeout(() => {
+    client.initialize().catch((err) => {
+      console.error("Reinitialize failed:", err.message);
+      lastError = err.message;
+    });
+  }, 5000);
 });
 
-// Main message handler
 client.on("message", async (msg) => {
   try {
     await handleMessage(client, msg);
@@ -120,8 +117,10 @@ client.on("message", async (msg) => {
   }
 });
 
-// Start
-client.initialize();
+client.initialize().catch((err) => {
+  console.error("❌ Initialize failed:", err.message);
+  lastError = err.message;
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));

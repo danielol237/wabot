@@ -1,24 +1,60 @@
 require("dotenv").config();
+const fs = require("fs");
+const path = require("path");
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
+const QRCode = require("qrcode");
 const express = require("express");
 const { handleMessage } = require("./handlers/messageHandler");
-const QRCode = require('qrcode');
-let currentQR = null;
+
+// Ensure required folders exist (Render/fresh clones won't have them)
+const TEMP_DIR = path.join(__dirname, "../temp");
+const SESSIONS_DIR = path.join(__dirname, "../sessions");
+[TEMP_DIR, SESSIONS_DIR].forEach((dir) => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
 
 const app = express();
 app.use(express.json());
 
-// Health check for Railway
+// Stores the latest QR as a base64 data URL so the webpage can always show the freshest one
+let latestQrDataUrl = null;
+let qrGeneratedAt = null;
+let isReady = false;
+
+// Health check
 app.get("/", (req, res) => res.send("ARIA Bot is running 🤖"));
-app.get('/qr', (req, res) => {
-  if (!currentQR) return res.send('<h3>No QR yet</h3><p>Restart service on Render to generate new QR</p>');
+
+// Auto-refreshing QR page — keeps polling for the newest QR so you never miss the scan window
+app.get("/qr", (req, res) => {
+  if (isReady) {
+    return res.send(`
+      <html><body style="background:#111;color:#0f0;font-family:sans-serif;text-align:center;padding-top:100px;">
+        <h1>✅ ARIA is already connected!</h1>
+        <p>No need to scan anything.</p>
+      </body></html>
+    `);
+  }
+
+  if (!latestQrDataUrl) {
+    return res.send(`
+      <html><head><meta http-equiv="refresh" content="2"></head>
+      <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
+        <h2>⏳ Waiting for QR code to generate...</h2>
+        <p>This page refreshes automatically.</p>
+      </body></html>
+    `);
+  }
+
+  const ageSeconds = Math.floor((Date.now() - qrGeneratedAt) / 1000);
   res.send(`
-    <div style="text-align:center;margin-top:50px;font-family:sans-serif">
-      <h2>Scan with WhatsApp</h2>
-      <p>WhatsApp > Settings > Linked Devices > Link a Device</p>
-      <img src="${currentQR}" style="width:300px;border:2px solid #ccc">
-    </div>
+    <html><head><meta http-equiv="refresh" content="3"></head>
+    <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:40px;">
+      <h2>📱 Scan this QR with WhatsApp</h2>
+      <img src="${latestQrDataUrl}" style="width:300px;height:300px;" />
+      <p>Generated ${ageSeconds}s ago — page auto-refreshes every 3s</p>
+      <p style="color:#888;font-size:12px;">If it's been more than 20s, wait for the next refresh — a new QR is coming.</p>
+    </body></html>
   `);
 });
 
@@ -48,13 +84,22 @@ const client = new Client({
 });
 
 // QR Code for first-time login
-client.on('qr', async (qr) => {
-  currentQR = await QRCode.toDataURL(qr);
-  console.log('QR generated! Open: https://wabot-ytal.onrender.com/qr');
+client.on("qr", async (qr) => {
+  console.log("\n📱 New QR generated! Visit /qr to scan it.\n");
+  qrcode.generate(qr, { small: true });
+
+  try {
+    latestQrDataUrl = await QRCode.toDataURL(qr, { width: 300 });
+    qrGeneratedAt = Date.now();
+  } catch (err) {
+    console.error("QR image generation failed:", err.message);
+  }
 });
 
 client.on("ready", () => {
   console.log("✅ ARIA is online and ready!");
+  isReady = true;
+  latestQrDataUrl = null;
 });
 
 client.on("auth_failure", (msg) => {

@@ -42,9 +42,11 @@ async function analyzeFile(media, question) {
       content = fs.readFileSync(filePath, "utf8").slice(0, 4000);
     }
 
-    // Image — tell AI what it received
+    // Image — use vision model to actually see and describe it
     else if (mimetype.startsWith("image/")) {
-      content = `[User sent an image file: ${filename || `image.${ext}`}]`;
+      const { analyzeImage } = require("./visionAI");
+      const result = await analyzeImage(data, mimetype, question);
+      return result;
     }
 
     // Unsupported

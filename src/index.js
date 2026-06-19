@@ -1,13 +1,19 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
-const { Client, LocalAuth } = require("whatsapp-web.js");
-const qrcodeTerminal = require("qrcode-terminal");
-const QRCode = require("qrcode");
 const express = require("express");
+const QRCode = require("qrcode");
+const qrcodeTerminal = require("qrcode-terminal");
+const pino = require("pino");
+const {
+  default: makeWASocket,
+  DisconnectReason,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+} = require("@whiskeysockets/baileys");
+
 const { handleMessage } = require("./handlers/messageHandler");
 
-// Ensure required folders exist
 const TEMP_DIR = path.join(__dirname, "../temp");
 const SESSIONS_DIR = path.join(__dirname, "../sessions");
 [TEMP_DIR, SESSIONS_DIR].forEach((dir) => {
@@ -19,11 +25,15 @@ app.use(express.json());
 
 let latestQrDataUrl = null;
 let qrGeneratedAt = null;
+let pairingCode = null;
 let isReady = false;
 let lastError = null;
+let sock = null;
+
+const USE_PAIRING_CODE = !!process.env.PHONE_NUMBER;
 
 app.get("/", (req, res) => {
-  res.send(`ARIA Bot — status: ${isReady ? "✅ connected" : "⏳ waiting for QR scan"}`);
+  res.send(`ARIA Bot — status: ${isReady ? "✅ connected" : "⏳ waiting for link"}`);
 });
 
 app.get("/qr", (req, res) => {
@@ -32,9 +42,23 @@ app.get("/qr", (req, res) => {
       <h1>✅ ARIA is connected!</h1></body></html>`);
   }
   if (lastError) {
-    return res.send(`<html><body style="background:#111;color:#f55;font-family:sans-serif;text-align:center;padding-top:60px;">
-      <h2>⚠️ Error occurred</h2><pre style="white-space:pre-wrap;padding:0 20px;">${lastError}</pre></body></html>`);
+    return res.send(`<html><head><meta http-equiv="refresh" content="5"></head><body style="background:#111;color:#f55;font-family:sans-serif;text-align:center;padding-top:60px;">
+      <h2>⚠️ Error occurred</h2><pre style="white-space:pre-wrap;padding:0 20px;">${lastError}</pre>
+      <p>Page will retry automatically...</p></body></html>`);
   }
+
+  if (USE_PAIRING_CODE) {
+    if (!pairingCode) {
+      return res.send(`<html><head><meta http-equiv="refresh" content="2"></head>
+        <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
+        <h2>⏳ Generating pairing code...</h2></body></html>`);
+    }
+    return res.send(`<html><body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:60px;">
+      <h2>📱 Enter this code in WhatsApp</h2>
+      <p style="font-size:48px;letter-spacing:8px;color:#0f0;font-weight:bold;">${pairingCode}</p>
+      <p>WhatsApp → Linked Devices → Link a Device → Link with phone number instead</p></body></html>`);
+  }
+
   if (!latestQrDataUrl) {
     return res.send(`<html><head><meta http-equiv="refresh" content="2"></head>
       <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
@@ -48,81 +72,115 @@ app.get("/qr", (req, res) => {
     <p>Generated ${ageSeconds}s ago — page auto-refreshes every 3s</p></body></html>`);
 });
 
-const puppeteerConfig = {
-  headless: true,
-  args: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-accelerated-2d-canvas",
-    "--no-first-run",
-    "--no-zygote",
-    "--single-process",
-    "--disable-gpu",
-  ],
-};
+async function startBot() {
+  const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
+  const { version } = await fetchLatestBaileysVersion();
 
-if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-  puppeteerConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  sock = makeWASocket({
+    version,
+    auth: state,
+    logger: pino({ level: "silent" }),
+    printQRInTerminal: false,
+    browser: ["ARIA", "Chrome", "1.0.0"],
+  });
+
+  // If using pairing code and not yet registered, request the code right after connecting
+  if (USE_PAIRING_CODE && !sock.authState.creds.registered) {
+    try {
+      const code = await sock.requestPairingCode(process.env.PHONE_NUMBER.replace(/[^0-9]/g, ""));
+      pairingCode = code;
+      console.log(`\n📱 Pairing code: ${code}\n(Enter this in WhatsApp → Linked Devices → Link with phone number instead)\n`);
+    } catch (err) {
+      console.error("Failed to request pairing code:", err.message);
+      lastError = `Pairing code request failed: ${err.message}`;
+    }
+  }
+
+  sock.ev.on("creds.update", saveCreds);
+
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr && !USE_PAIRING_CODE) {
+      console.log("📱 New QR generated! Visit /qr to scan it.");
+      qrcodeTerminal.generate(qr, { small: true });
+      try {
+        latestQrDataUrl = await QRCode.toDataURL(qr, { width: 300 });
+        qrGeneratedAt = Date.now();
+        lastError = null;
+      } catch (err) {
+        console.error("QR image generation failed:", err.message);
+      }
+    }
+
+    if (connection === "open") {
+      console.log("✅ ARIA is online and ready!");
+      isReady = true;
+      latestQrDataUrl = null;
+      pairingCode = null;
+      lastError = null;
+    }
+
+    if (connection === "close") {
+      isReady = false;
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+      console.log("⚠️ Connection closed. Status code:", statusCode, "Reconnecting:", shouldReconnect);
+
+      if (shouldReconnect) {
+        setTimeout(() => startBot().catch((err) => {
+          console.error("Reconnect failed:", err.message);
+          lastError = err.message;
+        }), 3000);
+      } else {
+        console.log("❌ Logged out. Need a fresh QR scan — clearing session.");
+        lastError = "Logged out — restart the service to get a fresh QR.";
+        // Clear session files so next boot generates a fresh QR
+        try {
+          fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
+          fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+        } catch (err) {
+          console.error("Failed to clear session:", err.message);
+        }
+        setTimeout(() => startBot().catch((err) => {
+          console.error("Restart after logout failed:", err.message);
+          lastError = err.message;
+        }), 3000);
+      }
+    }
+  });
+
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (type !== "notify") return;
+    for (const msg of messages) {
+      if (!msg.message || msg.key.fromMe) continue;
+      try {
+        await handleMessage(sock, msg);
+      } catch (err) {
+        console.error("Message handler error:", err);
+        try {
+          const { logError } = require("./tools/botAdmin");
+          logError("messageHandler", err.message);
+        } catch (_) {}
+      }
+    }
+  });
+
+  return sock;
 }
 
-const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: SESSIONS_DIR }),
-  puppeteer: puppeteerConfig,
-});
-
-client.on("qr", async (qr) => {
-  console.log("📱 New QR generated! Visit /qr to scan it.");
-  qrcodeTerminal.generate(qr, { small: true });
-  try {
-    latestQrDataUrl = await QRCode.toDataURL(qr, { width: 300 });
-    qrGeneratedAt = Date.now();
-    lastError = null;
-  } catch (err) {
-    console.error("QR image generation failed:", err.message);
-  }
-});
-
-client.on("ready", () => {
-  console.log("✅ ARIA is online and ready!");
-  isReady = true;
-  latestQrDataUrl = null;
-  lastError = null;
-});
-
-client.on("auth_failure", (msg) => {
-  console.error("❌ Auth failed:", msg);
-  lastError = `Auth failure: ${msg}`;
-  isReady = false;
-});
-
-client.on("disconnected", (reason) => {
-  console.log("⚠️ Client disconnected:", reason);
-  isReady = false;
-  latestQrDataUrl = null;
-  // Give it a moment before reinitializing to avoid rapid crash loops
-  setTimeout(() => {
-    client.initialize().catch((err) => {
-      console.error("Reinitialize failed:", err.message);
-      lastError = err.message;
-    });
-  }, 5000);
-});
-
-client.on("message", async (msg) => {
-  try {
-    await handleMessage(client, msg);
-  } catch (err) {
-    console.error("Message handler error:", err);
-  }
-});
-
-client.initialize().catch((err) => {
-  console.error("❌ Initialize failed:", err.message);
+startBot().catch((err) => {
+  console.error("❌ Failed to start bot:", err.message);
   lastError = err.message;
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
 
-module.exports = { client };
+// Flush memory to disk on shutdown so nothing's lost on a clean restart/deploy
+const { flushNow } = require("./utils/memory");
+process.on("SIGINT", () => { flushNow(); process.exit(0); });
+process.on("SIGTERM", () => { flushNow(); process.exit(0); });
+
+module.exports = { getSock: () => sock };

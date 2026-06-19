@@ -1,6 +1,5 @@
 const fs = require("fs");
 const path = require("path");
-const { MessageMedia } = require("whatsapp-web.js");
 const { v4: uuidv4 } = require("uuid");
 const { uploadToGofile } = require("./gofileUpload");
 
@@ -29,7 +28,7 @@ const FILE_TYPES = {
   default: { ext: "txt", mime: "text/plain", label: "File" },
 };
 
-async function sendFile(client, chatId, filename, content, caption = "") {
+async function sendFile(sock, chatId, filename, content, caption = "") {
   try {
     const ext = filename.split(".").pop().toLowerCase();
     const type = FILE_TYPES[ext] || FILE_TYPES.default;
@@ -44,30 +43,29 @@ async function sendFile(client, chatId, filename, content, caption = "") {
       const result = await uploadToGofile(filePath, filename);
       fs.unlinkSync(filePath);
       if (result.success) {
-        await client.sendMessage(chatId, `📄 *${filename}* (too big to send directly)\n${result.downloadPage}`);
+        await sock.sendMessage(chatId, { text: `📄 *${filename}* (too big to send directly)\n${result.downloadPage}` });
         return { success: true, viaLink: true };
       }
       return { success: false, error: result.error };
     }
 
-    const media = MessageMedia.fromFilePath(filePath);
-    media.filename = filename;
-    media.mimetype = type.mime;
-
     try {
-      await client.sendMessage(chatId, media, {
+      const buffer = fs.readFileSync(filePath);
+      await sock.sendMessage(chatId, {
+        document: buffer,
+        fileName: filename,
+        mimetype: type.mime,
         caption: caption || `📎 *${filename}*`,
-        sendMediaAsDocument: true,
       });
       fs.unlinkSync(filePath);
       return { success: true };
     } catch (sendErr) {
-      // Direct send failed (e.g. WhatsApp rejected it) — fall back to Gofile link
+      // Direct send failed — fall back to Gofile link
       console.error("Direct send failed, trying Gofile:", sendErr.message);
       const result = await uploadToGofile(filePath, filename);
       fs.unlinkSync(filePath);
       if (result.success) {
-        await client.sendMessage(chatId, `📄 *${filename}*\n${result.downloadPage}`);
+        await sock.sendMessage(chatId, { text: `📄 *${filename}*\n${result.downloadPage}` });
         return { success: true, viaLink: true };
       }
       return { success: false, error: sendErr.message };

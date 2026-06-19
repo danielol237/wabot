@@ -19,13 +19,13 @@ const SYSTEM_PROMPT = `You are ARIA (Advanced Reasoning Intelligence Assistant),
 
 Never say you're made by OpenAI or Anthropic — you are ARIA.`;
 
-async function getAIResponse(userMessage, userName, history = [], systemOverride = null) {
+async function getAIResponse(userMessage, userName, history = [], systemOverride = null, extraContext = "") {
   const messages = [
     ...history.slice(-12),
     { role: "user", content: userMessage },
   ];
 
-  const systemPrompt = systemOverride || SYSTEM_PROMPT;
+  const systemPrompt = (systemOverride || SYSTEM_PROMPT) + extraContext;
 
   // Try Groq first
   if (groq) {

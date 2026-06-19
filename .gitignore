@@ -3,7 +3,7 @@ sessions/*
 !sessions/.gitkeep
 temp/*
 !temp/.gitkeep
+data/*
+!data/.gitkeep
 .env
 *.log
-.wwebjs_auth/
-.wwebjs_cache/

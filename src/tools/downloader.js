@@ -1,12 +1,11 @@
 const { exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const { MessageMedia } = require("whatsapp-web.js");
 const { v4: uuidv4 } = require("uuid");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 
-async function downloadMedia(url, chatId, client) {
+async function downloadMedia(url, chatId, sock) {
   const id = uuidv4();
   const outputPath = path.join(TEMP_DIR, `${id}.%(ext)s`);
 
@@ -30,18 +29,26 @@ async function downloadMedia(url, chatId, client) {
       const ext = path.extname(files[0]).toLowerCase();
 
       try {
-        const media = MessageMedia.fromFilePath(filePath);
-        await client.sendMessage(chatId, media, {
-          caption: `📥 Downloaded successfully`,
-          sendMediaAsDocument: [".zip", ".pdf", ".mp3"].includes(ext),
-        });
+        const buffer = fs.readFileSync(filePath);
+        const isVideo = [".mp4", ".webm", ".mkv"].includes(ext);
+        const isAudio = [".mp3", ".m4a", ".opus"].includes(ext);
+        const isDoc = [".zip", ".pdf"].includes(ext);
 
-        // Cleanup
+        if (isVideo) {
+          await sock.sendMessage(chatId, { video: buffer, caption: "📥 Downloaded successfully" });
+        } else if (isAudio) {
+          await sock.sendMessage(chatId, { audio: buffer, mimetype: "audio/mp4" });
+        } else if (isDoc) {
+          await sock.sendMessage(chatId, { document: buffer, fileName: files[0], caption: "📥 Downloaded successfully" });
+        } else {
+          await sock.sendMessage(chatId, { document: buffer, fileName: files[0], caption: "📥 Downloaded successfully" });
+        }
+
         fs.unlinkSync(filePath);
         resolve({ success: true });
       } catch (sendErr) {
         console.error("Send error:", sendErr.message);
-        fs.unlinkSync(filePath);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         resolve({ success: false, error: "File downloaded but couldn't send it." });
       }
     });

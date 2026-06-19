@@ -1,4 +1,3 @@
-const { MessageMedia } = require("whatsapp-web.js");
 const { getAIResponse } = require("../tools/ai");
 const { searchWeb } = require("../tools/webSearch");
 const { generateImage } = require("../tools/imageGen");
@@ -9,123 +8,363 @@ const { analyzeFile } = require("../tools/fileAnalyzer");
 const { scrapeUrl } = require("../tools/scraper");
 const { sendFile, extractCodeBlock } = require("../tools/fileSender");
 const { readFromLink, detectFileLink } = require("../tools/linkReader");
+const { createSticker } = require("../tools/sticker");
+const { transcribeVoice } = require("../tools/voice");
+const { textToSpeech } = require("../tools/tts");
+const { translateText, convertCurrency, convertUnit, getWeather, weatherCodeToDescription } = require("../tools/utilities");
+const { getNewsDigest } = require("../tools/news");
+const { setRecurringReminder, cancelRecurringReminder, listRecurringReminders } = require("../tools/recurringReminders");
+const { runAgentTask } = require("../tools/agent");
 const { getMemory, saveMemory } = require("../utils/memory");
-const { react, reply } = require("../utils/helpers");
+const { isOwner, isAdmin, addAdmin, removeAdmin, listAdmins, banUser, unbanUser, isBanned, muteChat, unmuteChat, isMuted } = require("../utils/permissions");
+const { getStats, getRecentErrors, logError, broadcastToAll } = require("../tools/botAdmin");
 
-// ─── Bot identity ───────────────────────────────────────────────
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 const PREFIX = process.env.BOT_PREFIX || "!";
 
-const NAME_TRIGGERS = [
-  BOT_NAME,
-  BOT_NAME + ",",
-  BOT_NAME + "!",
-  "hey " + BOT_NAME,
-  "ok " + BOT_NAME,
-  "yo " + BOT_NAME,
-];
+const NAME_TRIGGERS = [BOT_NAME, BOT_NAME + ",", BOT_NAME + "!", "hey " + BOT_NAME, "ok " + BOT_NAME, "yo " + BOT_NAME];
 
 const INTENTS = {
-  image:    ["generate", "create an image", "make an image", "draw", "imagine", "paint", "design an image", "give me an image", "show me a picture"],
-  search:   ["search for", "look up", "google", "search the web", "find info on"],
+  image: ["generate", "create an image", "make an image", "draw", "imagine", "paint", "design an image", "give me an image", "show me a picture"],
+  search: ["search for", "look up", "google", "search the web", "find info on"],
   download: ["download", "dl this", "get this video", "save this"],
-  scrape:   ["read this link", "open this link", "check this site", "visit", "browse", "summarize this link", "what's on this site"],
-  remind:   ["remind me", "set a reminder", "alert me", "notify me in"],
-  clear:    ["clear memory", "reset chat", "forget everything", "start over"],
-  help:     ["help", "show commands", "what can you do", "menu"],
-  file:     ["send me the file", "give me the file", "send as file", "send it as a file", "download this code", "save this as"],
+  scrape: ["read this link", "open this link", "check this site", "visit", "browse", "summarize this link", "what's on this site"],
+  remind: ["remind me", "set a reminder", "alert me", "notify me in"],
+  clear: ["clear memory", "reset chat", "forget everything", "start over"],
+  help: ["help", "show commands", "what can you do", "menu"],
+  sticker: ["make this a sticker", "sticker this", "turn into sticker", "create sticker"],
+  voiceReply: ["say this", "voice note", "speak this", "read this out", "say it out loud"],
+  translate: ["translate", "say this in", "how do you say"],
+  weather: ["weather in", "weather for", "what's the weather"],
+  news: ["news about", "latest news", "news on", "what's happening with"],
+  agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
 };
 
-// ─── Main handler ───────────────────────────────────────────────
-async function handleMessage(client, msg) {
-  if (msg.from === "status@broadcast") return;
-  if (msg.fromMe) return;
+// ── Baileys helper functions (replaces whatsapp-web.js msg.reply / msg.react) ──
 
-  const body = msg.body?.trim() || "";
+function getMessageText(msg) {
+  return (
+    msg.message?.conversation ||
+    msg.message?.extendedTextMessage?.text ||
+    msg.message?.imageMessage?.caption ||
+    msg.message?.videoMessage?.caption ||
+    ""
+  );
+}
+
+function getSenderName(msg) {
+  return msg.pushName || msg.key.participant || msg.key.remoteJid?.split("@")[0] || "User";
+}
+
+async function reply(sock, msg, text) {
+  if (!text) return;
+  const chatId = msg.key.remoteJid;
+  try {
+    if (text.length <= 4000) {
+      await sock.sendMessage(chatId, { text }, { quoted: msg });
+      return;
+    }
+    // Split long messages
+    const chunks = splitMessage(text, 3900);
+    for (const chunk of chunks) {
+      await sock.sendMessage(chatId, { text: chunk });
+      await sleep(400);
+    }
+  } catch (err) {
+    console.error("Reply error:", err.message);
+  }
+}
+
+async function react(sock, msg, emoji) {
+  try {
+    await sock.sendMessage(msg.key.remoteJid, {
+      react: { text: emoji, key: msg.key },
+    });
+  } catch (_) {
+    // Reactions can fail silently, not critical
+  }
+}
+
+function splitMessage(text, maxLen) {
+  const chunks = [];
+  let current = "";
+  for (const line of text.split("\n")) {
+    if ((current + "\n" + line).length > maxLen) {
+      if (current) chunks.push(current.trim());
+      current = line;
+    } else {
+      current += (current ? "\n" : "") + line;
+    }
+  }
+  if (current) chunks.push(current.trim());
+  return chunks;
+}
+
+function sleep(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+function hasMedia(msg) {
+  return !!(msg.message?.imageMessage || msg.message?.documentMessage || msg.message?.videoMessage);
+}
+
+function hasVoiceNote(msg) {
+  return !!(msg.message?.audioMessage);
+}
+
+async function downloadMediaFromMsg(sock, msg) {
+  const { downloadMediaMessage } = require("@whiskeysockets/baileys");
+  try {
+    const buffer = await downloadMediaMessage(msg, "buffer", {});
+    const mediaMsg = msg.message?.imageMessage || msg.message?.documentMessage || msg.message?.videoMessage || msg.message?.audioMessage;
+    return {
+      data: buffer.toString("base64"),
+      buffer,
+      mimetype: mediaMsg?.mimetype || "application/octet-stream",
+      filename: mediaMsg?.fileName || null,
+    };
+  } catch (err) {
+    console.error("Media download error:", err.message);
+    return null;
+  }
+}
+
+// ── Main handler ──────────────────────────────────────────────
+async function handleMessage(sock, msg) {
+  const chatId = msg.key.remoteJid;
+  if (chatId === "status@broadcast") return;
+
+  const senderJid = msg.key.participant || msg.key.remoteJid;
+
+  // Banned users get nothing, no matter what they send
+  if (isBanned(senderJid)) return;
+
+  const body = getMessageText(msg).trim();
   const lower = body.toLowerCase();
-  const contact = await msg.getContact();
-  const senderName = contact.pushname || contact.number || "User";
-  const chatId = msg.from;
+  const senderName = getSenderName(msg);
   const isGroup = chatId.endsWith("@g.us");
 
   console.log(`[${senderName}${isGroup ? " (grp)" : ""}] ${body.slice(0, 80)}`);
 
   let activeBody = body;
 
-  // ── Group: only respond if called by name or prefix ──
   if (isGroup) {
-    const namedTrigger = NAME_TRIGGERS.find(t => lower.startsWith(t));
+    const namedTrigger = NAME_TRIGGERS.find((t) => lower.startsWith(t));
     const prefixTrigger = lower.startsWith(PREFIX);
-    if (!namedTrigger && !prefixTrigger && !msg.hasMedia) return;
+    if (!namedTrigger && !prefixTrigger && !hasMedia(msg)) return;
     if (namedTrigger) {
       activeBody = body.slice(namedTrigger.length).trim();
-      if (!activeBody) return reply(msg, `Yeah? What do you need? 👀`);
+      if (!activeBody) return reply(sock, msg, `Yeah? What do you need? 👀`);
     }
   } else {
-    // DM: strip name if used
-    const namedTrigger = NAME_TRIGGERS.find(t => lower.startsWith(t));
+    const namedTrigger = NAME_TRIGGERS.find((t) => lower.startsWith(t));
     if (namedTrigger) {
       activeBody = body.slice(namedTrigger.length).trim();
-      if (!activeBody) return reply(msg, `Yeah? What do you need? 👀`);
+      if (!activeBody) return reply(sock, msg, `Yeah? What do you need? 👀`);
     }
   }
 
   const activeLower = activeBody.toLowerCase();
 
-  // ── FILE ANALYSIS (received file) ───────────────────────────
-  if (msg.hasMedia) {
-    const mediaData = await msg.downloadMedia();
+  // Muted chats — owner/admin commands still work, everything else is silenced
+  if (isMuted(chatId) && !isAdmin(senderJid)) return;
+
+  // ── OWNER & ADMIN COMMANDS ───────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}stats`) && isAdmin(senderJid)) {
+    const s = getStats();
+    return reply(sock, msg, `*📊 ARIA Stats*\n\n⏱️ Uptime: ${s.uptime}\n💬 Total chats: ${s.totalChats}\n🧠 Stored messages: ${s.totalStoredMessages}\n💾 RAM used: ${s.ramUsedMB}MB\n⚙️ Node: ${s.nodeVersion}`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}broadcast`) && isAdmin(senderJid)) {
+    const message = activeBody.split(" ").slice(1).join(" ");
+    if (!message) return reply(sock, msg, `Usage: \`${PREFIX}broadcast Your message here\``);
+    await reply(sock, msg, "📢 Broadcasting...");
+    const result = await broadcastToAll(sock, message);
+    return reply(sock, msg, `✅ Sent to ${result.sent}/${result.total} chats (${result.failed} failed).`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}debug`) && isAdmin(senderJid)) {
+    const errors = getRecentErrors(5);
+    if (errors.length === 0) return reply(sock, msg, "✅ No recent errors logged.");
+    const text = errors.map((e) => `*${e.time}*\n[${e.context}] ${e.error}`).join("\n\n");
+    return reply(sock, msg, `*🐛 Recent Errors:*\n\n${text}`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}ban`) && isAdmin(senderJid)) {
+    const number = activeBody.split(" ")[1];
+    if (!number) return reply(sock, msg, `Usage: \`${PREFIX}ban 2376XXXXXXXX\``);
+    banUser(number);
+    return reply(sock, msg, `🚫 Banned ${number}.`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}unban`) && isAdmin(senderJid)) {
+    const number = activeBody.split(" ")[1];
+    if (!number) return reply(sock, msg, `Usage: \`${PREFIX}unban 2376XXXXXXXX\``);
+    unbanUser(number);
+    return reply(sock, msg, `✅ Unbanned ${number}.`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}mute`) && isAdmin(senderJid)) {
+    muteChat(chatId);
+    return reply(sock, msg, `🔇 Muted in this chat. Admins can still use commands.`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}unmute`) && isAdmin(senderJid)) {
+    unmuteChat(chatId);
+    return reply(sock, msg, `🔊 Unmuted. Back to normal.`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}addadmin`) && isOwner(senderJid)) {
+    const number = activeBody.split(" ")[1];
+    if (!number) return reply(sock, msg, `Usage: \`${PREFIX}addadmin 2376XXXXXXXX\``);
+    addAdmin(number);
+    return reply(sock, msg, `✅ ${number} is now an admin.`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}removeadmin`) && isOwner(senderJid)) {
+    const number = activeBody.split(" ")[1];
+    if (!number) return reply(sock, msg, `Usage: \`${PREFIX}removeadmin 2376XXXXXXXX\``);
+    removeAdmin(number);
+    return reply(sock, msg, `✅ Removed ${number} from admins.`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}admins`) && isAdmin(senderJid)) {
+    const list = listAdmins();
+    return reply(sock, msg, list.length ? `*Admins:*\n${list.join("\n")}` : "No admins added yet.");
+  }
+
+  if (activeLower === `${PREFIX}whoami`) {
+    if (isOwner(senderJid)) return reply(sock, msg, `👑 You're my creator. Full access, always.`);
+    if (isAdmin(senderJid)) return reply(sock, msg, `🛡️ You're an admin.`);
+    return reply(sock, msg, `👤 You're a regular user.`);
+  }
+
+  // ── VOICE NOTE TRANSCRIPTION ─────────────────────────────────
+  if (hasVoiceNote(msg)) {
+    const mediaData = await downloadMediaFromMsg(sock, msg);
     if (mediaData) {
-      await react(msg, "📊");
+      await react(sock, msg, "🎤");
+      const result = await transcribeVoice(mediaData.buffer, mediaData.mimetype);
+      if (result.success) {
+        await reply(sock, msg, `🎤 *Transcription:*\n_"${result.text}"_`);
+        // Also let the AI respond to what was said, like a normal message
+        const history = getMemory(chatId);
+        const response = await getAIResponse(result.text, senderName, history);
+        saveMemory(chatId, [...history, { role: "user", content: result.text }, { role: "assistant", content: response }]);
+        await handleResponseWithFile(sock, msg, response);
+      } else {
+        await reply(sock, msg, `❌ Couldn't transcribe that: ${result.error}`);
+      }
+    }
+    return;
+  }
+
+  // ── STICKER CONVERSION (image + sticker intent) ─────────────
+  if (hasMedia(msg) && INTENTS.sticker.some((k) => activeLower.includes(k))) {
+    const mediaData = await downloadMediaFromMsg(sock, msg);
+    if (mediaData && mediaData.mimetype.startsWith("image/")) {
+      await react(sock, msg, "🎭");
+      const result = await createSticker(mediaData.buffer);
+      if (result.success) {
+        await sock.sendMessage(chatId, { sticker: result.buffer });
+      } else {
+        await reply(sock, msg, `❌ Sticker creation failed: ${result.error}`);
+      }
+      return;
+    }
+  }
+
+  // ── FILE ANALYSIS ───────────────────────────────────────────
+  if (hasMedia(msg)) {
+    const mediaData = await downloadMediaFromMsg(sock, msg);
+    if (mediaData) {
+      await react(sock, msg, "📊");
       const question = activeBody || "Analyze this file and tell me everything about it.";
       const result = await analyzeFile(mediaData, question);
-      return reply(msg, result);
+      return reply(sock, msg, result);
     }
   }
 
   // ── PREFIX COMMANDS ─────────────────────────────────────────
   if (activeLower.startsWith(`${PREFIX}imagine`) || activeLower.startsWith(`${PREFIX}img`)) {
-    return handleImageGen(client, msg, chatId, activeBody.split(" ").slice(1).join(" "));
+    return handleImageGen(sock, msg, activeBody.split(" ").slice(1).join(" "));
   }
   if (activeLower.startsWith(`${PREFIX}search`) || activeLower.startsWith(`${PREFIX}web`)) {
-    return handleSearch(msg, activeBody.split(" ").slice(1).join(" "));
+    return handleSearch(sock, msg, activeBody.split(" ").slice(1).join(" "));
   }
   if (activeLower.startsWith(`${PREFIX}dl`) || activeLower.startsWith(`${PREFIX}download`)) {
-    return handleDownload(client, msg, chatId, activeBody.split(" ")[1]);
+    return handleDownload(sock, msg, activeBody.split(" ")[1]);
   }
   if (activeLower.startsWith(`${PREFIX}run`) || activeLower.startsWith(`${PREFIX}exec`)) {
     const parts = activeBody.split("\n");
-    return handleCode(msg, parts.slice(1).join("\n"), parts[0].split(" ")[1] || "js");
+    return handleCode(sock, msg, parts.slice(1).join("\n"), parts[0].split(" ")[1] || "js");
   }
   if (activeLower.startsWith(`${PREFIX}scrape`) || activeLower.startsWith(`${PREFIX}read`)) {
-    return handleScrape(msg, activeBody.split(" ")[1]);
+    return handleScrape(sock, msg, activeBody.split(" ")[1]);
   }
   if (activeLower.startsWith(`${PREFIX}remind`)) {
-    return handleRemind(client, msg, chatId, activeBody.split(" ").slice(1).join(" "));
+    return handleRemind(sock, msg, activeBody.split(" ").slice(1).join(" "));
+  }
+  if (activeLower.startsWith(`${PREFIX}every`)) {
+    const text = activeBody.split(" ").slice(1).join(" ");
+    const result = setRecurringReminder(sock, chatId, "every " + text);
+    return reply(sock, msg, result.message);
+  }
+  if (activeLower.startsWith(`${PREFIX}cancelreminder`)) {
+    const id = activeBody.split(" ")[1];
+    const cancelled = cancelRecurringReminder(id);
+    return reply(sock, msg, cancelled ? "✅ Recurring reminder cancelled." : "❌ Couldn't find that reminder ID.");
+  }
+  if (activeLower === `${PREFIX}reminders`) {
+    const list = listRecurringReminders(chatId);
+    if (list.length === 0) return reply(sock, msg, "No active recurring reminders in this chat.");
+    const text = list.map((r) => `• ${r.label} — _"${r.message}"_\n  ID: \`${r.id}\``).join("\n\n");
+    return reply(sock, msg, `*🔁 Active Recurring Reminders:*\n\n${text}`);
+  }
+  if (activeLower.startsWith(`${PREFIX}weather`)) {
+    return handleWeather(sock, msg, activeBody.split(" ").slice(1).join(" "));
+  }
+  if (activeLower.startsWith(`${PREFIX}translate`)) {
+    const parts = activeBody.split(" ").slice(1);
+    const targetLang = parts[0];
+    const text = parts.slice(1).join(" ");
+    return handleTranslate(sock, msg, text, targetLang);
+  }
+  if (activeLower.startsWith(`${PREFIX}news`)) {
+    return handleNews(sock, msg, activeBody.split(" ").slice(1).join(" "));
+  }
+  if (activeLower.startsWith(`${PREFIX}convert`)) {
+    return handleConvert(sock, msg, activeBody.split(" ").slice(1).join(" "));
+  }
+  if (activeLower.startsWith(`${PREFIX}say`)) {
+    return handleTTS(sock, msg, activeBody.split(" ").slice(1).join(" "));
+  }
+  if (activeLower.startsWith(`${PREFIX}poll`)) {
+    return handlePoll(sock, msg, activeBody.split(" ").slice(1).join(" "));
   }
   if (activeLower === `${PREFIX}help` || activeLower === `${PREFIX}menu`) {
-    return reply(msg, getHelpMenu());
+    return reply(sock, msg, getHelpMenu(senderJid));
   }
   if (activeLower === `${PREFIX}clear` || activeLower === `${PREFIX}reset`) {
     saveMemory(chatId, []);
-    return reply(msg, "🧹 Memory cleared. Fresh start!");
+    return reply(sock, msg, "🧹 Memory cleared. Fresh start!");
   }
 
   // ── AUTO FILE LINK DETECTION ────────────────────────────────
   const fileLink = detectFileLink(activeBody);
   if (fileLink) {
-    // Check if they want the bot to read/analyze the file link
-    const wantsRead = INTENTS.scrape.some(k => activeLower.includes(k))
-      || activeLower.replace(fileLink, "").trim().length < 15
-      || activeLower.includes("read")
-      || activeLower.includes("check")
-      || activeLower.includes("fix")
-      || activeLower.includes("review")
-      || activeLower.includes("analyze")
-      || activeLower.includes("what");
+    const wantsRead =
+      INTENTS.scrape.some((k) => activeLower.includes(k)) ||
+      activeLower.replace(fileLink, "").trim().length < 15 ||
+      activeLower.includes("read") ||
+      activeLower.includes("check") ||
+      activeLower.includes("fix") ||
+      activeLower.includes("review") ||
+      activeLower.includes("analyze") ||
+      activeLower.includes("what");
 
     if (wantsRead) {
-      await react(msg, "📎");
+      await react(sock, msg, "📎");
       const linkResult = await readFromLink(fileLink);
       if (linkResult.success) {
         const question = activeBody.replace(fileLink, "").trim() || "Analyze this file and tell me what it does.";
@@ -133,131 +372,215 @@ async function handleMessage(client, msg) {
         const history = getMemory(chatId);
         const response = await getAIResponse(aiPrompt, senderName, history);
         saveMemory(chatId, [...history, { role: "user", content: activeBody }, { role: "assistant", content: response }]);
-
-        // Auto send as file if response has a big code block
-        await handleResponseWithFile(client, msg, chatId, response, linkResult.filename);
+        await handleResponseWithFile(sock, msg, response, linkResult.filename);
         return;
       }
-      // Fall through to scrape if link reading failed
-      return handleScrape(msg, fileLink);
+      return handleScrape(sock, msg, fileLink);
     }
   }
 
   // ── NATURAL LANGUAGE INTENTS ────────────────────────────────
-
-  // Image
-  if (INTENTS.image.some(k => activeLower.includes(k))) {
+  if (INTENTS.image.some((k) => activeLower.includes(k))) {
     const prompt = stripIntent(activeLower, activeBody, INTENTS.image);
-    if (prompt.length > 3) return handleImageGen(client, msg, chatId, prompt);
+    if (prompt.length > 3) return handleImageGen(sock, msg, prompt);
   }
 
-  // URL in message → auto scrape
   const urlMatch = activeBody.match(/https?:\/\/[^\s]+/);
   if (urlMatch && !fileLink) {
-    const wantsScrape = INTENTS.scrape.some(k => activeLower.includes(k))
-      || activeLower.replace(urlMatch[0], "").trim().length < 10;
-    if (wantsScrape) return handleScrape(msg, urlMatch[0]);
+    const wantsScrape = INTENTS.scrape.some((k) => activeLower.includes(k)) || activeLower.replace(urlMatch[0], "").trim().length < 10;
+    if (wantsScrape) return handleScrape(sock, msg, urlMatch[0]);
   }
 
-  // Search
-  if (INTENTS.search.some(k => activeLower.includes(k))) {
+  if (INTENTS.search.some((k) => activeLower.includes(k))) {
     const query = stripIntent(activeLower, activeBody, INTENTS.search);
-    if (query.length > 2) return handleSearch(msg, query);
+    if (query.length > 2) return handleSearch(sock, msg, query);
   }
 
-  // Reminder
-  if (INTENTS.remind.some(k => activeLower.includes(k))) {
-    return handleRemind(client, msg, chatId, activeBody);
+  if (INTENTS.remind.some((k) => activeLower.includes(k))) {
+    return handleRemind(sock, msg, activeBody);
   }
 
-  // Help
-  if (INTENTS.help.some(k => activeLower === k)) {
-    return reply(msg, getHelpMenu());
+  if (INTENTS.weather.some((k) => activeLower.includes(k))) {
+    const city = stripIntent(activeLower, activeBody, INTENTS.weather);
+    if (city.length > 1) return handleWeather(sock, msg, city);
   }
 
-  // Clear
-  if (INTENTS.clear.some(k => activeLower.includes(k))) {
+  if (INTENTS.news.some((k) => activeLower.includes(k))) {
+    const topic = stripIntent(activeLower, activeBody, INTENTS.news);
+    return handleNews(sock, msg, topic || "world");
+  }
+
+  if (INTENTS.translate.some((k) => activeLower.includes(k))) {
+    // "translate hello to french" / "how do you say hello in french"
+    const toMatch = activeBody.match(/(?:to|in)\s+(\w+)\s*$/i);
+    const targetLang = toMatch ? toMatch[1] : "en";
+    const textToTranslate = activeBody.replace(/translate|how do you say|say this in/gi, "").replace(toMatch?.[0] || "", "").trim();
+    if (textToTranslate.length > 0) return handleTranslate(sock, msg, textToTranslate, targetLang);
+  }
+
+  if (INTENTS.voiceReply.some((k) => activeLower.includes(k))) {
+    const textToSpeak = stripIntent(activeLower, activeBody, INTENTS.voiceReply);
+    if (textToSpeak.length > 1) return handleTTS(sock, msg, textToSpeak);
+  }
+
+  if (INTENTS.agent.some((k) => activeLower.includes(k))) {
+    await react(sock, msg, "🧩");
+    const result = await runAgentTask(activeBody, senderName);
+    return handleResponseWithFile(sock, msg, result);
+  }
+
+  if (INTENTS.help.some((k) => activeLower === k)) {
+    return reply(sock, msg, getHelpMenu(senderJid));
+  }
+
+  if (INTENTS.clear.some((k) => activeLower.includes(k))) {
     saveMemory(chatId, []);
-    return reply(msg, "🧹 Memory cleared. Fresh start!");
+    return reply(sock, msg, "🧹 Memory cleared. Fresh start!");
   }
 
   // ── DEFAULT: AI CHAT ─────────────────────────────────────────
   if (activeBody.length > 0) {
-    await react(msg, "🧠");
+    await react(sock, msg, "🧠");
     const history = getMemory(chatId);
-    const response = await getAIResponse(activeBody, senderName, history);
-    saveMemory(chatId, [...history,
-      { role: "user", content: activeBody },
-      { role: "assistant", content: response },
-    ]);
-
-    // Smart: if response has a big code block, also send it as a file
-    await handleResponseWithFile(client, msg, chatId, response);
+    const ownerContext = isOwner(senderJid)
+      ? "\n\nThe person you're talking to right now is Daniel, your creator who built and maintains you. You can acknowledge this naturally if it's relevant, without being weird or robotic about it."
+      : "";
+    const response = await getAIResponse(activeBody, senderName, history, null, ownerContext);
+    saveMemory(chatId, [...history, { role: "user", content: activeBody }, { role: "assistant", content: response }]);
+    await handleResponseWithFile(sock, msg, response);
   }
 }
 
-// ─── Smart response handler ─────────────────────────────────────
-// Sends the text reply + auto-sends code as a file if it's substantial
-async function handleResponseWithFile(client, msg, chatId, response, hintFilename = null) {
-  await reply(msg, response);
-
+async function handleResponseWithFile(sock, msg, response, hintFilename = null) {
+  await reply(sock, msg, response);
   const codeBlock = extractCodeBlock(response);
   if (codeBlock && codeBlock.code.split("\n").length >= 10) {
-    // Build a smart filename
-    let filename = hintFilename
-      ? hintFilename.replace(/\.[^.]+$/, `.${codeBlock.ext}`)
-      : `code.${codeBlock.ext}`;
-
-    await sendFile(client, chatId, filename, codeBlock.code, `📎 *${filename}* — tap to open`);
+    let filename = hintFilename ? hintFilename.replace(/\.[^.]+$/, `.${codeBlock.ext}`) : `code.${codeBlock.ext}`;
+    await sendFile(sock, msg.key.remoteJid, filename, codeBlock.code, `📎 *${filename}* — tap to open`);
   }
 }
 
-// ─── Feature handlers ───────────────────────────────────────────
-async function handleImageGen(client, msg, chatId, prompt) {
-  if (!prompt || prompt.length < 2) return reply(msg, `Give me a prompt. Example: _${BOT_NAME} imagine a dark futuristic city_`);
-  await react(msg, "🎨");
+async function handleImageGen(sock, msg, prompt) {
+  if (!prompt || prompt.length < 2) return reply(sock, msg, `Give me a prompt. Example: _${BOT_NAME} imagine a dark futuristic city_`);
+  await react(sock, msg, "🎨");
   const result = await generateImage(prompt);
   if (result.success) {
-    const media = await MessageMedia.fromUrl(result.url, { unsafeMime: true });
-    await client.sendMessage(chatId, media, { caption: `🎨 *${prompt}*` });
+    await sock.sendMessage(msg.key.remoteJid, { image: { url: result.url }, caption: `🎨 *${prompt}*` });
   } else {
-    await reply(msg, `❌ Image gen failed: ${result.error}`);
+    await reply(sock, msg, `❌ Image gen failed: ${result.error}`);
   }
 }
 
-async function handleSearch(msg, query) {
-  if (!query || query.length < 2) return reply(msg, `What should I search?`);
-  await react(msg, "🔍");
-  await reply(msg, await searchWeb(query));
+async function handleSearch(sock, msg, query) {
+  if (!query || query.length < 2) return reply(sock, msg, `What should I search?`);
+  await react(sock, msg, "🔍");
+  await reply(sock, msg, await searchWeb(query));
 }
 
-async function handleDownload(client, msg, chatId, url) {
-  if (!url) return reply(msg, `Give me a URL to download.`);
-  await react(msg, "📥");
-  const result = await downloadMedia(url, chatId, client);
-  if (!result.success) await reply(msg, `❌ Download failed: ${result.error}`);
+async function handleDownload(sock, msg, url) {
+  if (!url) return reply(sock, msg, `Give me a URL to download.`);
+  await react(sock, msg, "📥");
+  const result = await downloadMedia(url, msg.key.remoteJid, sock);
+  if (!result.success) await reply(sock, msg, `❌ Download failed: ${result.error}`);
 }
 
-async function handleCode(msg, code, lang) {
-  if (!code) return reply(msg, "Send code like:\n`!run js`\n`console.log('hello')`");
-  await react(msg, "⚙️");
+async function handleCode(sock, msg, code, lang) {
+  if (!code) return reply(sock, msg, "Send code like:\n`!run js`\n`console.log('hello')`");
+  await react(sock, msg, "⚙️");
   const result = await runCode(code, lang);
-  await reply(msg, `\`\`\`\n${result}\n\`\`\``);
+  await reply(sock, msg, `\`\`\`\n${result}\n\`\`\``);
 }
 
-async function handleScrape(msg, url) {
-  if (!url) return reply(msg, `Give me a URL.`);
-  await react(msg, "🕷️");
-  await reply(msg, await scrapeUrl(url));
+async function handleScrape(sock, msg, url) {
+  if (!url) return reply(sock, msg, `Give me a URL.`);
+  await react(sock, msg, "🕷️");
+  await reply(sock, msg, await scrapeUrl(url));
 }
 
-async function handleRemind(client, msg, chatId, text) {
-  if (!text) return reply(msg, `Example: _remind me in 10m to call dad_`);
-  await react(msg, "⏰");
-  await reply(msg, await setReminder(client, chatId, text));
+async function handleRemind(sock, msg, text) {
+  if (!text) return reply(sock, msg, `Example: _remind me in 10m to call dad_`);
+  await react(sock, msg, "⏰");
+  await reply(sock, msg, await setReminder(sock, msg.key.remoteJid, text));
 }
 
-// ─── Helpers ────────────────────────────────────────────────────
+async function handleWeather(sock, msg, city) {
+  if (!city) return reply(sock, msg, `Which city? Example: _weather in Douala_`);
+  await react(sock, msg, "🌤️");
+  const result = await getWeather(city);
+  if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+  const desc = weatherCodeToDescription(result.weatherCode);
+  await reply(
+    sock,
+    msg,
+    `*🌤️ Weather in ${result.location}*\n\n${desc}\n🌡️ ${result.temp}°C\n💧 Humidity: ${result.humidity}%\n💨 Wind: ${result.windSpeed} km/h`
+  );
+}
+
+async function handleTranslate(sock, msg, text, targetLang) {
+  if (!text) return reply(sock, msg, `What should I translate? Example: _translate hello to french_`);
+  await react(sock, msg, "🌐");
+  const result = await translateText(text, targetLang || "en");
+  if (!result.success) return reply(sock, msg, `❌ Translation failed: ${result.error}`);
+  await reply(sock, msg, `🌐 *Translation:*\n${result.translated}`);
+}
+
+async function handleNews(sock, msg, topic) {
+  await react(sock, msg, "📰");
+  const result = await getNewsDigest(topic);
+  if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+  const text = result.items.map((item, i) => `*${i + 1}.* ${item.title}\n🔗 ${item.link}`).join("\n\n");
+  await reply(sock, msg, `*📰 News: ${topic}*\n\n${text}`);
+}
+
+async function handleConvert(sock, msg, text) {
+  // Try currency first: "100 USD to EUR"
+  const currencyMatch = text.match(/^([\d.]+)\s*([a-zA-Z]{3})\s*(to|in)\s*([a-zA-Z]{3})$/i);
+  if (currencyMatch) {
+    await react(sock, msg, "💱");
+    const result = await convertCurrency(parseFloat(currencyMatch[1]), currencyMatch[2], currencyMatch[4]);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    return reply(sock, msg, `💱 ${currencyMatch[1]} ${currencyMatch[2].toUpperCase()} = *${result.result} ${currencyMatch[4].toUpperCase()}*`);
+  }
+
+  // Try unit conversion: "10 km to mi"
+  const unitMatch = text.match(/^([\d.]+)\s*(\w+)\s*(to|in)\s*(\w+)$/i);
+  if (unitMatch) {
+    await react(sock, msg, "📐");
+    const result = convertUnit(parseFloat(unitMatch[1]), unitMatch[2], unitMatch[4]);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    return reply(sock, msg, `📐 ${unitMatch[1]} ${unitMatch[2]} = *${result.result} ${unitMatch[4]}*`);
+  }
+
+  return reply(sock, msg, `Format: _!convert 100 usd to eur_ or _!convert 10 km to mi_`);
+}
+
+async function handleTTS(sock, msg, text) {
+  if (!text) return reply(sock, msg, `What should I say? Example: _say this: hello world_`);
+  await react(sock, msg, "🔊");
+  const result = await textToSpeech(text);
+  if (!result.success) return reply(sock, msg, `❌ Voice generation failed: ${result.error}`);
+  await sock.sendMessage(msg.key.remoteJid, { audio: result.buffer, mimetype: "audio/mp4", ptt: true });
+}
+
+async function handlePoll(sock, msg, text) {
+  // Format: "Question? | Option1 | Option2 | Option3"
+  const parts = text.split("|").map((p) => p.trim());
+  if (parts.length < 3) {
+    return reply(sock, msg, `Format: _!poll Question? | Option 1 | Option 2 | Option 3_`);
+  }
+  const question = parts[0];
+  const options = parts.slice(1).slice(0, 12); // WhatsApp poll max 12 options
+
+  try {
+    await sock.sendMessage(msg.key.remoteJid, {
+      poll: { name: question, values: options, selectableCount: 1 },
+    });
+  } catch (err) {
+    console.error("Poll creation error:", err.message);
+    await reply(sock, msg, `❌ Couldn't create poll: ${err.message}`);
+  }
+}
+
 function stripIntent(lower, original, keywords) {
   for (const k of keywords) {
     const idx = lower.indexOf(k);
@@ -266,9 +589,9 @@ function stripIntent(lower, original, keywords) {
   return original;
 }
 
-function getHelpMenu() {
+function getHelpMenu(senderJid = null) {
   const n = BOT_NAME.charAt(0).toUpperCase() + BOT_NAME.slice(1);
-  return `*🤖 ${n} — AI Assistant*
+  let menu = `*🤖 ${n} — AI Assistant*
 
 *Just talk to me naturally or use commands:*
 
@@ -276,17 +599,47 @@ function getHelpMenu() {
 🔍 _search [query]_ — Search the web
 📥 _download [url]_ — Download video/audio
 🕷️ _read [url]_ — Read any website
-⏰ _remind me in 10m [msg]_ — Set reminder
+⏰ _remind me in 10m [msg]_ — One-time reminder
+🔁 \`!every day at 8am [msg]\` — Recurring reminder
+🌤️ _weather in [city]_ — Weather lookup
+🌐 _translate [text] to [lang]_ — Translate
+📰 _news about [topic]_ — News digest
+💱 \`!convert 100 usd to eur\` — Currency/unit convert
+🎭 Send image + "make this a sticker" — Sticker
+🎤 Send a voice note — Auto-transcribed + answered
+🔊 _say this: [text]_ — Voice note reply
+📊 \`!poll Question? | Opt1 | Opt2\` — Create a poll
+🧩 _figure out / research and..._ — Multi-step agent
 📎 _share a file link_ — I'll read & analyze it
-📊 _send any file_ — I'll analyze it
+📄 _send any file_ — I'll analyze it
 💻 _ask me to write code_ — I'll send it as a file too
 
-*Prefix commands:*
+*Other commands:*
 \`!run js\` / \`!run py\` — Run code
+\`!reminders\` — List active recurring reminders
+\`!cancelreminder [id]\` — Cancel one
 \`!clear\` — Reset memory
+\`!whoami\` — Check your permission level`;
 
-_In groups: call me by name first_
+  if (senderJid && isAdmin(senderJid)) {
+    menu += `\n\n*🛡️ Admin commands:*
+\`!stats\` — Bot stats (uptime, memory, RAM)
+\`!broadcast [msg]\` — Message every chat
+\`!debug\` — Recent errors
+\`!ban [number]\` / \`!unban [number]\`
+\`!mute\` / \`!unmute\` — Silence this chat
+\`!admins\` — List current admins`;
+  }
+
+  if (senderJid && isOwner(senderJid)) {
+    menu += `\n\n*👑 Owner-only:*
+\`!addadmin [number]\` / \`!removeadmin [number]\``;
+  }
+
+  menu += `\n\n_In groups: call me by name first_
 _In DMs: just talk to me_`;
+
+  return menu;
 }
 
 module.exports = { handleMessage };

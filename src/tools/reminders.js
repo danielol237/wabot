@@ -41,7 +41,7 @@ function parseReminder(text) {
   return { ms, message };
 }
 
-async function setReminder(client, chatId, text) {
+async function setReminder(sock, chatId, text) {
   const parsed = parseReminder(text);
 
   if (!parsed) {
@@ -62,7 +62,7 @@ async function setReminder(client, chatId, text) {
 
   setTimeout(async () => {
     try {
-      await client.sendMessage(chatId, `⏰ *Reminder!*\n\n${message}`);
+      await sock.sendMessage(chatId, { text: `⏰ *Reminder!*\n\n${message}` });
     } catch (err) {
       console.error("Reminder send error:", err.message);
     }

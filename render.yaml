@@ -1,4 +1,0 @@
-build:
-  command: npm install && npx puppeteer browsers install chrome
-start:
-  command: node src/index.js

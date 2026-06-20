@@ -40,4 +40,13 @@ async function analyzeImage(base64Image, mimeType, question) {
   return `❌ Image analysis failed: ${lastError?.message || "unknown error"}`;
 }
 
-module.exports = { analyzeImage };
+// OCR — reuses the same vision pipeline with a prompt tuned for accurate text extraction
+async function extractText(base64Image, mimeType) {
+  return analyzeImage(
+    base64Image,
+    mimeType,
+    "Extract ALL text visible in this image, exactly as written, preserving line breaks. If there's no text, say 'No text found in this image.' Don't add commentary, just the extracted text."
+  );
+}
+
+module.exports = { analyzeImage, extractText };

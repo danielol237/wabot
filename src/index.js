@@ -167,6 +167,31 @@ async function startBot() {
     }
   });
 
+  // Welcome / leave messages when group membership changes
+  sock.ev.on("group-participants.update", async (update) => {
+    try {
+      const { getGroupSettings } = require("./utils/groupSettings");
+      const settings = getGroupSettings(update.id);
+
+      if (update.action === "add" && settings.welcome) {
+        const message = settings.welcomeMsg || "Welcome {user} to the group! 👋";
+        for (const participant of update.participants) {
+          const text = message.replace("{user}", `@${participant.split("@")[0]}`);
+          await sock.sendMessage(update.id, { text, mentions: [participant] });
+        }
+      }
+
+      if (update.action === "remove" && settings.leaveMsg) {
+        for (const participant of update.participants) {
+          const text = settings.leaveMsg.replace("{user}", `@${participant.split("@")[0]}`);
+          await sock.sendMessage(update.id, { text, mentions: [participant] });
+        }
+      }
+    } catch (err) {
+      console.error("group-participants.update handler error:", err.message);
+    }
+  });
+
   return sock;
 }
 

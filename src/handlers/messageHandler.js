@@ -18,6 +18,15 @@ const { runAgentTask } = require("../tools/agent");
 const { getMemory, saveMemory } = require("../utils/memory");
 const { isOwner, isAdmin, addAdmin, removeAdmin, listAdmins, banUser, unbanUser, isBanned, muteChat, unmuteChat, isMuted } = require("../utils/permissions");
 const { getStats, getRecentErrors, logError, broadcastToAll } = require("../tools/botAdmin");
+const { isBotAdmin, isSenderAdmin, kickUser, promoteUser, demoteUser, tagAll, hideTag } = require("../tools/groupAdmin");
+const { getGroupSettings, setAntilink, setWelcome, setWelcomeMessage, setLeaveMessage, addWarning, resetWarnings, getWarnings } = require("../utils/groupSettings");
+const { getJoke, getTruth, getDare, getWouldYouRather, getRoast, getShipPercentage, getShipEmoji } = require("../tools/funGames");
+const { startTicTacToe, playTicTacToe, hasActiveGame, endGame, rollDice, flipCoin } = require("../tools/simpleGames");
+const { drawCard, getBalance, claimDaily, getInventory, sellCard, getLeaderboard, RARITY_VALUE } = require("../tools/cardEconomy");
+const { renderCodeImage } = require("../tools/carbon");
+const { extractText } = require("../tools/visionAI");
+const { getLyrics } = require("../tools/lyricsSearch");
+const { searchWallpaper } = require("../tools/wallpaperSearch");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 const PREFIX = process.env.BOT_PREFIX || "!";
@@ -25,7 +34,7 @@ const PREFIX = process.env.BOT_PREFIX || "!";
 const NAME_TRIGGERS = [BOT_NAME, BOT_NAME + ",", BOT_NAME + "!", "hey " + BOT_NAME, "ok " + BOT_NAME, "yo " + BOT_NAME];
 
 const INTENTS = {
-  image: ["generate", "create an image", "make an image", "draw", "imagine", "paint", "design an image", "give me an image", "show me a picture"],
+  image: ["generate an image", "generate a picture", "create an image", "make an image", "draw me", "draw a", "imagine a", "imagine an", "paint a", "paint me", "design an image", "give me an image", "show me a picture", "make a picture"],
   search: ["search for", "look up", "google", "search the web", "find info on"],
   download: ["download", "dl this", "get this video", "save this"],
   scrape: ["read this link", "open this link", "check this site", "visit", "browse", "summarize this link", "what's on this site"],
@@ -56,18 +65,29 @@ function getSenderName(msg) {
   return msg.pushName || msg.key.participant || msg.key.remoteJid?.split("@")[0] || "User";
 }
 
-async function reply(sock, msg, text) {
+// Gets the JID of whoever was @mentioned in the message, or who the message
+// is replying to — used for kick/promote/demote/warn targeting.
+function getTargetJid(msg) {
+  const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+  if (mentioned && mentioned.length > 0) return mentioned[0];
+  const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant;
+  if (quotedParticipant) return quotedParticipant;
+  return null;
+}
+
+async function reply(sock, msg, text, options = {}) {
   if (!text) return;
   const chatId = msg.key.remoteJid;
+  const mentions = options.mentions || [];
   try {
     if (text.length <= 4000) {
-      await sock.sendMessage(chatId, { text }, { quoted: msg });
+      await sock.sendMessage(chatId, { text, mentions }, { quoted: msg });
       return;
     }
     // Split long messages
     const chunks = splitMessage(text, 3900);
-    for (const chunk of chunks) {
-      await sock.sendMessage(chatId, { text: chunk });
+    for (let i = 0; i < chunks.length; i++) {
+      await sock.sendMessage(chatId, { text: chunks[i], mentions: i === 0 ? mentions : [] });
       await sleep(400);
     }
   } catch (err) {
@@ -105,21 +125,33 @@ function sleep(ms) {
 }
 
 // Checks if this message is a WhatsApp "reply" (quote) pointing at a message
-// ARIA itself sent. The quoted message's sender is the bot's own JID when fromMe was true.
+// ARIA itself sent. Checks multiple possible field shapes since WhatsApp's
+// participant/fromMe fields vary between DMs, groups, and Baileys versions.
 function isQuotingBotMessage(msg, sock) {
   const contextInfo = msg.message?.extendedTextMessage?.contextInfo
     || msg.message?.imageMessage?.contextInfo
-    || msg.message?.videoMessage?.contextInfo;
+    || msg.message?.videoMessage?.contextInfo
+    || msg.message?.documentMessage?.contextInfo
+    || msg.message?.audioMessage?.contextInfo;
 
   if (!contextInfo?.quotedMessage) return false;
 
-  // participant field on the quoted message is the JID of whoever sent the original.
-  // If it's missing entirely but stanzaId/participant point back to the bot's own number, treat as a reply to the bot.
-  const quotedParticipant = contextInfo.participant;
-  const botJid = sock?.user?.id?.split(":")[0];
+  const botJid = sock?.user?.id;
+  if (!botJid) return false;
+  const botNumber = botJid.split(":")[0].split("@")[0];
 
-  if (!quotedParticipant || !botJid) return false;
-  return quotedParticipant.split(":")[0].split("@")[0] === botJid.split("@")[0];
+  // Try every field that might tell us who sent the quoted message
+  const candidates = [
+    contextInfo.participant,
+    contextInfo.remoteJid,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const candidateNumber = candidate.split(":")[0].split("@")[0];
+    if (candidateNumber === botNumber) return true;
+  }
+
+  return false;
 }
 
 function hasMedia(msg) {
@@ -162,6 +194,11 @@ async function handleMessage(sock, msg) {
   const senderName = getSenderName(msg);
   const isGroup = chatId.endsWith("@g.us");
   const isReplyToBot = isQuotingBotMessage(msg, sock);
+  if (process.env.DEBUG_REPLIES === "true") {
+    const ctx = msg.message?.extendedTextMessage?.contextInfo;
+    console.log("DEBUG quoted contextInfo:", JSON.stringify(ctx, null, 2)?.slice(0, 500));
+    console.log("DEBUG isReplyToBot result:", isReplyToBot);
+  }
 
   console.log(`[${senderName}${isGroup ? " (grp)" : ""}] ${body.slice(0, 80)}`);
 
@@ -189,6 +226,20 @@ async function handleMessage(sock, msg) {
 
   // Muted chats — owner/admin commands still work, everything else is silenced
   if (isMuted(chatId) && !isAdmin(senderJid)) return;
+
+  // Antilink enforcement — delete messages containing links if enabled and sender isn't admin
+  if (isGroup && getGroupSettings(chatId).antilink && !(await isSenderAdmin(sock, chatId, senderJid))) {
+    const hasLink = /https?:\/\/|wa\.me\/|chat\.whatsapp\.com/i.test(body);
+    if (hasLink) {
+      try {
+        await sock.sendMessage(chatId, { delete: msg.key });
+        await reply(sock, msg, `🔗 @${senderJid.split("@")[0]}, links aren't allowed here.`, { mentions: [senderJid] });
+      } catch (err) {
+        console.error("Antilink delete failed:", err.message);
+      }
+      return;
+    }
+  }
 
   // ── OWNER & ADMIN COMMANDS ───────────────────────────────────
   if (activeLower.startsWith(`${PREFIX}stats`) && isAdmin(senderJid)) {
@@ -369,6 +420,213 @@ async function handleMessage(sock, msg) {
   if (activeLower === `${PREFIX}clear` || activeLower === `${PREFIX}reset`) {
     saveMemory(chatId, []);
     return reply(sock, msg, "🧹 Memory cleared. Fresh start!");
+  }
+
+  // ── GROUP ADMIN COMMANDS (only work in groups, need bot+sender to be admin) ──
+  if (isGroup && activeLower.startsWith(`${PREFIX}kick`)) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    if (!(await isBotAdmin(sock, chatId))) return reply(sock, msg, "❌ I need to be a group admin to do that.");
+    const target = getTargetJid(msg);
+    if (!target) return reply(sock, msg, "Tag or reply to the person you want to kick.");
+    const result = await kickUser(sock, chatId, target);
+    return reply(sock, msg, result.success ? "👋 Kicked." : `❌ ${result.error}`);
+  }
+
+  if (isGroup && activeLower.startsWith(`${PREFIX}promote`)) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    if (!(await isBotAdmin(sock, chatId))) return reply(sock, msg, "❌ I need to be a group admin to do that.");
+    const target = getTargetJid(msg);
+    if (!target) return reply(sock, msg, "Tag or reply to the person you want to promote.");
+    const result = await promoteUser(sock, chatId, target);
+    return reply(sock, msg, result.success ? "⬆️ Promoted to admin." : `❌ ${result.error}`);
+  }
+
+  if (isGroup && activeLower.startsWith(`${PREFIX}demote`)) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    if (!(await isBotAdmin(sock, chatId))) return reply(sock, msg, "❌ I need to be a group admin to do that.");
+    const target = getTargetJid(msg);
+    if (!target) return reply(sock, msg, "Tag or reply to the person you want to demote.");
+    const result = await demoteUser(sock, chatId, target);
+    return reply(sock, msg, result.success ? "⬇️ Demoted." : `❌ ${result.error}`);
+  }
+
+  if (isGroup && (activeLower.startsWith(`${PREFIX}tagall`) || activeLower.startsWith(`${PREFIX}hidetag`))) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    const customMsg = activeBody.split(" ").slice(1).join(" ");
+    const fn = activeLower.startsWith(`${PREFIX}hidetag`) ? hideTag : tagAll;
+    const result = await fn(sock, msg, chatId, customMsg);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    return;
+  }
+
+  if (isGroup && activeLower.startsWith(`${PREFIX}warn`) && !activeLower.startsWith(`${PREFIX}warnings`)) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    const target = getTargetJid(msg);
+    if (!target) return reply(sock, msg, "Tag or reply to the person you want to warn.");
+    const count = addWarning(chatId, target);
+    return reply(sock, msg, `⚠️ Warned @${target.split("@")[0]} (${count}/3 warnings).`, { mentions: [target] });
+  }
+
+  if (isGroup && activeLower.startsWith(`${PREFIX}resetwarn`)) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    const target = getTargetJid(msg);
+    if (!target) return reply(sock, msg, "Tag or reply to the person whose warnings you want to reset.");
+    resetWarnings(chatId, target);
+    return reply(sock, msg, `✅ Warnings reset for @${target.split("@")[0]}.`, { mentions: [target] });
+  }
+
+  if (isGroup && activeLower.startsWith(`${PREFIX}antilink`)) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    const arg = activeBody.split(" ")[1]?.toLowerCase();
+    if (arg === "on") { setAntilink(chatId, true); return reply(sock, msg, "🔗 Antilink enabled. I'll remove messages with links."); }
+    if (arg === "off") { setAntilink(chatId, false); return reply(sock, msg, "🔗 Antilink disabled."); }
+    return reply(sock, msg, `Usage: \`${PREFIX}antilink on\` or \`${PREFIX}antilink off\``);
+  }
+
+  if (isGroup && activeLower.startsWith(`${PREFIX}setwelcome`)) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    const message = activeBody.split(" ").slice(1).join(" ");
+    if (!message) return reply(sock, msg, `Usage: \`${PREFIX}setwelcome Welcome {user} to the group!\` (use {user} as a placeholder)`);
+    setWelcomeMessage(chatId, message);
+    setWelcome(chatId, true);
+    return reply(sock, msg, "✅ Welcome message set and enabled.");
+  }
+
+  if (isGroup && activeLower.startsWith(`${PREFIX}welcome`)) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    const arg = activeBody.split(" ")[1]?.toLowerCase();
+    if (arg === "on") { setWelcome(chatId, true); return reply(sock, msg, "👋 Welcome messages enabled."); }
+    if (arg === "off") { setWelcome(chatId, false); return reply(sock, msg, "👋 Welcome messages disabled."); }
+    return reply(sock, msg, `Usage: \`${PREFIX}welcome on\` or \`${PREFIX}welcome off\``);
+  }
+
+  if (isGroup && activeLower.startsWith(`${PREFIX}setleave`)) {
+    if (!(await isSenderAdmin(sock, chatId, senderJid))) return reply(sock, msg, "❌ You need to be a group admin to use this.");
+    const message = activeBody.split(" ").slice(1).join(" ");
+    setLeaveMessage(chatId, message || null);
+    return reply(sock, msg, "✅ Leave message set.");
+  }
+
+  // ── FUN / PARTY COMMANDS ─────────────────────────────────────
+  if (activeLower === `${PREFIX}joke`) return reply(sock, msg, `😂 ${getJoke()}`);
+  if (activeLower === `${PREFIX}truth`) return reply(sock, msg, `🤔 *Truth:* ${getTruth()}`);
+  if (activeLower === `${PREFIX}dare`) return reply(sock, msg, `🔥 *Dare:* ${getDare()}`);
+  if (activeLower === `${PREFIX}wyr`) return reply(sock, msg, `🤯 *Would you rather:* ${getWouldYouRather()}`);
+
+  if (activeLower.startsWith(`${PREFIX}roast`)) {
+    const target = getTargetJid(msg);
+    const roastText = getRoast();
+    if (target) return reply(sock, msg, `🔥 @${target.split("@")[0]}, ${roastText}`, { mentions: [target] });
+    return reply(sock, msg, `🔥 ${roastText}`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}ship`)) {
+    const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    if (mentioned.length >= 2) {
+      const pct = getShipPercentage(mentioned[0], mentioned[1]);
+      return reply(sock, msg, `💘 @${mentioned[0].split("@")[0]} + @${mentioned[1].split("@")[0]} = *${pct}%*\n${getShipEmoji(pct)}`, { mentions: mentioned });
+    }
+    return reply(sock, msg, `Tag two people: \`${PREFIX}ship @person1 @person2\``);
+  }
+
+  // ── SIMPLE GAMES ──────────────────────────────────────────────
+  if (activeLower === `${PREFIX}dice`) return reply(sock, msg, `🎲 You rolled a *${rollDice()}*!`);
+  if (activeLower === `${PREFIX}coinflip` || activeLower === `${PREFIX}cf`) return reply(sock, msg, `🪙 *${flipCoin()}*!`);
+
+  if (isGroup && activeLower.startsWith(`${PREFIX}ttt`)) {
+    const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    if (hasActiveGame(chatId)) return reply(sock, msg, "A game is already running in this chat. Finish it first or wait it out.");
+    if (mentioned.length < 1) return reply(sock, msg, `Tag someone to challenge: \`${PREFIX}ttt @person\``);
+    const board = startTicTacToe(chatId, senderJid, mentioned[0]);
+    return reply(sock, msg, board, { mentions: [mentioned[0]] });
+  }
+
+  if (isGroup && hasActiveGame(chatId) && /^[1-9]$/.test(activeBody.trim())) {
+    const result = playTicTacToe(chatId, senderJid, parseInt(activeBody.trim()));
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    return reply(sock, msg, result.message);
+  }
+
+  // ── CARD ECONOMY GAME ────────────────────────────────────────
+  if (activeLower === `${PREFIX}daily`) {
+    const result = claimDaily(senderJid);
+    return reply(sock, msg, result.success ? `✅ Claimed *${result.reward}* coins! Come back tomorrow.` : `❌ ${result.error}`);
+  }
+
+  if (activeLower === `${PREFIX}balance` || activeLower === `${PREFIX}bal`) {
+    return reply(sock, msg, `💰 Your balance: *${getBalance(senderJid)}* coins`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}draw`) || activeLower.startsWith(`${PREFIX}gacha`)) {
+    const result = drawCard(senderJid, 50);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    const c = result.card;
+    return reply(sock, msg, `${c.emoji} You drew *${c.name}*! (${c.rarity}, ${c.element})`);
+  }
+
+  if (activeLower === `${PREFIX}inventory` || activeLower === `${PREFIX}inv` || activeLower === `${PREFIX}mycards`) {
+    const inv = getInventory(senderJid);
+    if (inv.length === 0) return reply(sock, msg, `Empty inventory. Use \`${PREFIX}draw\` to get cards!`);
+    const text = inv.map((c) => `${c.emoji} *${c.name}* x${c.count} (${c.rarity})`).join("\n");
+    return reply(sock, msg, `*🎴 Your Collection:*\n\n${text}`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}sellcard`)) {
+    const cardId = activeBody.split(" ")[1]?.toLowerCase();
+    if (!cardId) return reply(sock, msg, `Usage: \`${PREFIX}sellcard cardid\` (check \`${PREFIX}inventory\` for IDs)`);
+    const result = sellCard(senderJid, cardId);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    return reply(sock, msg, `💰 Sold ${result.card.emoji} *${result.card.name}* for *${result.value}* coins.`);
+  }
+
+  if (activeLower === `${PREFIX}cardleaderboard` || activeLower === `${PREFIX}richlist`) {
+    const lb = getLeaderboard(10);
+    if (lb.length === 0) return reply(sock, msg, "No one's played yet.");
+    const text = lb.map((u, i) => `${i + 1}. @${u.userId.split("@")[0]} — ${u.balance} coins`).join("\n");
+    const mentions = lb.map((u) => u.userId);
+    return reply(sock, msg, `*🏆 Richest Players:*\n\n${text}`, { mentions });
+  }
+
+  // ── CODE-TO-IMAGE (carbon) ───────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}carbon`)) {
+    const code = activeBody.split("\n").slice(1).join("\n") || activeBody.replace(/^\S+\s*/, "");
+    if (!code) return reply(sock, msg, `Usage:\n\`${PREFIX}carbon\`\n\`\`\`\nyour code here\n\`\`\``);
+    await react(sock, msg, "🎨");
+    const result = await renderCodeImage(code);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    await sock.sendMessage(chatId, { image: result.buffer, caption: "📸 Code snippet" });
+    return;
+  }
+
+  // ── LYRICS ────────────────────────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}lyrics`)) {
+    const query = activeBody.split(" ").slice(1).join(" ");
+    if (!query) return reply(sock, msg, `Usage: \`${PREFIX}lyrics artist - song name\``);
+    await react(sock, msg, "🎵");
+    const result = await getLyrics(query);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    return reply(sock, msg, `🎵 *${result.title}*\n\n${result.lyrics.slice(0, 3500)}`);
+  }
+
+  // ── WALLPAPER SEARCH ──────────────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}wallpaper`)) {
+    const query = activeBody.split(" ").slice(1).join(" ");
+    if (!query) return reply(sock, msg, `Usage: \`${PREFIX}wallpaper mountains\``);
+    await react(sock, msg, "🖼️");
+    const result = await searchWallpaper(query);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    await sock.sendMessage(chatId, { image: { url: result.url }, caption: `🖼️ ${query}` });
+    return;
+  }
+
+  // ── OCR ───────────────────────────────────────────────────────
+  if (hasMedia(msg) && (activeLower.includes("ocr") || activeLower.includes("extract text") || activeLower.includes("read the text"))) {
+    const mediaData = await downloadMediaFromMsg(sock, msg);
+    if (mediaData && mediaData.mimetype.startsWith("image/")) {
+      await react(sock, msg, "🔠");
+      const text = await extractText(mediaData.data, mediaData.mimetype);
+      return reply(sock, msg, `📝 *Extracted text:*\n\n${text}`);
+    }
   }
 
   // ── AUTO FILE LINK DETECTION ────────────────────────────────
@@ -640,7 +898,28 @@ function getHelpMenu(senderJid = null) {
 \`!reminders\` — List active recurring reminders
 \`!cancelreminder [id]\` — Cancel one
 \`!clear\` — Reset memory
-\`!whoami\` — Check your permission level`;
+\`!whoami\` — Check your permission level
+
+*🎮 Games & Fun:*
+\`!joke\` / \`!truth\` / \`!dare\` / \`!wyr\` — Party games
+\`!roast [@tag]\` — Roast someone (or yourself)
+\`!ship @p1 @p2\` — Compatibility %
+\`!dice\` / \`!coinflip\` — Quick rolls
+\`!ttt @person\` — Challenge to Tic-Tac-Toe (reply 1-9 to play)
+
+*🎴 Card Economy:*
+\`!daily\` — Claim daily coins
+\`!balance\` — Check your coins
+\`!draw\` — Draw a random card (50 coins)
+\`!inventory\` — View your collection
+\`!sellcard [id]\` — Sell a card
+\`!richlist\` — Leaderboard
+
+*🛠️ Extra tools:*
+\`!carbon\` + code block — Code as a styled image
+\`!lyrics artist - song\` — Get song lyrics
+\`!wallpaper [topic]\` — Find a wallpaper
+Send image + "ocr" — Extract text from image`;
 
   if (senderJid && isAdmin(senderJid)) {
     menu += `\n\n*🛡️ Admin commands:*
@@ -649,7 +928,15 @@ function getHelpMenu(senderJid = null) {
 \`!debug\` — Recent errors
 \`!ban [number]\` / \`!unban [number]\`
 \`!mute\` / \`!unmute\` — Silence this chat
-\`!admins\` — List current admins`;
+\`!admins\` — List current admins
+
+*👥 Group admin (need to be group admin):*
+\`!kick\` / \`!promote\` / \`!demote\` — tag or reply to target
+\`!tagall [msg]\` / \`!hidetag [msg]\` — Mention everyone
+\`!warn\` / \`!resetwarn\` — tag or reply to target
+\`!antilink on/off\` — Auto-moderate links
+\`!welcome on/off\` / \`!setwelcome [msg]\` — Greet new members
+\`!setleave [msg]\` — Set leave message`;
   }
 
   if (senderJid && isOwner(senderJid)) {

@@ -5,19 +5,33 @@ const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_
 
 const SYSTEM_PROMPT = `You are ARIA (Advanced Reasoning Intelligence Assistant), a peak AI assistant living inside WhatsApp. You are:
 - Smart, direct, and no-nonsense with a real personality
-- An expert coder — you write clean, complete, production-ready code
+- An expert software engineer — you write clean, complete, production-ready code, not toy examples
 - You can be sarcastic and funny when appropriate
 - You format responses for WhatsApp: use *bold*, _italic_, \`code\`, and emojis naturally
-- You keep responses concise but complete — never cut off code midway
 - You remember conversation context
 
-*CRITICAL FILE RULES:*
-- When writing code that's more than 10 lines, ALWAYS wrap it in a proper code block with the language tag: \`\`\`js ... \`\`\` or \`\`\`py ... \`\`\` etc.
-- When someone asks you to create a file (script, document, config, etc.), write the FULL content in a code block
-- Never truncate code — always write the complete implementation
-- If asked to fix/edit code someone shared, return the full corrected version in a code block
+*CODING STANDARDS — these are non-negotiable:*
+- When asked for a webpage, app, or UI: it must be genuinely responsive (works on mobile and desktop), visually polished (real spacing, real color choices, not default browser styling), and fully functional — not a bare-bones skeleton.
+- Use modern CSS (flexbox/grid), sensible semantic HTML, and include hover states / transitions where it improves the UI.
+- Write the COMPLETE file every time. Never write "// rest of the code..." or "<!-- add more here -->" or similar placeholders. If it's long, that's fine — write all of it.
+- For a request like "build me a login page," that means: full HTML+CSS+JS (or separate files if asked), working form validation, a real visual design with a clear aesthetic choice, not just unstyled inputs and a button.
+- If a request is genuinely too large for one response (e.g. a full multi-page app), say so explicitly and ask if they want it broken into parts — don't silently deliver something incomplete and pretend it's done.
+- When writing code that's more than 10 lines, ALWAYS wrap it in a proper code block with the language tag: \`\`\`js ... \`\`\` or \`\`\`html ... \`\`\` etc.
+- If asked to fix/edit code someone shared, return the full corrected version, not just a diff or snippet.
 
 Never say you're made by OpenAI or Anthropic — you are ARIA.`;
+
+// Detects requests that likely need serious code output (full pages/apps/scripts)
+// so we can give the model enough room to actually finish instead of cutting off mid-file.
+function needsLargeOutput(userMessage) {
+  const signals = [
+    "build me", "create a", "make a", "website", "webpage", "web page", "login page",
+    "app", "html", "css", "responsive", "full", "complete", "landing page",
+    "dashboard", "form", "game", "component", "script", "api", "backend",
+  ];
+  const lower = userMessage.toLowerCase();
+  return signals.some((s) => lower.includes(s));
+}
 
 async function getAIResponse(userMessage, userName, history = [], systemOverride = null, extraContext = "") {
   const messages = [
@@ -26,19 +40,34 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
   ];
 
   const systemPrompt = (systemOverride || SYSTEM_PROMPT) + extraContext;
+  const maxTokens = needsLargeOutput(userMessage) ? 8000 : 2048;
 
-  // Try Groq first
+  // Try Groq first — model deprecated June 17, 2026, switched to current replacement.
+  // Groq retires models without much notice, so this list is a fallback chain:
+  // if the primary model gets deprecated too, it tries the next one automatically.
+  const GROQ_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "llama-3.1-8b-instant"];
+
   if (groq) {
-    try {
-      const res = await groq.chat.completions.create({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "system", content: systemPrompt }, ...messages],
-        max_tokens: 2048,
-        temperature: 0.7,
-      });
-      return res.choices[0]?.message?.content || "I got nothing. Try again.";
-    } catch (err) {
-      console.error("Groq error:", err.message);
+    for (const model of GROQ_MODELS) {
+      try {
+        const res = await groq.chat.completions.create({
+          model,
+          messages: [{ role: "system", content: systemPrompt }, ...messages],
+          max_tokens: maxTokens,
+          temperature: 0.7,
+        });
+        const finishReason = res.choices[0]?.finish_reason;
+        let content = res.choices[0]?.message?.content || "I got nothing. Try again.";
+        if (finishReason === "length") {
+          content += "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
+        }
+        return content;
+      } catch (err) {
+        console.error(`Groq error (${model}):`, err.message);
+        // If it's a decommissioned-model error, try the next model in the list.
+        // For any other error (rate limit, network, etc.), stop retrying and fall through to OpenRouter.
+        if (!err.message?.includes("decommissioned")) break;
+      }
     }
   }
 
@@ -50,7 +79,7 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
         {
           model: "mistralai/mistral-7b-instruct",
           messages: [{ role: "system", content: systemPrompt }, ...messages],
-          max_tokens: 2048,
+          max_tokens: maxTokens,
         },
         {
           headers: {

@@ -104,6 +104,24 @@ function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
+// Checks if this message is a WhatsApp "reply" (quote) pointing at a message
+// ARIA itself sent. The quoted message's sender is the bot's own JID when fromMe was true.
+function isQuotingBotMessage(msg, sock) {
+  const contextInfo = msg.message?.extendedTextMessage?.contextInfo
+    || msg.message?.imageMessage?.contextInfo
+    || msg.message?.videoMessage?.contextInfo;
+
+  if (!contextInfo?.quotedMessage) return false;
+
+  // participant field on the quoted message is the JID of whoever sent the original.
+  // If it's missing entirely but stanzaId/participant point back to the bot's own number, treat as a reply to the bot.
+  const quotedParticipant = contextInfo.participant;
+  const botJid = sock?.user?.id?.split(":")[0];
+
+  if (!quotedParticipant || !botJid) return false;
+  return quotedParticipant.split(":")[0].split("@")[0] === botJid.split("@")[0];
+}
+
 function hasMedia(msg) {
   return !!(msg.message?.imageMessage || msg.message?.documentMessage || msg.message?.videoMessage);
 }
@@ -143,6 +161,7 @@ async function handleMessage(sock, msg) {
   const lower = body.toLowerCase();
   const senderName = getSenderName(msg);
   const isGroup = chatId.endsWith("@g.us");
+  const isReplyToBot = isQuotingBotMessage(msg, sock);
 
   console.log(`[${senderName}${isGroup ? " (grp)" : ""}] ${body.slice(0, 80)}`);
 
@@ -151,7 +170,9 @@ async function handleMessage(sock, msg) {
   if (isGroup) {
     const namedTrigger = NAME_TRIGGERS.find((t) => lower.startsWith(t));
     const prefixTrigger = lower.startsWith(PREFIX);
-    if (!namedTrigger && !prefixTrigger && !hasMedia(msg)) return;
+    // Replying directly to one of ARIA's messages counts as addressing it,
+    // same as saying its name — no prefix or name needed in that case.
+    if (!namedTrigger && !prefixTrigger && !isReplyToBot && !hasMedia(msg)) return;
     if (namedTrigger) {
       activeBody = body.slice(namedTrigger.length).trim();
       if (!activeBody) return reply(sock, msg, `Yeah? What do you need? 👀`);

@@ -1,33 +1,29 @@
 const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
-const { v4: uuidv4 } = require("uuid");
 
-const TEMP_DIR = path.join(__dirname, "../../temp");
-
-// Converts text to speech using a free TTS endpoint, returns audio buffer
-async function textToSpeech(text, lang = "en") {
-  // Google Translate TTS has a ~200 char limit per request, so chunk if needed
-  const MAX_CHARS = 200;
-  const chunks = [];
-  for (let i = 0; i < text.length; i += MAX_CHARS) {
-    chunks.push(text.slice(i, i + MAX_CHARS));
-  }
-  // Cap at 3 chunks to avoid huge audio files / long requests
-  const limitedChunks = chunks.slice(0, 3);
-
+// Uses FreeTTS API (freetts.org) — free, no API key, no signup required.
+// Switched from Google Translate's undocumented endpoint because: (1) it started
+// returning 403 errors, (2) it has an undocumented ~200 char limit that required
+// risky chunking, and (3) naively concatenating multiple MP3 chunks together
+// produces a corrupted file, which was the root cause of "audio file is wrong" errors.
+async function textToSpeech(text, voice = "en-US-JennyNeural") {
   try {
-    const buffers = [];
-    for (const chunk of limitedChunks) {
-      const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=${lang}&client=tw-ob`;
-      const res = await axios.get(url, {
-        responseType: "arraybuffer",
-        headers: { "User-Agent": "Mozilla/5.0" },
-        timeout: 15000,
-      });
-      buffers.push(Buffer.from(res.data));
-    }
-    return { success: true, buffer: Buffer.concat(buffers) };
+    // Step 1: submit the text, get back a file ID
+    const submitRes = await axios.post(
+      "https://freetts.org/api/tts",
+      { text, voice, rate: "+0%", pitch: "+0Hz" },
+      { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+    );
+
+    const fileId = submitRes.data?.file_id;
+    if (!fileId) return { success: false, error: "TTS service didn't return a file ID." };
+
+    // Step 2: fetch the actual audio
+    const audioRes = await axios.get(`https://freetts.org/api/audio/${fileId}`, {
+      responseType: "arraybuffer",
+      timeout: 20000,
+    });
+
+    return { success: true, buffer: Buffer.from(audioRes.data) };
   } catch (err) {
     console.error("TTS error:", err.message);
     return { success: false, error: err.message };

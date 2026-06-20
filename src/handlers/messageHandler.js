@@ -15,6 +15,7 @@ const { translateText, convertCurrency, convertUnit, getWeather, weatherCodeToDe
 const { getNewsDigest } = require("../tools/news");
 const { setRecurringReminder, cancelRecurringReminder, listRecurringReminders } = require("../tools/recurringReminders");
 const { runAgentTask } = require("../tools/agent");
+const { buildProject } = require("../tools/appBuilder");
 const { getMemory, saveMemory } = require("../utils/memory");
 const { isOwner, isAdmin, addAdmin, removeAdmin, listAdmins, banUser, unbanUser, isBanned, muteChat, unmuteChat, isMuted } = require("../utils/permissions");
 const { getStats, getRecentErrors, logError, broadcastToAll } = require("../tools/botAdmin");
@@ -47,6 +48,7 @@ const INTENTS = {
   weather: ["weather in", "weather for", "what's the weather"],
   news: ["news about", "latest news", "news on", "what's happening with"],
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
+  build: ["build me", "build a", "build an", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
 };
 
 // ── Baileys helper functions (replaces whatsapp-web.js msg.reply / msg.react) ──
@@ -206,7 +208,7 @@ async function handleMessage(sock, msg) {
 
   if (isGroup) {
     const namedTrigger = NAME_TRIGGERS.find((t) => lower.startsWith(t));
-    const prefixTrigger = lower.startsWith(PREFIX);
+    const prefixTrigger = lower.startsWith(PREFIX) || new RegExp(`^\\${PREFIX}\\s`).test(lower);
     // Replying directly to one of ARIA's messages counts as addressing it,
     // same as saying its name — no prefix or name needed in that case.
     if (!namedTrigger && !prefixTrigger && !isReplyToBot && !hasMedia(msg)) return;
@@ -220,6 +222,13 @@ async function handleMessage(sock, msg) {
       activeBody = body.slice(namedTrigger.length).trim();
       if (!activeBody) return reply(sock, msg, `Yeah? What do you need? 👀`);
     }
+  }
+
+  // Normalize "! command" to "!command" — a space after the prefix shouldn't
+  // silently break every command and fall through to AI chat with no explanation.
+  const prefixSpaceRegex = new RegExp(`^(\\${PREFIX})\\s+`);
+  if (prefixSpaceRegex.test(activeBody)) {
+    activeBody = activeBody.replace(prefixSpaceRegex, PREFIX);
   }
 
   const activeLower = activeBody.toLowerCase();
@@ -370,6 +379,10 @@ async function handleMessage(sock, msg) {
   if (activeLower.startsWith(`${PREFIX}run`) || activeLower.startsWith(`${PREFIX}exec`)) {
     const parts = activeBody.split("\n");
     return handleCode(sock, msg, parts.slice(1).join("\n"), parts[0].split(" ")[1] || "js");
+  }
+  if (activeLower.startsWith(`${PREFIX}build`) || activeLower.startsWith(`${PREFIX}agent`)) {
+    const request = activeBody.split(" ").slice(1).join(" ");
+    return handleBuild(sock, msg, request);
   }
   if (activeLower.startsWith(`${PREFIX}scrape`) || activeLower.startsWith(`${PREFIX}read`)) {
     return handleScrape(sock, msg, activeBody.split(" ")[1]);
@@ -702,6 +715,10 @@ async function handleMessage(sock, msg) {
     if (textToSpeak.length > 1) return handleTTS(sock, msg, textToSpeak);
   }
 
+  if (INTENTS.build.some((k) => activeLower.includes(k))) {
+    return handleBuild(sock, msg, activeBody);
+  }
+
   if (INTENTS.agent.some((k) => activeLower.includes(k))) {
     await react(sock, msg, "🧩");
     const result = await runAgentTask(activeBody, senderName);
@@ -768,6 +785,41 @@ async function handleCode(sock, msg, code, lang) {
   await react(sock, msg, "⚙️");
   const result = await runCode(code, lang);
   await reply(sock, msg, `\`\`\`\n${result}\n\`\`\``);
+}
+
+async function handleBuild(sock, msg, request) {
+  if (!request || request.length < 3) {
+    return reply(sock, msg, `Tell me what to build. Example: \`${PREFIX}build a todo app in html css js\`\n\nKeep it realistic — small apps, landing pages, simple games, calculators, APIs. Not full AAA games 😅`);
+  }
+
+  await react(sock, msg, "🏗️");
+  await reply(sock, msg, `🏗️ Building: *${request}*\nThis can take a minute or two for bigger requests...`);
+
+  const onProgress = async (text) => {
+    try {
+      await sock.sendMessage(msg.key.remoteJid, { text });
+    } catch (err) {
+      console.error("Build progress message failed:", err.message);
+    }
+  };
+
+  try {
+    const result = await buildProject(request, getSenderName(msg), onProgress);
+
+    if (!result.success) {
+      return reply(sock, msg, `❌ Build failed: ${result.error}`);
+    }
+
+    const fileList = result.files.map((f) => `• ${f}`).join("\n");
+    return reply(
+      sock,
+      msg,
+      `✅ *Built successfully!* (${result.fileCount} files)\n\n${fileList}\n\n📦 Download:\n${result.downloadUrl}`
+    );
+  } catch (err) {
+    console.error("Build error:", err.message);
+    return reply(sock, msg, `❌ Something went wrong during the build: ${err.message}`);
+  }
 }
 
 async function handleScrape(sock, msg, url) {
@@ -838,7 +890,7 @@ async function handleTTS(sock, msg, text) {
   await react(sock, msg, "🔊");
   const result = await textToSpeech(text);
   if (!result.success) return reply(sock, msg, `❌ Voice generation failed: ${result.error}`);
-  await sock.sendMessage(msg.key.remoteJid, { audio: result.buffer, mimetype: "audio/mp4", ptt: true });
+  await sock.sendMessage(msg.key.remoteJid, { audio: result.buffer, mimetype: "audio/mpeg", ptt: true });
 }
 
 async function handlePoll(sock, msg, text) {
@@ -889,6 +941,7 @@ function getHelpMenu(senderJid = null) {
 🔊 _say this: [text]_ — Voice note reply
 📊 \`!poll Question? | Opt1 | Opt2\` — Create a poll
 🧩 _figure out / research and..._ — Multi-step agent
+🏗️ \`!build [app description]\` — Generate a real small project, zipped & uploaded
 📎 _share a file link_ — I'll read & analyze it
 📄 _send any file_ — I'll analyze it
 💻 _ask me to write code_ — I'll send it as a file too

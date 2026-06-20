@@ -84,6 +84,17 @@ async function startBot() {
     browser: ["ARIA", "Chrome", "1.0.0"],
   });
 
+  // Wrap sendMessage once here so EVERY message ARIA sends anywhere in the app
+  // gets tracked automatically — this is what makes "reply to ARIA's message" detection
+  // reliable, instead of trying to parse WhatsApp's quoted-message fields after the fact.
+  const { trackSentMessage } = require("./utils/botMessages");
+  const originalSendMessage = sock.sendMessage.bind(sock);
+  sock.sendMessage = async (...args) => {
+    const result = await originalSendMessage(...args);
+    if (result?.key?.id) trackSentMessage(result.key.id);
+    return result;
+  };
+
   // If using pairing code and not yet registered, request the code right after connecting
   if (USE_PAIRING_CODE && !sock.authState.creds.registered) {
     try {

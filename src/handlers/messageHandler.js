@@ -1,3 +1,4 @@
+const axios = require("axios");
 const { getAIResponse } = require("../tools/ai");
 const { searchWeb } = require("../tools/webSearch");
 const { generateImage } = require("../tools/imageGen");
@@ -15,8 +16,10 @@ const { translateText, convertCurrency, convertUnit, getWeather, weatherCodeToDe
 const { getNewsDigest } = require("../tools/news");
 const { setRecurringReminder, cancelRecurringReminder, listRecurringReminders } = require("../tools/recurringReminders");
 const { runAgentTask } = require("../tools/agent");
-const { buildProject } = require("../tools/appBuilder");
+const { buildProject, continueProject, getProjectStatus, listProjects, cancelProject } = require("../tools/appBuilder");
 const { getMemory, saveMemory } = require("../utils/memory");
+const { wasSentByBot } = require("../utils/botMessages");
+const { startSession, endSession, isSessionActive, touchSession } = require("../utils/chatSessions");
 const { isOwner, isAdmin, addAdmin, removeAdmin, listAdmins, banUser, unbanUser, isBanned, muteChat, unmuteChat, isMuted } = require("../utils/permissions");
 const { getStats, getRecentErrors, logError, broadcastToAll } = require("../tools/botAdmin");
 const { isBotAdmin, isSenderAdmin, kickUser, promoteUser, demoteUser, tagAll, hideTag } = require("../tools/groupAdmin");
@@ -48,7 +51,7 @@ const INTENTS = {
   weather: ["weather in", "weather for", "what's the weather"],
   news: ["news about", "latest news", "news on", "what's happening with"],
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
-  build: ["build me", "build a", "build an", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
+  build: ["build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
 };
 
 // ── Baileys helper functions (replaces whatsapp-web.js msg.reply / msg.react) ──
@@ -127,8 +130,9 @@ function sleep(ms) {
 }
 
 // Checks if this message is a WhatsApp "reply" (quote) pointing at a message
-// ARIA itself sent. Checks multiple possible field shapes since WhatsApp's
-// participant/fromMe fields vary between DMs, groups, and Baileys versions.
+// ARIA itself sent. Uses the stanzaId (the quoted message's own ID) checked against
+// our own tracked sent-message IDs — this is reliable regardless of DM/group context,
+// unlike trying to guess which JID field WhatsApp populated for the quoted sender.
 function isQuotingBotMessage(msg, sock) {
   const contextInfo = msg.message?.extendedTextMessage?.contextInfo
     || msg.message?.imageMessage?.contextInfo
@@ -136,24 +140,10 @@ function isQuotingBotMessage(msg, sock) {
     || msg.message?.documentMessage?.contextInfo
     || msg.message?.audioMessage?.contextInfo;
 
-  if (!contextInfo?.quotedMessage) return false;
+  const stanzaId = contextInfo?.stanzaId;
+  if (!stanzaId) return false;
 
-  const botJid = sock?.user?.id;
-  if (!botJid) return false;
-  const botNumber = botJid.split(":")[0].split("@")[0];
-
-  // Try every field that might tell us who sent the quoted message
-  const candidates = [
-    contextInfo.participant,
-    contextInfo.remoteJid,
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    const candidateNumber = candidate.split(":")[0].split("@")[0];
-    if (candidateNumber === botNumber) return true;
-  }
-
-  return false;
+  return wasSentByBot(stanzaId);
 }
 
 function hasMedia(msg) {
@@ -205,13 +195,14 @@ async function handleMessage(sock, msg) {
   console.log(`[${senderName}${isGroup ? " (grp)" : ""}] ${body.slice(0, 80)}`);
 
   let activeBody = body;
+  const sessionActive = isSessionActive(chatId);
 
   if (isGroup) {
     const namedTrigger = NAME_TRIGGERS.find((t) => lower.startsWith(t));
     const prefixTrigger = lower.startsWith(PREFIX) || new RegExp(`^\\${PREFIX}\\s`).test(lower);
-    // Replying directly to one of ARIA's messages counts as addressing it,
-    // same as saying its name — no prefix or name needed in that case.
-    if (!namedTrigger && !prefixTrigger && !isReplyToBot && !hasMedia(msg)) return;
+    // Replying directly to one of ARIA's messages, or having an active !chat session,
+    // both count as addressing it — same as saying its name, no prefix needed either way.
+    if (!namedTrigger && !prefixTrigger && !isReplyToBot && !sessionActive && !hasMedia(msg)) return;
     if (namedTrigger) {
       activeBody = body.slice(namedTrigger.length).trim();
       if (!activeBody) return reply(sock, msg, `Yeah? What do you need? 👀`);
@@ -223,6 +214,8 @@ async function handleMessage(sock, msg) {
       if (!activeBody) return reply(sock, msg, `Yeah? What do you need? 👀`);
     }
   }
+
+  if (sessionActive) touchSession(chatId); // keep the 30-min window alive on each message
 
   // Normalize "! command" to "!command" — a space after the prefix shouldn't
   // silently break every command and fall through to AI chat with no explanation.
@@ -320,6 +313,24 @@ async function handleMessage(sock, msg) {
     return reply(sock, msg, `👤 You're a regular user.`);
   }
 
+  if (activeLower === `${PREFIX}model`) {
+    const hasGemini = !!process.env.GEMINI_API_KEY;
+    const hasGroq = !!process.env.GROQ_API_KEY;
+    const hasOpenRouter = !!process.env.OPENROUTER_API_KEY;
+    return reply(
+      sock,
+      msg,
+      `*🧠 AI Provider Chain*\n\n1. Gemini 2.0 Flash ${hasGemini ? "✅ configured" : "❌ no key set"}\n2. Groq (gpt-oss-120b) ${hasGroq ? "✅ configured" : "❌ no key set"}\n3. OpenRouter ${hasOpenRouter ? "✅ configured" : "❌ no key set"}\n\nTries each in order until one responds successfully.`
+    );
+  }
+
+  if (activeLower === `${PREFIX}health`) {
+    await react(sock, msg, "🩺");
+    const checks = await runHealthCheck();
+    const text = checks.map((c) => `${c.ok ? "✅" : "❌"} ${c.name}${c.detail ? ` — ${c.detail}` : ""}`).join("\n");
+    return reply(sock, msg, `*🩺 Health Check*\n\n${text}`);
+  }
+
   // ── VOICE NOTE TRANSCRIPTION ─────────────────────────────────
   if (hasVoiceNote(msg)) {
     const mediaData = await downloadMediaFromMsg(sock, msg);
@@ -384,6 +395,21 @@ async function handleMessage(sock, msg) {
     const request = activeBody.split(" ").slice(1).join(" ");
     return handleBuild(sock, msg, request);
   }
+  if (activeLower.startsWith(`${PREFIX}continue`) || activeLower.startsWith(`${PREFIX}resume`)) {
+    const projectId = activeBody.split(" ")[1] || null;
+    return handleContinue(sock, msg, projectId);
+  }
+  if (activeLower.startsWith(`${PREFIX}status`)) {
+    const projectId = activeBody.split(" ")[1] || null;
+    return handleProjectStatus(sock, msg, projectId);
+  }
+  if (activeLower.startsWith(`${PREFIX}projects`)) {
+    return handleProjectList(sock, msg);
+  }
+  if (activeLower.startsWith(`${PREFIX}cancelbuild`)) {
+    const projectId = activeBody.split(" ")[1] || null;
+    return handleProjectCancel(sock, msg, projectId);
+  }
   if (activeLower.startsWith(`${PREFIX}scrape`) || activeLower.startsWith(`${PREFIX}read`)) {
     return handleScrape(sock, msg, activeBody.split(" ")[1]);
   }
@@ -433,6 +459,14 @@ async function handleMessage(sock, msg) {
   if (activeLower === `${PREFIX}clear` || activeLower === `${PREFIX}reset`) {
     saveMemory(chatId, []);
     return reply(sock, msg, "🧹 Memory cleared. Fresh start!");
+  }
+  if (activeLower === `${PREFIX}chat`) {
+    startSession(chatId);
+    return reply(sock, msg, "💬 Chat mode enabled. Talk normally, no need to say my name or use prefixes. Send `!exit` to leave this mode (auto-expires after 30 min of inactivity).");
+  }
+  if (activeLower === `${PREFIX}exit`) {
+    endSession(chatId);
+    return reply(sock, msg, "👋 Chat mode disabled. Back to normal — say my name or use ! commands.");
   }
 
   // ── GROUP ADMIN COMMANDS (only work in groups, need bot+sender to be admin) ──
@@ -715,7 +749,11 @@ async function handleMessage(sock, msg) {
     if (textToSpeak.length > 1) return handleTTS(sock, msg, textToSpeak);
   }
 
-  if (INTENTS.build.some((k) => activeLower.includes(k))) {
+  // Broader pattern alongside the phrase list above — catches phrasing like
+  // "create a node api" or "develop a discord bot" that the fixed phrases miss
+  const BUILD_INTENT_REGEX = /(build|create|make|develop|generate)\s+(me\s+|an?\s+)?.*(app|website|site|api|bot|game|calculator|dashboard|project|script)/i;
+
+  if (INTENTS.build.some((k) => activeLower.includes(k)) || BUILD_INTENT_REGEX.test(activeBody)) {
     return handleBuild(sock, msg, activeBody);
   }
 
@@ -792,34 +830,99 @@ async function handleBuild(sock, msg, request) {
     return reply(sock, msg, `Tell me what to build. Example: \`${PREFIX}build a todo app in html css js\`\n\nKeep it realistic — small apps, landing pages, simple games, calculators, APIs. Not full AAA games 😅`);
   }
 
+  const chatId = msg.key.remoteJid;
   await react(sock, msg, "🏗️");
   await reply(sock, msg, `🏗️ Building: *${request}*\nThis can take a minute or two for bigger requests...`);
 
   const onProgress = async (text) => {
     try {
-      await sock.sendMessage(msg.key.remoteJid, { text });
+      await sock.sendMessage(chatId, { text });
     } catch (err) {
       console.error("Build progress message failed:", err.message);
     }
   };
 
   try {
-    const result = await buildProject(request, getSenderName(msg), onProgress);
-
-    if (!result.success) {
-      return reply(sock, msg, `❌ Build failed: ${result.error}`);
-    }
-
-    const fileList = result.files.map((f) => `• ${f}`).join("\n");
-    return reply(
-      sock,
-      msg,
-      `✅ *Built successfully!* (${result.fileCount} files)\n\n${fileList}\n\n📦 Download:\n${result.downloadUrl}`
-    );
+    const result = await buildProject(request, getSenderName(msg), chatId, onProgress);
+    return handleBuildResult(sock, msg, result);
   } catch (err) {
     console.error("Build error:", err.message);
     return reply(sock, msg, `❌ Something went wrong during the build: ${err.message}`);
   }
+}
+
+async function handleContinue(sock, msg, projectId) {
+  const chatId = msg.key.remoteJid;
+  await react(sock, msg, "▶️");
+
+  const onProgress = async (text) => {
+    try {
+      await sock.sendMessage(chatId, { text });
+    } catch (err) {
+      console.error("Continue progress message failed:", err.message);
+    }
+  };
+
+  try {
+    const result = await continueProject(chatId, getSenderName(msg), onProgress, projectId);
+    return handleBuildResult(sock, msg, result);
+  } catch (err) {
+    console.error("Continue error:", err.message);
+    return reply(sock, msg, `❌ Something went wrong continuing the build: ${err.message}`);
+  }
+}
+
+// Shared result handler for both fresh builds and continues — paused/done/failed all look the same either way
+async function handleBuildResult(sock, msg, result) {
+  if (!result.success) {
+    return reply(sock, msg, `❌ Build failed: ${result.error}`);
+  }
+  if (result.paused) {
+    return reply(sock, msg, result.message);
+  }
+
+  const fileList = result.files.map((f) => `• ${f}`).join("\n");
+  const warningNote = result.warnings && result.warnings.length > 0
+    ? `\n\n⚠️ These files had issues even after an auto-fix attempt, double check them: ${result.warnings.join(", ")}`
+    : "";
+  const buildWarningNote = result.buildWarning ? `\n\n🔨 *Build verification:* ${result.buildWarning}` : "";
+
+  return reply(
+    sock,
+    msg,
+    `✅ *Built successfully!* (${result.fileCount} files)\n\n${fileList}\n\n📦 Download:\n${result.downloadUrl}${warningNote}${buildWarningNote}`
+  );
+}
+
+async function handleProjectStatus(sock, msg, projectId) {
+  const chatId = msg.key.remoteJid;
+  const statusResult = getProjectStatus(chatId, projectId);
+  if (!statusResult) return reply(sock, msg, "No project found. Start one with `!build [description]`.");
+
+  const { project, progress } = statusResult;
+  return reply(
+    sock,
+    msg,
+    `*📊 Project Status*\nID: \`${project.id}\`\nGoal: ${project.goal}\nStatus: ${project.status}\nProgress: ${progress.done}/${progress.total} files (${progress.percent}%)`
+  );
+}
+
+async function handleProjectList(sock, msg) {
+  const chatId = msg.key.remoteJid;
+  const projects = listProjects(chatId);
+  if (projects.length === 0) return reply(sock, msg, "No projects yet. Start one with `!build [description]`.");
+
+  const text = projects
+    .slice(0, 10)
+    .map((p) => `\`${p.id}\` — ${p.goal} (${p.status}, ${p.progress.percent}%)`)
+    .join("\n");
+  return reply(sock, msg, `*📁 Your Projects:*\n\n${text}`);
+}
+
+async function handleProjectCancel(sock, msg, projectId) {
+  const chatId = msg.key.remoteJid;
+  const cancelled = cancelProject(chatId, projectId);
+  return reply(sock, msg, cancelled ? "🛑 Project cancelled." : "❌ No active project found to cancel.");
 }
 
 async function handleScrape(sock, msg, url) {
@@ -912,6 +1015,64 @@ async function handlePoll(sock, msg, text) {
   }
 }
 
+// Actually pings each service rather than just checking if a key exists in .env —
+// a configured-but-wrong key, or a service that's down, should show as unhealthy too.
+async function runHealthCheck() {
+  const results = [];
+
+  // Gemini
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      await axios.post(
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        { model: "gemini-2.0-flash", messages: [{ role: "user", content: "hi" }], max_tokens: 5 },
+        { headers: { Authorization: `Bearer ${process.env.GEMINI_API_KEY}` }, timeout: 8000 }
+      );
+      results.push({ name: "Gemini", ok: true });
+    } catch (err) {
+      results.push({ name: "Gemini", ok: false, detail: err.response?.status || err.message });
+    }
+  } else {
+    results.push({ name: "Gemini", ok: false, detail: "no key set" });
+  }
+
+  // Groq
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const Groq = require("groq-sdk");
+      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+      await groq.chat.completions.create({ model: "llama-3.1-8b-instant", messages: [{ role: "user", content: "hi" }], max_tokens: 5 });
+      results.push({ name: "Groq", ok: true });
+    } catch (err) {
+      results.push({ name: "Groq", ok: false, detail: err.message });
+    }
+  } else {
+    results.push({ name: "Groq", ok: false, detail: "no key set" });
+  }
+
+  // Gofile (used for file uploads)
+  try {
+    await axios.get("https://api.gofile.io/servers", { timeout: 8000 });
+    results.push({ name: "Gofile", ok: true });
+  } catch (err) {
+    results.push({ name: "Gofile", ok: false, detail: err.message });
+  }
+
+  // Memory/disk
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const testFile = path.join(__dirname, "../../data/.healthcheck");
+    fs.writeFileSync(testFile, "ok");
+    fs.unlinkSync(testFile);
+    results.push({ name: "Disk storage", ok: true });
+  } catch (err) {
+    results.push({ name: "Disk storage", ok: false, detail: err.message });
+  }
+
+  return results;
+}
+
 function stripIntent(lower, original, keywords) {
   for (const k of keywords) {
     const idx = lower.indexOf(k);
@@ -952,6 +1113,9 @@ function getHelpMenu(senderJid = null) {
 \`!cancelreminder [id]\` — Cancel one
 \`!clear\` — Reset memory
 \`!whoami\` — Check your permission level
+\`!chat\` — Talk freely without saying my name each time (30 min, \`!exit\` to stop)
+\`!model\` — Show which AI provider is active
+\`!health\` — Check if Gemini/Groq/Gofile/storage are actually working
 
 *🎮 Games & Fun:*
 \`!joke\` / \`!truth\` / \`!dare\` / \`!wyr\` — Party games

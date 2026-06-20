@@ -3,6 +3,12 @@ const axios = require("axios");
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 
+// Gemini's free tier: 1,500 requests/day, 1M token context, no credit card.
+// Using Google's official OpenAI-compatible endpoint so we can reuse the same
+// request/response shape as Groq/OpenRouter instead of adding a separate SDK.
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"]; // fallback chain in case one gets deprecated/renamed
+
 const SYSTEM_PROMPT = `You are ARIA (Advanced Reasoning Intelligence Assistant), a peak AI assistant living inside WhatsApp. You are:
 - Smart, direct, and no-nonsense with a real personality
 - An expert software engineer — you write clean, complete, production-ready code, not toy examples
@@ -44,7 +50,44 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
   const systemPrompt = (systemOverride || SYSTEM_PROMPT) + extraContext;
   const maxTokens = needsLargeOutput(userMessage) ? 8000 : 2048;
 
-  // Try Groq first — model deprecated June 17, 2026, switched to current replacement.
+  // Try Gemini first — bigger context window (1M tokens) and free tier than Groq,
+  // genuinely useful for the app builder which needs to track a lot of project context.
+  if (process.env.GEMINI_API_KEY) {
+    for (const model of GEMINI_MODELS) {
+      try {
+        const res = await axios.post(
+          GEMINI_BASE_URL,
+          {
+            model,
+            messages: [{ role: "system", content: systemPrompt }, ...messages],
+            max_tokens: maxTokens,
+            temperature: 0.7,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.GEMINI_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            timeout: 30000,
+          }
+        );
+        const finishReason = res.data.choices[0]?.finish_reason;
+        let content = res.data.choices[0]?.message?.content || "I got nothing. Try again.";
+        if (finishReason === "length") {
+          content += "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
+        }
+        return content;
+      } catch (err) {
+        console.error(`Gemini error (${model}):`, err.response?.data?.error?.message || err.message);
+        // If this specific model is gone, try the next one in the list.
+        // Any other error (rate limit, network) falls through to Groq instead.
+        const errMsg = err.response?.data?.error?.message || err.message || "";
+        if (!errMsg.toLowerCase().includes("not found") && !errMsg.toLowerCase().includes("deprecated")) break;
+      }
+    }
+  }
+
+  // Try Groq second — model deprecated June 17, 2026, switched to current replacement.
   // Groq retires models without much notice, so this list is a fallback chain:
   // if the primary model gets deprecated too, it tries the next one automatically.
   const GROQ_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "llama-3.1-8b-instant"];
@@ -96,7 +139,7 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
     }
   }
 
-  return "❌ No AI keys configured. Add GROQ_API_KEY to your .env file.";
+  return "❌ No AI keys configured. Add GEMINI_API_KEY or GROQ_API_KEY to your .env file.";
 }
 
 module.exports = { getAIResponse };

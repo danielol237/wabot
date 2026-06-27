@@ -12,6 +12,8 @@ const {
   advanceProject,
   setProjectStatus,
   getProgress,
+  getFileContent,
+  saveFileContent,
 } = require("./projectState");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
@@ -24,12 +26,15 @@ const FILES_PER_BATCH = 4; // generate this many files per !build/!continue call
 // emojis/markdown/commentary, which broke parsing especially on simple requests.
 const PLANNER_SYSTEM_PROMPT = `You are a JSON-only API. You respond with valid JSON arrays and nothing else. No greetings, no emojis, no markdown formatting, no explanations before or after the JSON. If you add anything other than the raw JSON array, the response will fail to parse and break the system calling you.`;
 
-async function planProject(request, senderName) {
+async function planProject(request, senderName, userId = null) {
+  const { getPreferencesContext } = require("../utils/userPreferences");
+  const preferencesContext = userId ? getPreferencesContext(userId) : "";
+
   const prompt = `A user wants this built: "${request}"
 
 Design a file structure for this as a small, realistic project (NOT Hogwarts Legacy — keep scope to something genuinely buildable: a calculator, a todo app, a small landing page, a simple API, a basic game, a small Discord/WhatsApp bot module, etc).
 
-If the user specified particular languages/technologies (e.g. "using only HTML, CSS, and JavaScript", "in Python", "as a React app"), respect that exactly — don't substitute a different stack.
+If the user specified particular languages/technologies (e.g. "using only HTML, CSS, and JavaScript", "in Python", "as a React app"), respect that exactly — don't substitute a different stack.${preferencesContext}
 
 Respond ONLY with a JSON array, no other text, no markdown fences. Each item: {"path": "relative/file/path.ext", "description": "what this file does"}.
 Max ${MAX_FILES} files. Include only files genuinely needed — no filler.
@@ -56,6 +61,50 @@ Example output:
 // Dedicated system prompt for raw code generation — same reasoning as PLANNER_SYSTEM_PROMPT,
 // keeps ARIA's chatty personality from wrapping code output in commentary/emojis.
 const CODE_SYSTEM_PROMPT = `You are a code generation engine. You output ONLY raw file content — no greetings, no emojis, no explanations, no markdown code fences. Just the exact file content that should be written to disk.`;
+
+// ── Reviewer Agent ──────────────────────────────────────────────
+// Distinct from the Coder above — this is a genuinely separate pass that looks
+// at the WHOLE generated project together (not one file at a time), specifically
+// hunting for cross-file issues the per-file syntax check can't catch: mismatched
+// imports/exports, a file referencing another file that was never created,
+// inconsistent naming between files, etc. This is the real fix for the
+// "ui.js had an issue, attempting a fix" pattern — that happened because files
+// were generated in isolation with no awareness of what the others actually contain.
+const REVIEWER_SYSTEM_PROMPT = `You are a code reviewer. You're given multiple files from a small project. Find cross-file problems specifically — things a single-file check would miss:
+- A file imports/requires something that doesn't exist in another file
+- Function/variable names referenced in one file but never defined anywhere
+- Inconsistent naming or API shape between files that are supposed to work together
+- A file that's referenced (e.g. in HTML <script src="...">) but wasn't actually generated
+
+Respond ONLY with a JSON array of issues found, no other text. Each item: {"file": "path", "issue": "description", "severity": "high"|"low"}.
+If you genuinely find no cross-file issues, respond with an empty array: []`;
+
+async function reviewProjectFiles(projectDir, fileList, senderName) {
+  const fileContents = fileList
+    .map((f) => {
+      try {
+        const content = fs.readFileSync(path.join(projectDir, f), "utf8");
+        return `=== ${f} ===\n${content.slice(0, 2000)}`;
+      } catch (err) {
+        return `=== ${f} ===\n[Could not read this file: ${err.message}]`;
+      }
+    })
+    .join("\n\n");
+
+  const prompt = `Here are all the files in this project:\n\n${fileContents}\n\nReview for cross-file issues as instructed.`;
+
+  try {
+    const response = await getAIResponse(prompt, senderName, [], REVIEWER_SYSTEM_PROMPT, "");
+    let cleaned = response.replace(/```json|```/g, "").trim();
+    const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (arrayMatch) cleaned = arrayMatch[0];
+    const issues = JSON.parse(cleaned);
+    return Array.isArray(issues) ? issues : [];
+  } catch (err) {
+    console.error("Reviewer agent failed to produce usable output:", err.message);
+    return []; // reviewer failing shouldn't block the build — just means no extra issues caught
+  }
+}
 
 // ── Step 2: Generate code for one file ────────────────────────
 async function generateFileContent(filePlan, projectContext, senderName) {
@@ -130,13 +179,59 @@ ${brokenContent}`;
   return response.replace(/^```[\w]*\n?/, "").replace(/```$/, "").trim();
 }
 
-// ── Main entry point: starts a new project OR continues an existing one ──
-async function buildProject(request, senderName, chatId, onProgress) {
-  const planResult = await planProject(request, senderName);
+// ── Think mode: show the plan only, don't generate any code yet ──
+// Saves the plan as a "pending" project so a follow-up !build can use it
+// directly instead of re-planning from scratch.
+const pendingPlans = new Map(); // chatId -> { request, files, plannedAt }
+
+async function thinkAboutProject(request, senderName, chatId, userId = null) {
+  const planResult = await planProject(request, senderName, userId);
   if (!planResult.success) return planResult;
 
-  const project = createProject(chatId, request, planResult.files);
-  if (onProgress) await onProgress(`📋 Planned ${planResult.files.length} files for *${request}*.\nProject ID: \`${project.id}\`\nGenerating first batch...`);
+  pendingPlans.set(chatId, { request, files: planResult.files, plannedAt: Date.now() });
+
+  const fileList = planResult.files.map((f) => `📄 *${f.path}*\n   ${f.description}`).join("\n\n");
+  return {
+    success: true,
+    message: `*🧠 Plan for: ${request}*\n\n${fileList}\n\n_${planResult.files.length} files planned. Say "build it" or \`!build\` to start generating, or describe changes if you want a different approach._`,
+  };
+}
+
+function getPendingPlan(chatId) {
+  const plan = pendingPlans.get(chatId);
+  if (!plan) return null;
+  // Plans older than 30 min are considered stale — don't silently build something you forgot about
+  if (Date.now() - plan.plannedAt > 30 * 60 * 1000) {
+    pendingPlans.delete(chatId);
+    return null;
+  }
+  return plan;
+}
+
+function clearPendingPlan(chatId) {
+  pendingPlans.delete(chatId);
+}
+
+
+async function buildProject(request, senderName, chatId, onProgress, userId = null) {
+  // If a !think plan exists for this chat, use it directly instead of re-planning —
+  // this is what makes "think first, then build" actually save the planning step
+  // rather than silently redoing it.
+  const pending = getPendingPlan(chatId);
+  let files;
+
+  if (pending) {
+    files = pending.files;
+    clearPendingPlan(chatId);
+    if (onProgress) await onProgress(`🧠 Using the plan from earlier — ${files.length} files. Generating...`);
+  } else {
+    const planResult = await planProject(request, senderName, userId);
+    if (!planResult.success) return planResult;
+    files = planResult.files;
+  }
+
+  const project = createProject(chatId, request, files);
+  if (onProgress) await onProgress(`📐 *Planner:* Designed ${files.length} files for *${request}*.\nProject ID: \`${project.id}\`\n👨‍💻 *Coder:* Starting generation...`);
 
   return await processProjectBatch(project.id, senderName, onProgress);
 }
@@ -170,7 +265,7 @@ async function processProjectBatch(projectId, senderName, onProgress) {
 
   for (let i = project.currentIndex; i < batchEnd; i++) {
     const filePlan = project.files[i];
-    if (onProgress) await onProgress(`⚙️ Generating ${i + 1}/${project.files.length}: ${filePlan.path}`);
+    if (onProgress) await onProgress(`👨‍💻 *Coder:* Writing ${i + 1}/${project.files.length} — ${filePlan.path}`);
 
     try {
       let content = await generateFileContent(filePlan, projectContext, senderName);
@@ -178,7 +273,7 @@ async function processProjectBatch(projectId, senderName, onProgress) {
 
       // One repair attempt if verification fails — keeps this bounded, not an infinite loop
       if (!verification.valid) {
-        if (onProgress) await onProgress(`🔧 ${filePlan.path} had an issue, attempting a fix...`);
+        if (onProgress) await onProgress(`🔍 *Reviewer:* Found an issue in ${filePlan.path}, sending to Fixer...`);
         content = await repairFile(filePlan, content, verification.error, senderName);
         verification = verifyFile(filePlan.path, content);
       }
@@ -187,7 +282,7 @@ async function processProjectBatch(projectId, senderName, onProgress) {
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, content, "utf8");
 
-      markFileStatus(project.id, i, verification.valid ? "done" : "done_with_warning");
+      markFileStatus(project.id, i, verification.valid ? "done" : "done_with_warning", content);
     } catch (err) {
       console.error(`Failed to generate ${filePlan.path}:`, err.message);
       markFileStatus(project.id, i, "failed");
@@ -228,6 +323,17 @@ async function finalizeProject(project, projectDir, onProgress) {
   const readmeContent = `# ${project.goal}\n\nGenerated by ARIA.\n\n## Files\n${doneFiles.map((f) => `- ${f.path}`).join("\n")}\n`;
   fs.writeFileSync(path.join(projectDir, "README.md"), readmeContent, "utf8");
 
+  // Reviewer Agent pass — a genuinely separate look at ALL files together,
+  // catching cross-file issues that per-file generation/verification can't see.
+  if (onProgress) await onProgress("🔍 *Reviewer:* Checking the whole project for cross-file issues...");
+  const crossFileIssues = await reviewProjectFiles(projectDir, doneFiles.map((f) => f.path), project.goal);
+  const highSeverityIssues = crossFileIssues.filter((i) => i.severity === "high");
+
+  if (onProgress && crossFileIssues.length > 0) {
+    const issueSummary = crossFileIssues.slice(0, 5).map((i) => `• ${i.file}: ${i.issue}`).join("\n");
+    await onProgress(`🔍 *Reviewer:* Found ${crossFileIssues.length} cross-file issue(s):\n${issueSummary}`);
+  }
+
   // Real build verification — only for npm-based projects (anything with package.json).
   // Plain HTML/CSS/JS projects skip this since there's nothing to "build."
   // This actually runs npm install + npm run build, not just a syntax check.
@@ -235,11 +341,11 @@ async function finalizeProject(project, projectDir, onProgress) {
   let buildWarning = null;
 
   if (hasPackageJson) {
-    if (onProgress) await onProgress("🔨 Running real build verification (npm install + build)...");
+    if (onProgress) await onProgress("🧪 *Tester:* Running npm install + build...");
     const buildResult = await runBuildVerification(projectDir);
 
     if (!buildResult.success) {
-      if (onProgress) await onProgress(`⚠️ Build failed, attempting one auto-repair pass...\n${buildResult.error.slice(0, 300)}`);
+      if (onProgress) await onProgress(`🧪 *Tester:* Build failed, handing off to Fixer...\n${buildResult.error.slice(0, 300)}`);
       const repaired = await attemptBuildRepair(projectDir, buildResult.error, project);
 
       if (repaired) {
@@ -257,7 +363,22 @@ async function finalizeProject(project, projectDir, onProgress) {
     cleanupDir(path.join(projectDir, "node_modules"));
   }
 
-  if (onProgress) await onProgress("📦 Packaging project...");
+  // Optional live preview via Vercel — only attempted for static projects (no
+  // package.json/build step) since those deploy instantly with zero config.
+  // Entirely skipped if VERCEL_TOKEN isn't set; never blocks the rest of the build.
+  let previewUrl = null;
+  if (!hasPackageJson && process.env.VERCEL_TOKEN) {
+    if (onProgress) await onProgress("🌐 *Deployer:* Setting up a live preview...");
+    try {
+      const { deployToVercel } = require("./vercelDeploy");
+      const deployResult = await deployToVercel(projectDir, project.goal);
+      if (deployResult.success) previewUrl = deployResult.url;
+    } catch (err) {
+      console.error("Vercel deploy step failed (non-fatal):", err.message);
+    }
+  }
+
+  if (onProgress) await onProgress("📦 *Packager:* Zipping the project...");
 
   const zipPath = path.join(TEMP_DIR, `${project.id}.zip`);
   const zipResult = await zipDirectory(projectDir, zipPath);
@@ -265,14 +386,14 @@ async function finalizeProject(project, projectDir, onProgress) {
 
   if (!zipResult.success) return { success: false, error: zipResult.error };
 
-  if (onProgress) await onProgress("☁️ Uploading...");
+  if (onProgress) await onProgress("☁️ *Uploader:* Sending to Gofile...");
 
   // Retry upload up to 2 extra times before giving up — covers transient network blips
   let uploadResult = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     uploadResult = await uploadToGofile(zipPath, `${slugify(project.goal)}.zip`);
     if (uploadResult.success) break;
-    if (attempt < 2 && onProgress) await onProgress(`⚠️ Upload attempt ${attempt + 1} failed, retrying...`);
+    if (attempt < 2 && onProgress) await onProgress(`📦 *Uploader:* Attempt ${attempt + 1} failed, retrying...`);
   }
 
   if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
@@ -287,6 +408,8 @@ async function finalizeProject(project, projectDir, onProgress) {
     files: doneFiles.map((f) => f.path),
     warnings: warningFiles.map((f) => f.path),
     buildWarning,
+    previewUrl,
+    crossFileIssues: highSeverityIssues,
     downloadUrl: uploadResult.downloadPage,
   };
 }
@@ -309,6 +432,51 @@ function cancelProject(chatId, projectId = null) {
   const projectDir = path.join(TEMP_DIR, `project_${project.id}`);
   cleanupDir(projectDir);
   return true;
+}
+
+// ── Edit an existing file in a completed/in-progress project ──────
+// "Reply to the project, say 'add dark mode'" — finds the named file's stored
+// content, asks the AI to apply the requested change, saves the new version.
+// Only edits ONE file at a time (the one specified); doesn't regenerate the
+// whole project, which is the whole point versus just running !build again.
+async function editProjectFile(chatId, filename, instruction, senderName, projectId = null) {
+  const project = projectId ? getProject(projectId) : getActiveProjectForChat(chatId);
+  if (!project) return { success: false, error: "No project found to edit. Build one first with !build." };
+
+  const filePlan = project.files.find((f) => f.path === filename || f.path.endsWith("/" + filename));
+  if (!filePlan) {
+    const available = project.files.map((f) => f.path).join(", ");
+    return { success: false, error: `Couldn't find "${filename}" in this project. Available files: ${available}` };
+  }
+
+  const currentContent = getFileContent(project.id, filePlan.path);
+  if (currentContent === null) {
+    return { success: false, error: `No saved content found for ${filePlan.path} — it may have failed to generate originally.` };
+  }
+
+  const prompt = `Here's an existing file from a project called "${project.goal}":
+
+File: ${filePlan.path}
+
+Current content:
+${currentContent}
+
+Requested change: "${instruction}"
+
+Apply this change and return the COMPLETE updated file content. No explanations, no markdown fences — just the full file.`;
+
+  const response = await getAIResponse(prompt, senderName, [], CODE_SYSTEM_PROMPT, "");
+  const newContent = response.replace(/^```[\w]*\n?/, "").replace(/```$/, "").trim();
+
+  const verification = verifyFile(filePlan.path, newContent);
+  saveFileContent(project.id, filePlan.path, newContent);
+
+  return {
+    success: true,
+    filename: filePlan.path,
+    content: newContent,
+    warning: verification.valid ? null : `Heads up — this edit may have introduced an issue: ${verification.error}`,
+  };
 }
 
 // ── Real build verification: actually runs npm install + npm run build ──
@@ -405,4 +573,4 @@ function slugify(text) {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "project";
 }
 
-module.exports = { buildProject, continueProject, getProjectStatus, listProjects, cancelProject };
+module.exports = { buildProject, continueProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, getPendingPlan, editProjectFile };

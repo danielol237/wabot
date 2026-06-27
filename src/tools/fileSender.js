@@ -92,4 +92,33 @@ function extractCodeBlock(text) {
   return { lang, code, ext: type.ext, label: type.label };
 }
 
-module.exports = { sendFile, extractCodeBlock, FILE_TYPES };
+// Extracts EVERY code block in a response, not just the first — this matters when
+// the AI generates multiple files (e.g. "index.html" + "sample.txt") in one reply.
+// Without the global flag, only the first block was ever found, silently dropping
+// every other file. Also tries to pull a real filename from text right before each
+// block (e.g. "### `index.html`" or "**index.html**") instead of generic "code.ext".
+function extractAllCodeBlocks(text) {
+  const blocks = [];
+  const regex = /```(\w+)?\n([\s\S]+?)```/g;
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    const lang = (match[1] || "txt").toLowerCase();
+    const code = match[2].trim();
+    if (code.split("\n").length < 3) continue; // skip tiny snippets, not real files
+
+    const type = FILE_TYPES[lang] || FILE_TYPES.default;
+
+    // Look at the ~150 chars right before this code block for a filename hint
+    const precedingText = text.slice(Math.max(0, match.index - 150), match.index);
+    const filenameMatch = precedingText.match(/[`*]*([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]{1,5})[`*]*\s*$/);
+    const inferredName = filenameMatch ? filenameMatch[1] : null;
+
+    blocks.push({ lang, code, ext: type.ext, label: type.label, inferredName });
+  }
+
+  return blocks;
+}
+
+module.exports = { sendFile, extractCodeBlock, extractAllCodeBlocks, FILE_TYPES };
+

@@ -1,9 +1,72 @@
 const axios = require("axios");
-const cheerio = require("cheerio");
 
+// Provider chain: Tavily first (purpose-built for LLM retrieval, 1k free/month),
+// Brave second (2k free queries/month, good general quality), DuckDuckGo scraping
+// as last resort (known unreliable — kept only so search never fully dies if
+// both real APIs are unavailable).
 async function searchWeb(query) {
+  if (process.env.TAVILY_API_KEY) {
+    const result = await tavilySearch(query);
+    if (result.success) return result.output;
+    console.error("Tavily failed, trying Brave:", result.error);
+  }
+
+  if (process.env.BRAVE_API_KEY) {
+    const result = await braveSearch(query);
+    if (result.success) return result.output;
+    console.error("Brave failed, falling back to scraping:", result.error);
+  }
+
+  return await searchWebFallback(query);
+}
+
+async function tavilySearch(query) {
   try {
-    // DuckDuckGo HTML search (no API key needed)
+    const res = await axios.post(
+      "https://api.tavily.com/search",
+      { api_key: process.env.TAVILY_API_KEY, query, max_results: 5 },
+      { timeout: 12000 }
+    );
+
+    const results = res.data?.results || [];
+    if (results.length === 0) return { success: false, error: "no results" };
+
+    let output = `🔍 *Search: ${query}*\n\n`;
+    results.forEach((r, i) => {
+      output += `*${i + 1}. ${r.title}*\n${(r.content || "").slice(0, 200)}\n🔗 ${r.url}\n\n`;
+    });
+    return { success: true, output: output.trim() };
+  } catch (err) {
+    return { success: false, error: err.response?.data?.message || err.message };
+  }
+}
+
+async function braveSearch(query) {
+  try {
+    const res = await axios.get("https://api.search.brave.com/res/v1/web/search", {
+      params: { q: query, count: 5 },
+      headers: { "X-Subscription-Token": process.env.BRAVE_API_KEY, Accept: "application/json" },
+      timeout: 12000,
+    });
+
+    const results = res.data?.web?.results || [];
+    if (results.length === 0) return { success: false, error: "no results" };
+
+    let output = `🔍 *Search: ${query}*\n\n`;
+    results.forEach((r, i) => {
+      output += `*${i + 1}. ${r.title}*\n${(r.description || "").replace(/<[^>]+>/g, "").slice(0, 200)}\n🔗 ${r.url}\n\n`;
+    });
+    return { success: true, output: output.trim() };
+  } catch (err) {
+    return { success: false, error: err.response?.data?.message || err.message };
+  }
+}
+
+// Last resort if neither real API is configured or both failed — known to be
+// unreliable due to DuckDuckGo's bot detection, kept only so search isn't
+// completely dead in that scenario.
+async function searchWebFallback(query) {
+  try {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     const res = await axios.get(url, {
       headers: {
@@ -13,31 +76,32 @@ async function searchWeb(query) {
       timeout: 10000,
     });
 
+    const cheerio = require("cheerio");
     const $ = cheerio.load(res.data);
     const results = [];
 
     $(".result").each((i, el) => {
-      if (i >= 5) return false; // top 5 results
+      if (i >= 5) return false;
       const title = $(el).find(".result__title").text().trim();
       const snippet = $(el).find(".result__snippet").text().trim();
       const link = $(el).find(".result__url").text().trim();
-      if (title && snippet) {
-        results.push({ title, snippet, link });
-      }
+      if (title && snippet) results.push({ title, snippet, link });
     });
 
-    if (results.length === 0) return `❌ No results found for: *${query}*`;
+    if (results.length === 0) {
+      return `❌ No results found for: *${query}*\n\n_(Tip: set TAVILY_API_KEY or BRAVE_API_KEY in .env for reliable search — this fallback is known to be flaky.)_`;
+    }
 
     let output = `🔍 *Search: ${query}*\n\n`;
     results.forEach((r, i) => {
       output += `*${i + 1}. ${r.title}*\n${r.snippet}\n🔗 ${r.link}\n\n`;
     });
-
     return output.trim();
   } catch (err) {
-    console.error("Search error:", err.message);
+    console.error("Fallback search error:", err.message);
     return `❌ Search failed: ${err.message}`;
   }
 }
 
 module.exports = { searchWeb };
+

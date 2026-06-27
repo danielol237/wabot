@@ -13,6 +13,8 @@ const {
 } = require("@whiskeysockets/baileys");
 
 const { handleMessage } = require("./handlers/messageHandler");
+const { loadPlugins } = require("./utils/pluginLoader");
+const { startTaskPoller } = require("./tools/taskPoller");
 
 const TEMP_DIR = path.join(__dirname, "../temp");
 const SESSIONS_DIR = path.join(__dirname, "../sessions");
@@ -20,12 +22,18 @@ const SESSIONS_DIR = path.join(__dirname, "../sessions");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
+// Load plugins once at startup. A broken plugin logs an error and gets
+// skipped — it never prevents the rest of the bot from starting.
+const loadedPlugins = loadPlugins();
+console.log(`🧩 ${loadedPlugins.length} plugin(s) loaded.`);
+
 const app = express();
 app.use(express.json());
 
 let latestQrDataUrl = null;
 let qrGeneratedAt = null;
 let pairingCode = null;
+let pairingCodeRequested = false; // prevents re-requesting a new code on every reconnect attempt
 let isReady = false;
 let lastError = null;
 let sock = null;
@@ -95,15 +103,23 @@ async function startBot() {
     return result;
   };
 
-  // If using pairing code and not yet registered, request the code right after connecting
-  if (USE_PAIRING_CODE && !sock.authState.creds.registered) {
+  // If using pairing code and not yet registered, request the code ONCE.
+  // IMPORTANT: requesting a pairing code naturally causes Baileys to close the
+  // connection with status 428 right after — that's expected protocol behavior,
+  // NOT an error. The old code treated every close as "reconnect immediately",
+  // which re-requested a fresh pairing code every ~3 seconds, invalidating
+  // whatever code you were trying to type and causing WhatsApp to reject the
+  // rapid repeated requests with 401s — an infinite self-inflicted loop.
+  if (USE_PAIRING_CODE && !sock.authState.creds.registered && !pairingCodeRequested) {
+    pairingCodeRequested = true;
     try {
       const code = await sock.requestPairingCode(process.env.PHONE_NUMBER.replace(/[^0-9]/g, ""));
       pairingCode = code;
-      console.log(`\n📱 Pairing code: ${code}\n(Enter this in WhatsApp → Linked Devices → Link with phone number instead)\n`);
+      console.log(`\n📱 Pairing code: ${code}\n(Enter this in WhatsApp → Linked Devices → Link with phone number instead)\nYou have about 60 seconds — don't worry if the connection log looks like it closed, that's normal right after requesting a code.\n`);
     } catch (err) {
       console.error("Failed to request pairing code:", err.message);
       lastError = `Pairing code request failed: ${err.message}`;
+      pairingCodeRequested = false; // allow retry on genuine failure
     }
   }
 
@@ -129,7 +145,9 @@ async function startBot() {
       isReady = true;
       latestQrDataUrl = null;
       pairingCode = null;
+      pairingCodeRequested = false;
       lastError = null;
+      startTaskPoller(sock); // safe to call again on reconnect — it clears any previous interval first
     }
 
     if (connection === "close") {
@@ -139,14 +157,29 @@ async function startBot() {
 
       console.log("⚠️ Connection closed. Status code:", statusCode, "Reconnecting:", shouldReconnect);
 
+      // If we're mid-pairing (code issued, not yet registered), DON'T reconnect
+      // immediately — that's what caused the loop. Give the person time to actually
+      // type the code into WhatsApp before trying again.
+      const isPendingPairing = USE_PAIRING_CODE && !sock.authState.creds.registered && pairingCodeRequested;
+      const reconnectDelay = isPendingPairing ? 45000 : 3000;
+
+      if (isPendingPairing && statusCode !== DisconnectReason.loggedOut) {
+        console.log("⏳ Waiting for pairing code to be entered before retrying...");
+      }
+
       if (shouldReconnect) {
-        setTimeout(() => startBot().catch((err) => {
-          console.error("Reconnect failed:", err.message);
-          lastError = err.message;
-        }), 3000);
+        setTimeout(() => {
+          // If still not registered after the wait, allow a fresh pairing code request
+          if (isPendingPairing) pairingCodeRequested = false;
+          startBot().catch((err) => {
+            console.error("Reconnect failed:", err.message);
+            lastError = err.message;
+          });
+        }, reconnectDelay);
       } else {
         console.log("❌ Logged out. Need a fresh QR scan — clearing session.");
         lastError = "Logged out — restart the service to get a fresh QR.";
+        pairingCodeRequested = false;
         // Clear session files so next boot generates a fresh QR
         try {
           fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
@@ -157,7 +190,7 @@ async function startBot() {
         setTimeout(() => startBot().catch((err) => {
           console.error("Restart after logout failed:", err.message);
           lastError = err.message;
-        }), 3000);
+        }), 5000);
       }
     }
   });
@@ -167,13 +200,24 @@ async function startBot() {
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
       try {
-        await handleMessage(sock, msg);
+        await handleMessage(sock, msg, loadedPlugins);
       } catch (err) {
         console.error("Message handler error:", err);
         try {
           const { logError } = require("./tools/botAdmin");
           logError("messageHandler", err.message);
         } catch (_) {}
+
+        // Previously, a crash here left the user with just a 🧠 reaction and total
+        // silence — confusing and looked like the bot was ignoring them. Always
+        // send something back so it's clear what happened instead of going quiet.
+        try {
+          await sock.sendMessage(msg.key.remoteJid, {
+            text: "⚠️ Something broke on my end processing that — try again, or rephrase it.",
+          }, { quoted: msg });
+        } catch (_) {
+          // If even this fails, there's genuinely nothing more we can do for this message
+        }
       }
     }
   });
@@ -211,7 +255,7 @@ startBot().catch((err) => {
   lastError = err.message;
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
 
 // Flush memory to disk on shutdown so nothing's lost on a clean restart/deploy

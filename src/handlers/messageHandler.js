@@ -7,7 +7,7 @@ const { runCode } = require("../tools/codeRunner");
 const { setReminder } = require("../tools/reminders");
 const { analyzeFile } = require("../tools/fileAnalyzer");
 const { scrapeUrl } = require("../tools/scraper");
-const { sendFile, extractCodeBlock } = require("../tools/fileSender");
+const { sendFile, extractAllCodeBlocks } = require("../tools/fileSender");
 const { readFromLink, detectFileLink } = require("../tools/linkReader");
 const { createSticker } = require("../tools/sticker");
 const { transcribeVoice } = require("../tools/voice");
@@ -16,9 +16,19 @@ const { translateText, convertCurrency, convertUnit, getWeather, weatherCodeToDe
 const { getNewsDigest } = require("../tools/news");
 const { setRecurringReminder, cancelRecurringReminder, listRecurringReminders } = require("../tools/recurringReminders");
 const { runAgentTask } = require("../tools/agent");
-const { buildProject, continueProject, getProjectStatus, listProjects, cancelProject } = require("../tools/appBuilder");
+const { buildProject, continueProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
+const { debugCode } = require("../tools/debugTool");
 const { getMemory, saveMemory } = require("../utils/memory");
+const { addPreference, getPreferences, clearPreferences } = require("../utils/userPreferences");
 const { wasSentByBot } = require("../utils/botMessages");
+const { needsRealtimeInfo } = require("../utils/needsRealtimeInfo");
+const { runEvolveCheck } = require("../tools/selfAwareness");
+const { learnFact, getFacts, forgetFact, getFactsContext } = require("../utils/learnedFacts");
+const { investigate } = require("../tools/investigate");
+const { runSelfCheck, getPendingFix, clearPendingFix } = require("../tools/selfCheck");
+const { findPluginCommand } = require("../utils/pluginLoader");
+const { createTask, getTasksForChat, deactivateTaskForChat } = require("../utils/backgroundTasks");
+const { getCryptoPrice, parseCondition } = require("../tools/priceWatcher");
 const { startSession, endSession, isSessionActive, touchSession } = require("../utils/chatSessions");
 const { isOwner, isAdmin, addAdmin, removeAdmin, listAdmins, banUser, unbanUser, isBanned, muteChat, unmuteChat, isMuted } = require("../utils/permissions");
 const { getStats, getRecentErrors, logError, broadcastToAll } = require("../tools/botAdmin");
@@ -146,6 +156,26 @@ function isQuotingBotMessage(msg, sock) {
   return wasSentByBot(stanzaId);
 }
 
+// Gets the actual text of whatever message is being replied to — this is what
+// lets ARIA understand "tell me more about that" after replying to a previous
+// answer, instead of treating the reply as a context-free new message.
+function getQuotedMessageText(msg) {
+  const contextInfo = msg.message?.extendedTextMessage?.contextInfo
+    || msg.message?.imageMessage?.contextInfo
+    || msg.message?.videoMessage?.contextInfo
+    || msg.message?.documentMessage?.contextInfo
+    || msg.message?.audioMessage?.contextInfo;
+
+  const quoted = contextInfo?.quotedMessage;
+  if (!quoted) return null;
+
+  return quoted.conversation
+    || quoted.extendedTextMessage?.text
+    || quoted.imageMessage?.caption
+    || quoted.videoMessage?.caption
+    || null;
+}
+
 function hasMedia(msg) {
   return !!(msg.message?.imageMessage || msg.message?.documentMessage || msg.message?.videoMessage);
 }
@@ -172,7 +202,7 @@ async function downloadMediaFromMsg(sock, msg) {
 }
 
 // ── Main handler ──────────────────────────────────────────────
-async function handleMessage(sock, msg) {
+async function handleMessage(sock, msg, loadedPlugins = []) {
   const chatId = msg.key.remoteJid;
   if (chatId === "status@broadcast") return;
 
@@ -264,6 +294,41 @@ async function handleMessage(sock, msg) {
     return reply(sock, msg, `*🐛 Recent Errors:*\n\n${text}`);
   }
 
+  if (activeLower.startsWith(`${PREFIX}selfcheck`) && isOwner(senderJid)) {
+    await react(sock, msg, "🩻");
+    const result = await runSelfCheck(getSenderName(msg));
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    if (result.noIssues) return reply(sock, msg, result.message);
+
+    const d = result.diagnosis;
+    return reply(
+      sock,
+      msg,
+      `*🩻 Self-Check Diagnosis*\n\n*Issue:* ${d.diagnosis}\n*Likely file:* ${d.file || "unclear"}\n*Confidence:* ${d.confidence}\n\n*Proposed fix:*\n${d.proposedFix}\n\n⚠️ Nothing has been changed. Reply \`${PREFIX}approve\` to have me write this fix, or \`${PREFIX}rejectfix\` to discard it.`
+    );
+  }
+
+  if (activeLower.startsWith(`${PREFIX}rejectfix`) && isOwner(senderJid)) {
+    clearPendingFix();
+    return reply(sock, msg, `🗑️ Discarded. Nothing was changed.`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}approve`) && isOwner(senderJid)) {
+    const pending = getPendingFix();
+    if (!pending) return reply(sock, msg, `❌ No pending fix to approve (or it expired — run \`${PREFIX}selfcheck\` again).`);
+
+    if (!pending.file) {
+      return reply(sock, msg, `❌ This diagnosis didn't identify a specific file, so there's nothing I can mechanically apply. You'll need to fix this one manually based on the diagnosis.`);
+    }
+
+    await react(sock, msg, "✍️");
+    return reply(
+      sock,
+      msg,
+      `*✍️ Here's the proposed change for ${pending.file}:*\n\n${pending.proposedFix}\n\nI'm intentionally NOT writing this to disk automatically — copy this fix and apply it yourself via nano, same as every other update tonight. This keeps a human checking every change to ARIA's own code before it takes effect, which is a permanent design choice, not a missing feature.`
+    );
+  }
+
   if (activeLower.startsWith(`${PREFIX}ban`) && isAdmin(senderJid)) {
     const number = activeBody.split(" ")[1];
     if (!number) return reply(sock, msg, `Usage: \`${PREFIX}ban 2376XXXXXXXX\``);
@@ -314,13 +379,14 @@ async function handleMessage(sock, msg) {
   }
 
   if (activeLower === `${PREFIX}model`) {
+    const hasCerebras = !!process.env.CEREBRAS_API_KEY;
     const hasGemini = !!process.env.GEMINI_API_KEY;
     const hasGroq = !!process.env.GROQ_API_KEY;
     const hasOpenRouter = !!process.env.OPENROUTER_API_KEY;
     return reply(
       sock,
       msg,
-      `*🧠 AI Provider Chain*\n\n1. Gemini 2.0 Flash ${hasGemini ? "✅ configured" : "❌ no key set"}\n2. Groq (gpt-oss-120b) ${hasGroq ? "✅ configured" : "❌ no key set"}\n3. OpenRouter ${hasOpenRouter ? "✅ configured" : "❌ no key set"}\n\nTries each in order until one responds successfully.`
+      `*🧠 AI Provider Chain*\n\n1. Cerebras (gpt-oss-120b) ${hasCerebras ? "✅ configured" : "❌ no key set"}\n2. Gemini 2.0 Flash ${hasGemini ? "✅ configured" : "❌ no key set"}\n3. Groq (gpt-oss-120b) ${hasGroq ? "✅ configured" : "❌ no key set"}\n4. OpenRouter ${hasOpenRouter ? "✅ configured" : "❌ no key set"}\n\nTries each in order until one responds successfully.`
     );
   }
 
@@ -409,6 +475,116 @@ async function handleMessage(sock, msg) {
   if (activeLower.startsWith(`${PREFIX}cancelbuild`)) {
     const projectId = activeBody.split(" ")[1] || null;
     return handleProjectCancel(sock, msg, projectId);
+  }
+  if (activeLower.startsWith(`${PREFIX}edit`)) {
+    // Usage: !edit filename.ext the instruction goes here
+    const parts = activeBody.split(" ").slice(1);
+    const filename = parts[0];
+    const instruction = parts.slice(1).join(" ");
+    return handleEditFile(sock, msg, filename, instruction);
+  }
+  if (activeLower.startsWith(`${PREFIX}think`)) {
+    const request = activeBody.split(" ").slice(1).join(" ");
+    return handleThink(sock, msg, request);
+  }
+  if (activeLower.startsWith(`${PREFIX}fix`)) {
+    // Code debugging command. Named !fix (not !debug) since !debug is already
+    // taken by the admin error-log command above.
+    const errorContext = activeBody.split(" ").slice(1).join(" ");
+    return handleDebugCode(sock, msg, errorContext);
+  }
+  if (activeLower.startsWith(`${PREFIX}remember`)) {
+    const preference = activeBody.split(" ").slice(1).join(" ");
+    if (!preference) return reply(sock, msg, `Usage: \`${PREFIX}remember prefers React over plain JS\``);
+    addPreference(senderJid, preference);
+    return reply(sock, msg, `✅ Got it — I'll keep that in mind for your future builds.`);
+  }
+  if (activeLower.startsWith(`${PREFIX}preferences`) || activeLower.startsWith(`${PREFIX}myprefs`)) {
+    const list = getPreferences(senderJid);
+    if (list.length === 0) return reply(sock, msg, `No preferences saved yet. Add one with \`${PREFIX}remember [preference]\`.`);
+    return reply(sock, msg, `*🧠 Your saved preferences:*\n\n${list.map((p) => `• ${p}`).join("\n")}`);
+  }
+  if (activeLower.startsWith(`${PREFIX}forgetprefs`)) {
+    clearPreferences(senderJid);
+    return reply(sock, msg, `🧹 Cleared all your saved preferences.`);
+  }
+  if (activeLower.startsWith(`${PREFIX}evolve`)) {
+    await react(sock, msg, "🧬");
+    const result = await runEvolveCheck(getSenderName(msg));
+    return reply(sock, msg, `*🧬 Self-Assessment*\n\n${result}`);
+  }
+  if (activeLower.startsWith(`${PREFIX}learn`)) {
+    const fact = activeBody.split(" ").slice(1).join(" ");
+    if (!fact) return reply(sock, msg, `Usage: \`${PREFIX}learn Baileys is preferred over whatsapp-web.js for this project\``);
+    learnFact(chatId, fact);
+    return reply(sock, msg, `📚 Noted — I'll remember that for this chat going forward.`);
+  }
+  if (activeLower.startsWith(`${PREFIX}learned`)) {
+    const list = getFacts(chatId);
+    if (list.length === 0) return reply(sock, msg, `Nothing learned yet for this chat. Add something with \`${PREFIX}learn [fact]\`.`);
+    return reply(sock, msg, `*📚 Learned for this chat:*\n\n${list.map((f, i) => `${i}. ${f}`).join("\n")}`);
+  }
+  if (activeLower.startsWith(`${PREFIX}forgetlearned`)) {
+    const index = parseInt(activeBody.split(" ")[1], 10);
+    if (isNaN(index)) return reply(sock, msg, `Usage: \`${PREFIX}forgetlearned [number]\` — check \`${PREFIX}learned\` for the index.`);
+    const removed = forgetFact(chatId, index);
+    return reply(sock, msg, removed ? `🧹 Forgot that one.` : `❌ Nothing at that index.`);
+  }
+  if (activeLower.startsWith(`${PREFIX}investigate`)) {
+    const problem = activeBody.split(" ").slice(1).join(" ");
+    if (!problem) return reply(sock, msg, `Usage: \`${PREFIX}investigate render deployment keeps crashing\``);
+    await react(sock, msg, "🕵️");
+    const result = await investigate(problem, getSenderName(msg));
+    return reply(sock, msg, `*🕵️ Investigation*\n\n${result}`);
+  }
+  if (activeLower.startsWith(`${PREFIX}watch`) && !activeLower.startsWith(`${PREFIX}watches`)) {
+    // Format: !watch bitcoin below 80000  OR  !watch bitcoin drops below 80k
+    const parts = activeBody.split(" ").slice(1);
+    const coinId = parts[0];
+    const conditionText = parts.slice(1).join(" ");
+
+    if (!coinId || !conditionText) {
+      return reply(sock, msg, `Usage: \`${PREFIX}watch bitcoin below 80000\` or \`${PREFIX}watch ethereum above 5000\`\n\nI'll check every 30 min and notify you here once it happens.`);
+    }
+
+    const condition = parseCondition(conditionText);
+    if (!condition) {
+      return reply(sock, msg, `❌ Couldn't understand that condition. Try: \`${PREFIX}watch bitcoin below 80000\``);
+    }
+
+    await react(sock, msg, "👀");
+    const priceCheck = await getCryptoPrice(coinId);
+    if (!priceCheck.success) return reply(sock, msg, `❌ ${priceCheck.error}`);
+
+    const result = createTask(chatId, "crypto_price", { coinId: coinId.toLowerCase() }, conditionText);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+
+    return reply(
+      sock,
+      msg,
+      `👀 *Watching ${coinId}*\nCurrent price: $${priceCheck.price.toLocaleString()}\nWill notify you here when it goes ${condition.label}.\nChecking every 30 min. ID: \`${result.task.id}\``
+    );
+  }
+  if (activeLower.startsWith(`${PREFIX}watches`)) {
+    const tasks = getTasksForChat(chatId);
+    if (tasks.length === 0) return reply(sock, msg, `No active watches in this chat. Start one with \`${PREFIX}watch bitcoin below 80000\`.`);
+    const text = tasks
+      .map((t) => `• \`${t.id}\` — ${t.params.coinId} ${t.condition}${t.lastValue ? ` (last: $${t.lastValue.toLocaleString()})` : ""}`)
+      .join("\n");
+    return reply(sock, msg, `*👀 Active watches:*\n\n${text}`);
+  }
+  if (activeLower.startsWith(`${PREFIX}unwatch`)) {
+    const taskId = activeBody.split(" ")[1];
+    if (!taskId) return reply(sock, msg, `Usage: \`${PREFIX}unwatch [id]\` — check \`${PREFIX}watches\` for the ID.`);
+    const removed = deactivateTaskForChat(chatId, taskId);
+    return reply(sock, msg, removed ? `🛑 Stopped watching.` : `❌ No active watch found with that ID.`);
+  }
+  if (activeLower.startsWith(`${PREFIX}edit`)) {
+    // Format: !edit filename.ext the change you want
+    const parts = activeBody.split(" ").slice(1);
+    const filename = parts[0];
+    const instruction = parts.slice(1).join(" ");
+    return handleEditFile(sock, msg, filename, instruction);
   }
   if (activeLower.startsWith(`${PREFIX}scrape`) || activeLower.startsWith(`${PREFIX}read`)) {
     return handleScrape(sock, msg, activeBody.split(" ")[1]);
@@ -652,7 +828,11 @@ async function handleMessage(sock, msg) {
     await react(sock, msg, "🎵");
     const result = await getLyrics(query);
     if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
-    return reply(sock, msg, `🎵 *${result.title}*\n\n${result.lyrics.slice(0, 3500)}`);
+    return reply(
+      sock,
+      msg,
+      `🎵 *${result.title}* — ${result.artist}\n\n${result.preview}\n\n_(Preview only — full lyrics aren't reproduced here for copyright reasons. Search the title on Genius or your music app for the complete song.)_`
+    );
   }
 
   // ── WALLPAPER SEARCH ──────────────────────────────────────────
@@ -772,6 +952,33 @@ async function handleMessage(sock, msg) {
     return reply(sock, msg, "🧹 Memory cleared. Fresh start!");
   }
 
+  // ── PLUGIN COMMANDS ───────────────────────────────────────────
+  // Checked after every built-in command/intent, so a plugin can never
+  // accidentally shadow something like !ban or !stats. Only reachable if
+  // nothing built-in matched and the message starts with the prefix.
+  if (activeLower.startsWith(PREFIX)) {
+    const commandName = activeBody.slice(PREFIX.length).split(" ")[0].toLowerCase();
+    const args = activeBody.split(" ").slice(1);
+    const found = findPluginCommand(loadedPlugins, commandName);
+
+    if (found) {
+      const ctx = {
+        chatId,
+        senderJid,
+        senderName: getSenderName(msg),
+        reply: (text) => reply(sock, msg, text),
+        react: (emoji) => react(sock, msg, emoji),
+      };
+      try {
+        await found.handler(sock, msg, args, ctx);
+      } catch (err) {
+        console.error(`Plugin "${found.plugin.name}" command "${commandName}" crashed:`, err.message);
+        await reply(sock, msg, `⚠️ The "${commandName}" plugin command hit an error and didn't complete.`);
+      }
+      return;
+    }
+  }
+
   // ── DEFAULT: AI CHAT ─────────────────────────────────────────
   if (activeBody.length > 0) {
     await react(sock, msg, "🧠");
@@ -779,18 +986,71 @@ async function handleMessage(sock, msg) {
     const ownerContext = isOwner(senderJid)
       ? "\n\nThe person you're talking to right now is Daniel, your creator who built and maintains you. You can acknowledge this naturally if it's relevant, without being weird or robotic about it."
       : "";
-    const response = await getAIResponse(activeBody, senderName, history, null, ownerContext);
+
+    // If this message is a reply to one of ARIA's previous messages, pull in
+    // what that message actually said — without this, "tell me more about that"
+    // is meaningless to the model since it has no idea what "that" refers to.
+    let replyContext = "";
+    if (isReplyToBot) {
+      const quotedText = getQuotedMessageText(msg);
+      if (quotedText) {
+        replyContext = `\n\nThe person is replying directly to this earlier message you sent:\n"${quotedText.slice(0, 1500)}"\n\nTreat their message as a continuation of that specific topic.`;
+      }
+    }
+
+    // Autonomous search: previously ARIA only searched when explicitly told to
+    // with !search, meaning normal chat questions like "what's bitcoin doing
+    // today" got answered from training data with no real current info. Now it
+    // detects questions that genuinely need current info and searches first,
+    // then answers using those results — without the person needing to know
+    // a search command exists.
+    let searchContext = "";
+    if (needsRealtimeInfo(activeBody)) {
+      await react(sock, msg, "🔍");
+      try {
+        const searchResults = await searchWeb(activeBody);
+        searchContext = `\n\nYou just searched the web for this and got these results — use them to answer accurately instead of relying on memory, since this is a question about current/changing information:\n${searchResults.slice(0, 2500)}`;
+      } catch (err) {
+        console.error("Autonomous search failed:", err.message);
+        // If search fails, fall through and let the AI answer from its own
+        // knowledge with an honest caveat rather than blocking the response entirely
+        searchContext = "\n\n(A web search was attempted for this but failed — answer from what you know, and mention that your info might not be current.)";
+      }
+    }
+
+    const factsContext = getFactsContext(chatId);
+    const response = await getAIResponse(activeBody, senderName, history, null, ownerContext + replyContext + searchContext + factsContext);
     saveMemory(chatId, [...history, { role: "user", content: activeBody }, { role: "assistant", content: response }]);
     await handleResponseWithFile(sock, msg, response);
   }
 }
 
 async function handleResponseWithFile(sock, msg, response, hintFilename = null) {
-  await reply(sock, msg, response);
-  const codeBlock = extractCodeBlock(response);
-  if (codeBlock && codeBlock.code.split("\n").length >= 10) {
-    let filename = hintFilename ? hintFilename.replace(/\.[^.]+$/, `.${codeBlock.ext}`) : `code.${codeBlock.ext}`;
-    await sendFile(sock, msg.key.remoteJid, filename, codeBlock.code, `📎 *${filename}* — tap to open`);
+  const codeBlocks = extractAllCodeBlocks(response);
+  const sendableBlocks = codeBlocks.filter((b) => b.code.split("\n").length >= 5);
+
+  if (sendableBlocks.length === 0) {
+    // No real files to send — just reply normally with the full text
+    await reply(sock, msg, response);
+    return;
+  }
+
+  // When sending actual files, skip the surrounding chat text entirely (no "here's
+  // what I made" explanation, no "how to use" instructions) — just the file(s),
+  // since that's what was actually asked for.
+  for (let i = 0; i < sendableBlocks.length; i++) {
+    const block = sendableBlocks[i];
+
+    let filename;
+    if (block.inferredName) {
+      filename = block.inferredName;
+    } else if (hintFilename && sendableBlocks.length === 1) {
+      filename = hintFilename.replace(/\.[^.]+$/, `.${block.ext}`);
+    } else {
+      filename = `file${i + 1}.${block.ext}`;
+    }
+
+    await sendFile(sock, msg.key.remoteJid, filename, block.code, `📎 *${filename}*`);
   }
 }
 
@@ -825,12 +1085,55 @@ async function handleCode(sock, msg, code, lang) {
   await reply(sock, msg, `\`\`\`\n${result}\n\`\`\``);
 }
 
+async function handleThink(sock, msg, request) {
+  if (!request || request.length < 3) {
+    return reply(sock, msg, `Tell me what to think through. Example: \`${PREFIX}think build a recipe app\`\n\nI'll show you the plan first — you can adjust it before anything gets built.`);
+  }
+
+  const chatId = msg.key.remoteJid;
+  const senderJid = msg.key.participant || msg.key.remoteJid;
+  await react(sock, msg, "🧠");
+
+  try {
+    const result = await thinkAboutProject(request, getSenderName(msg), chatId, senderJid);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    return reply(sock, msg, result.message);
+  } catch (err) {
+    console.error("Think error:", err.message);
+    return reply(sock, msg, `❌ Something went wrong while planning: ${err.message}`);
+  }
+}
+
+async function handleDebugCode(sock, msg, errorContext) {
+  // Works two ways: replying to a message containing code, or with code pasted
+  // directly after the command. Check for quoted code first.
+  const quotedText = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.conversation
+    || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text;
+
+  const codeToCheck = quotedText || errorContext;
+
+  if (!codeToCheck || codeToCheck.length < 5) {
+    return reply(sock, msg, `Reply to a message with code using \`${PREFIX}fix\`, or send \`${PREFIX}fix [paste your code]\`.`);
+  }
+
+  await react(sock, msg, "🔍");
+
+  try {
+    const result = await debugCode(codeToCheck, null, quotedText ? errorContext : null, getSenderName(msg));
+    return handleResponseWithFile(sock, msg, result);
+  } catch (err) {
+    console.error("Debug error:", err.message);
+    return reply(sock, msg, `❌ Something went wrong debugging that: ${err.message}`);
+  }
+}
+
 async function handleBuild(sock, msg, request) {
   if (!request || request.length < 3) {
     return reply(sock, msg, `Tell me what to build. Example: \`${PREFIX}build a todo app in html css js\`\n\nKeep it realistic — small apps, landing pages, simple games, calculators, APIs. Not full AAA games 😅`);
   }
 
   const chatId = msg.key.remoteJid;
+  const senderJid = msg.key.participant || msg.key.remoteJid;
   await react(sock, msg, "🏗️");
   await reply(sock, msg, `🏗️ Building: *${request}*\nThis can take a minute or two for bigger requests...`);
 
@@ -843,7 +1146,7 @@ async function handleBuild(sock, msg, request) {
   };
 
   try {
-    const result = await buildProject(request, getSenderName(msg), chatId, onProgress);
+    const result = await buildProject(request, getSenderName(msg), chatId, onProgress, senderJid);
     return handleBuildResult(sock, msg, result);
   } catch (err) {
     console.error("Build error:", err.message);
@@ -886,11 +1189,15 @@ async function handleBuildResult(sock, msg, result) {
     ? `\n\n⚠️ These files had issues even after an auto-fix attempt, double check them: ${result.warnings.join(", ")}`
     : "";
   const buildWarningNote = result.buildWarning ? `\n\n🔨 *Build verification:* ${result.buildWarning}` : "";
+  const previewNote = result.previewUrl ? `\n\n🌐 *Live preview:* ${result.previewUrl}` : "";
+  const crossFileNote = result.crossFileIssues && result.crossFileIssues.length > 0
+    ? `\n\n🔍 *Reviewer found cross-file issues:*\n${result.crossFileIssues.map((i) => `• ${i.file}: ${i.issue}`).join("\n")}`
+    : "";
 
   return reply(
     sock,
     msg,
-    `✅ *Built successfully!* (${result.fileCount} files)\n\n${fileList}\n\n📦 Download:\n${result.downloadUrl}${warningNote}${buildWarningNote}`
+    `✅ *Built successfully!* (${result.fileCount} files)\n\n${fileList}\n\n📦 Download:\n${result.downloadUrl}${previewNote}${warningNote}${buildWarningNote}${crossFileNote}`
   );
 }
 
@@ -923,6 +1230,26 @@ async function handleProjectCancel(sock, msg, projectId) {
   const chatId = msg.key.remoteJid;
   const cancelled = cancelProject(chatId, projectId);
   return reply(sock, msg, cancelled ? "🛑 Project cancelled." : "❌ No active project found to cancel.");
+}
+
+async function handleEditFile(sock, msg, filename, instruction) {
+  if (!filename || !instruction) {
+    return reply(sock, msg, `Usage: \`${PREFIX}edit script.js add a dark mode toggle\`\n\nEdits one file in your most recent project instead of rebuilding everything.`);
+  }
+
+  const chatId = msg.key.remoteJid;
+  await react(sock, msg, "✏️");
+
+  try {
+    const result = await editProjectFile(chatId, filename, instruction, getSenderName(msg));
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+
+    await sendFile(sock, chatId, result.filename, result.content, `📎 *${result.filename}* — updated`);
+    if (result.warning) await reply(sock, msg, `⚠️ ${result.warning}`);
+  } catch (err) {
+    console.error("Edit file error:", err.message);
+    return reply(sock, msg, `❌ Something went wrong editing that file: ${err.message}`);
+  }
 }
 
 async function handleScrape(sock, msg, url) {
@@ -1020,6 +1347,22 @@ async function handlePoll(sock, msg, text) {
 async function runHealthCheck() {
   const results = [];
 
+  // Cerebras
+  if (process.env.CEREBRAS_API_KEY) {
+    try {
+      await axios.post(
+        "https://api.cerebras.ai/v1/chat/completions",
+        { model: "gpt-oss-120b", messages: [{ role: "user", content: "hi" }], max_tokens: 5 },
+        { headers: { Authorization: `Bearer ${process.env.CEREBRAS_API_KEY}` }, timeout: 8000 }
+      );
+      results.push({ name: "Cerebras", ok: true });
+    } catch (err) {
+      results.push({ name: "Cerebras", ok: false, detail: err.response?.data?.message || err.response?.data?.error || err.response?.status || err.message });
+    }
+  } else {
+    results.push({ name: "Cerebras", ok: false, detail: "no key set" });
+  }
+
   // Gemini
   if (process.env.GEMINI_API_KEY) {
     try {
@@ -1030,7 +1373,7 @@ async function runHealthCheck() {
       );
       results.push({ name: "Gemini", ok: true });
     } catch (err) {
-      results.push({ name: "Gemini", ok: false, detail: err.response?.status || err.message });
+      results.push({ name: "Gemini", ok: false, detail: err.response?.data?.error?.message || err.response?.status || err.message });
     }
   } else {
     results.push({ name: "Gemini", ok: false, detail: "no key set" });
@@ -1103,6 +1446,17 @@ function getHelpMenu(senderJid = null) {
 📊 \`!poll Question? | Opt1 | Opt2\` — Create a poll
 🧩 _figure out / research and..._ — Multi-step agent
 🏗️ \`!build [app description]\` — Generate a real small project, zipped & uploaded
+🧠 \`!think [app description]\` — See the plan first, build later with \`!build\`
+🔍 \`!fix\` (reply to code) — Find and fix bugs in shared code
+✏️ \`!edit filename.ext [change]\` — Edit one file in your last project, no full rebuild
+🧠 \`!remember [preference]\` — e.g. "prefers React" — applied to future builds
+\`!preferences\` / \`!forgetprefs\` — View or clear saved preferences
+🧬 \`!evolve\` — ARIA's honest self-assessment
+📚 \`!learn [fact]\` — Save a shared fact for this chat/project
+\`!learned\` / \`!forgetlearned [n]\` — View or remove learned facts
+👀 \`!watch bitcoin below 80000\` — Get notified automatically when a crypto price hits your target
+\`!watches\` / \`!unwatch [id]\` — View or stop active watches
+🕵️ \`!investigate [problem]\` — Root-cause analysis on a bug/issue
 📎 _share a file link_ — I'll read & analyze it
 📄 _send any file_ — I'll analyze it
 💻 _ask me to write code_ — I'll send it as a file too
@@ -1158,7 +1512,9 @@ Send image + "ocr" — Extract text from image`;
 
   if (senderJid && isOwner(senderJid)) {
     menu += `\n\n*👑 Owner-only:*
-\`!addadmin [number]\` / \`!removeadmin [number]\``;
+\`!addadmin [number]\` / \`!removeadmin [number]\`
+\`!selfcheck\` — Diagnose recent errors + propose a fix (never auto-applied)
+\`!approve\` / \`!rejectfix\` — Review the proposed fix`;
   }
 
   menu += `\n\n_In groups: call me by name first_

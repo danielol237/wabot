@@ -61,11 +61,56 @@ function getAllProjectsForChat(chatId) {
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
-function markFileStatus(projectId, fileIndex, status) {
+function markFileStatus(projectId, fileIndex, status, content = null) {
   const project = projects[projectId];
   if (!project || !project.files[fileIndex]) return;
   project.files[fileIndex].status = status;
   save();
+
+  // Store actual generated content separately from the lightweight metadata file —
+  // this is what makes "edit this existing project file" possible later, since
+  // finalizeProject() deletes the working directory after zipping/uploading.
+  if (content !== null) {
+    saveFileContent(projectId, project.files[fileIndex].path, content);
+  }
+}
+
+const CONTENT_DIR = path.join(DATA_DIR, "project_files");
+if (!fs.existsSync(CONTENT_DIR)) fs.mkdirSync(CONTENT_DIR, { recursive: true });
+
+function contentFilePath(projectId, filePath) {
+  // Flatten the relative path into a safe filename (no nested dirs needed on disk)
+  const safeName = filePath.replace(/[\/\\]/g, "__");
+  return path.join(CONTENT_DIR, `${projectId}__${safeName}`);
+}
+
+function saveFileContent(projectId, filePath, content) {
+  try {
+    fs.writeFileSync(contentFilePath(projectId, filePath), content, "utf8");
+  } catch (err) {
+    console.error(`Failed to save content for ${filePath}:`, err.message);
+  }
+}
+
+function getFileContent(projectId, filePath) {
+  try {
+    return fs.readFileSync(contentFilePath(projectId, filePath), "utf8");
+  } catch (err) {
+    return null; // file genuinely doesn't exist or was never saved — caller handles this
+  }
+}
+
+function deleteProjectFiles(projectId) {
+  const project = projects[projectId];
+  if (!project) return;
+  for (const file of project.files) {
+    try {
+      const fp = contentFilePath(projectId, file.path);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    } catch (err) {
+      console.error("Failed to delete stored file content:", err.message);
+    }
+  }
 }
 
 function advanceProject(projectId) {
@@ -96,4 +141,8 @@ module.exports = {
   advanceProject,
   setProjectStatus,
   getProgress,
+  getFileContent,
+  saveFileContent,
+  deleteProjectFiles,
 };
+

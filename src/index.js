@@ -233,6 +233,33 @@ async function startBot() {
     if (type !== "notify") return;
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
+
+      // Auto-save view-once media and forward to owner's DM
+      const viewOnceMsg = msg.message?.imageMessage?.viewOnce || msg.message?.videoMessage?.viewOnce;
+      if (viewOnceMsg) {
+        try {
+          const ownerNumber = process.env.OWNER_NUMBER;
+          const isFromOwner = msg.key.participant?.includes(ownerNumber) || msg.key.remoteJid?.includes(ownerNumber);
+          if (ownerNumber && !isFromOwner) {
+            const mediaMsg = msg.message?.imageMessage || msg.message?.videoMessage;
+            const isVideo = !!msg.message?.videoMessage;
+            const buffer = await sock.downloadMediaMessage(msg);
+            if (buffer) {
+              const ownerJid = ownerNumber + "@s.whatsapp.net";
+              const sender = msg.pushName || msg.key.participant || "someone";
+              if (isVideo) {
+                await sock.sendMessage(ownerJid, { video: buffer, caption: "📸 View-once video from " + sender });
+              } else {
+                await sock.sendMessage(ownerJid, { image: buffer, caption: "📸 View-once photo from " + sender });
+              }
+              console.log("Auto-saved view-once media from", sender);
+            }
+          }
+        } catch (voErr) {
+          console.error("View-once save error:", voErr.message);
+        }
+      }
+
       try {
         await handleMessage(sock, msg, loadedPlugins);
       } catch (err) {

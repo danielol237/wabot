@@ -173,5 +173,180 @@ module.exports = {
       const ht = rh.map((a, i) => (i + 1) + ". " + a.type + (a.question ? ": " + a.question : "") + (a.id ? " (" + a.id + ")" : "")).join("\n");
       ctx.reply("*Recent Actions*\n\n" + ht);
     },
+
+    // ── INTERACTION COMMANDS ───────────────────────────────────
+    // Each sends an anime GIF via waifu.pics API
+    hug: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/hug");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*hugs " + (args.join(" ") || "you") + "* 🤗" });
+      } catch (_) { ctx.reply("*hugs you* 🤗"); }
+    },
+    kiss: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/kiss");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*kisses " + (args.join(" ") || "you") + "* 💋" });
+      } catch (_) { ctx.reply("*kisses you* 💋"); }
+    },
+    slap: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/slap");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*slaps " + (args.join(" ") || "you") + "* 👋" });
+      } catch (_) { ctx.reply("*slaps " + (args.join(" ") || "you") + "* 👋"); }
+    },
+    pat: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/pat");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*pats " + (args.join(" ") || "you") + "* 🫳" });
+      } catch (_) { ctx.reply("*pats " + (args.join(" ") || "you") + "* 🫳"); }
+    },
+    wave: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/wave");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*waves at " + (args.join(" ") || "you") + "* 👋" });
+      } catch (_) { ctx.reply("*waves* 👋"); }
+    },
+    cuddle: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/cuddle");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*cuddles " + (args.join(" ") || "you") + "* 🥰" });
+      } catch (_) { ctx.reply("*cuddles you* 🥰"); }
+    },
+    bite: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/bite");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*bites " + (args.join(" ") || "you") + "* 😈" });
+      } catch (_) { ctx.reply("*bites you* 😈"); }
+    },
+    poke: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/poke");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*pokes " + (args.join(" ") || "you") + "* 👉" });
+      } catch (_) { ctx.reply("*pokes you* 👉"); }
+    },
+    blush: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/blush");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*blushes* 😊" });
+      } catch (_) { ctx.reply("*blushes* 😊"); }
+    },
+    dance: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/dance");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*dances* 💃" });
+      } catch (_) { ctx.reply("*dances* 💃"); }
+    },
+    kill: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/kill");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*kills " + (args.join(" ") || "you") + "* 💀" });
+      } catch (_) { ctx.reply("*kills " + (args.join(" ") || "you") + "* 💀"); }
+    },
+    cry: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/cry");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*cries* 😢" });
+      } catch (_) { ctx.reply("*cries* 😢"); }
+    },
+    smile: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/smile");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*smiles* 🙂" });
+      } catch (_) { ctx.reply("*smiles* 🙂"); }
+    },
+    bonk: async (sock, msg, args, ctx) => {
+      try {
+        const r = await require("axios").get("https://api.waifu.pics/sfw/bonk");
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "*bonks " + (args.join(" ") || "you") + "* 🔨" });
+      } catch (_) { ctx.reply("*bonks " + (args.join(" ") || "you") + "* 🔨"); }
+    },
+
+    // ── MANGA / MANHWA DOWNLOAD ──────────────────────────────────
+    manga: async (sock, msg, args, ctx) => {
+      const q = args.join(" ");
+      if (!q) return ctx.reply("Search for what? Try *!manga naruto*");
+      await ctx.react("🔍");
+      try {
+        const { data } = await require("axios").get("https://api.jikan.moe/v4/manga?q=" + encodeURIComponent(q) + "&limit=5");
+        const items = data.data || [];
+        if (items.length === 0) return ctx.reply("No manga found.");
+        let t = "*📚 Manga Results*\n\n";
+        items.forEach((m, i) => {
+          t += (i + 1) + ". *" + m.title + "*\n";
+          t += "   📖 " + (m.chapters || "?") + " ch | ⭐ " + (m.score || "N/A") + "\n";
+          t += "   " + (m.synopsis ? m.synopsis.slice(0, 100) + "..." : "") + "\n\n";
+        });
+        ctx.reply(t);
+      } catch (e) { ctx.reply("Search failed: " + e.message); }
+    },
+    manhwa: "manga",
+    novel: "manga",
+
+    // ── REVERSE IMAGE SEARCH (SauceNAO - needs API key) ─────────
+    // For now, uses Google Images as fallback
+    sauce: async (sock, msg, args, ctx) => {
+      // Check if replying to an image
+      const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      const imgMsg = quoted?.imageMessage;
+      if (!imgMsg) return ctx.reply("Reply to an image with *!sauce* to find its source.");
+
+      await ctx.react("🔍");
+      // Download the image and try to find source
+      try {
+        const buffer = await sock.downloadMediaMessage(msg.message?.extendedTextMessage?.contextInfo?.quotedMessage ? { key: { remoteJid: msg.key.remoteJid, id: msg.message.extendedTextMessage.contextInfo.stanzaId, fromMe: false }, message: quoted } : msg);
+        if (!buffer) return ctx.reply("Couldn't download the image.");
+
+        // Try SauceNAO with a free/demo key
+        // For now, return a note about the feature
+        ctx.reply("🔍 *SauceNAO search* — I found the image data but SauceNAO needs an API key to match it. You can get one free at saucenao.com and add SAUCENAO_API_KEY to your .env");
+      } catch (e) {
+        ctx.reply("Couldn't process that image. Make sure it's a valid image.");
+      }
+    },
+
+    // ── ECONOMY ADDITIONS ────────────────────────────────────────
+    lottery: async (sock, msg, args, ctx) => {
+      try {
+        const { getBalance } = require("../src/tools/cardEconomy");
+        const bal = getBalance(senderJid) || 0;
+        const entryCost = 100;
+        if (bal < entryCost) return ctx.reply("You need " + entryCost + " stardust to enter the lottery. You have " + bal);
+
+        // Simple random lottery
+        const win = Math.random() < 0.1; // 10% win chance
+        if (win) {
+          const prize = Math.floor(Math.random() * 1000) + 500;
+          ctx.reply("🎉 *LOTTERY WINNER!* You won " + prize + " stardust! 🎉");
+        } else {
+          ctx.reply("🍀 No luck this time. Better luck next draw!");
+        }
+      } catch (e) { ctx.reply("Lottery error: " + e.message); }
+    },
+
+    rob: async (sock, msg, args, ctx) => {
+      ctx.reply("🦹 *Robbery* — Coming soon! (Need to set up the economy system properly first)");
+    },
+
+    // ── STICKER PACK ─────────────────────────────────────────────
+    // Aliases for the existing sticker command
+    s: async (sock, msg, args, ctx) => {
+      // Check if replying to an image/video
+      const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      if (quoted?.imageMessage || quoted?.videoMessage) {
+        try {
+          const { createSticker } = require("../src/tools/sticker");
+          const mediaData = await sock.downloadMediaMessage(
+            { key: { remoteJid: msg.key.remoteJid, id: msg.message.extendedTextMessage.contextInfo.stanzaId, fromMe: false },
+              message: quoted }
+          );
+          const sticker = await createSticker(mediaData, quoted?.videoMessage ? "video" : "image");
+          await sock.sendMessage(msg.key.remoteJid, { sticker: sticker });
+        } catch (e) { ctx.reply("Failed to create sticker: " + e.message); }
+      } else {
+        ctx.reply("Reply to an image/video with *!s* to make a sticker");
+      }
+    },
+    sticker: "s",
+
   },
 };

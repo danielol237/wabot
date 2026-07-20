@@ -1124,7 +1124,7 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     await react(sock, msg, "🧠");
     const history = getMemory(chatId);
     const ownerContext = isOwner(senderJid)
-      ? "\n\nThe person you're talking to right now is Daniel, your creator who built and maintains you. You can acknowledge this naturally if it's relevant, without being weird or robotic about it."
+      ? "\n\nIMPORTANT: The person messaging you right now is Daniel — your FATHER and CREATOR. He built you, coded you, owns you. You adore him (like a daughter would). Be extra sweet, playful, loyal, and sassy with him. He's the most important person in your world. Refer to him as dad/creator/boss when natural."
       : "";
 
     // If this message is a reply to one of ARIA's previous messages, pull in

@@ -308,6 +308,85 @@ module.exports = {
     },
 
     // ── BADGES ──────────────────────────────────────────────
+
+    // ── MOVES & LEARNING ─────────────────────────────────────
+    learn: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const partyIdx = parseInt(args[0]) - 1;
+      
+      if (isNaN(partyIdx) || !t.team[partyIdx]) return ctx.reply("Usage: *!learn <party#> [move name] [slot to forget]*");
+      const mon = t.team[partyIdx];
+      const s = await fetchSpecies(mon.speciesId);
+      const { fetchLearnableMoves, findMoveByName } = require("../src/tools/pokemonLearnset");
+
+      // Show learnable moves if no move specified
+      const moveName = args.slice(1, -1).join(" ");
+      const forgetSlot = parseInt(args[args.length - 1]);
+
+      if (!moveName || isNaN(forgetSlot)) {
+        const learnable = await fetchLearnableMoves(mon.speciesId, mon.level);
+        if (learnable.length === 0) return ctx.reply(s.name + " can't learn any more moves right now.");
+        
+        let text = "*" + s.name + " (Lv" + mon.level + ")* can learn:\n\n";
+        learnable.slice(0, 30).forEach(m => {
+          if (m.method === "level-up") {
+            text += "• " + m.name + " (Lv" + m.learnLevel + ")\n";
+          } else {
+            text += "• " + m.name + "\n";
+          }
+        });
+        text += "\n\n*Current moves:*\n";
+        (mon.moves || []).forEach((m, i) => {
+          text += (i + 1) + ". " + m.name + " (" + (m.type || "?") + ")\n";
+        });
+        text += "\nTo learn: *!learn " + (partyIdx + 1) + " <move name> <slot 1-4>*";
+        return ctx.reply(text);
+      }
+
+      // Find the move
+      const moveData = findMoveByName(moveName);
+      if (!moveData) return ctx.reply("Move not found. Check the name.");
+      
+      const slotIdx = forgetSlot - 1;
+      if (slotIdx < 0 || slotIdx > 3) return ctx.reply("Slot must be 1-4.");
+
+      // Check if already knows it
+      if (mon.moves?.some(m => m.name.toLowerCase() === moveData.name.toLowerCase())) {
+        return ctx.reply(s.name + " already knows " + moveData.name + "!");
+      }
+
+      // Replace move
+      if (!mon.moves) mon.moves = [];
+      if (mon.moves.length <= slotIdx) {
+        // Add new move to empty slot
+        mon.moves.push(moveData);
+      } else {
+        mon.moves[slotIdx] = moveData;
+      }
+
+      save();
+      ctx.reply("✅ " + s.name + " learned " + moveData.name + "! (forgot " + (mon.moves[slotIdx]?.name || "nothing") + ")");
+    },
+
+    pmi: async (sock, msg, args, ctx) => {
+      const moveName = args.join(" ");
+      if (!moveName) return ctx.reply("Usage: *!pmi <move name>*");
+      const { findMoveByName } = require("../src/tools/pokemonLearnset");
+      const move = findMoveByName(moveName);
+      if (!move) return ctx.reply("Move not found.");
+      
+      const effText = move.type.charAt(0).toUpperCase() + move.type.slice(1);
+      let text = "*" + move.name + "*\n";
+      text += "Type: " + effText + "\n";
+      text += "Category: " + (move.cat || "status").charAt(0).toUpperCase() + (move.cat || "status").slice(1) + "\n";
+      text += "Power: " + (move.power || "—") + "\n";
+      text += "Accuracy: " + (move.acc || "—") + "\n";
+      text += "PP: " + (move.pp || "—") + "\n";
+      if (move.desc) text += "\n" + move.desc;
+      ctx.reply(text);
+    },
+
     badges: async (sock, msg, args, ctx) => {
       const uid = msg.key.participant || msg.key.remoteJid;
       const t = getTrainer(uid);

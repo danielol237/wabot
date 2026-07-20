@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const { fetchSpecies, randomId, getEffectiveness, ITEMS } = require("./pokemonData");
+const { getMovesForTypes } = require("./pokemonMoves");
 
 const FILE = path.join(__dirname, "../../data/pokemon.json");
 let state = { trainers: {}, battles: {}, trades: {} };
@@ -67,11 +68,14 @@ function addXP(uid, amt) {
 }
 
 // ── Create Monster ──────────────────────────────────────────
-function createMonster(speciesId, level) {
-  return { uid: uid(), speciesId, level, xp: 0, nickname: "", hp: 0, maxHp: 0,
+async function createMonster(speciesId, level) {
+  const s = await fetchSpecies(speciesId);
+  const mon = { uid: uid(), speciesId, level, xp: 0, nickname: "", hp: 0, maxHp: 0,
     attack: 0, defense: 0, spAttack: 0, spDefense: 0, speed: 0,
     nature: NATURES[Math.floor(Math.random() * NATURES.length)],
-    friendship: 50, shiny: Math.random() < 0.01, evoStone: null, mega: false };
+    friendship: 50, shiny: Math.random() < 0.01, evoStone: null, mega: false,
+    moves: getMovesForTypes(s.types, level).slice(0, 4) };
+  return mon;
 }
 
 async function recalc(mon) {
@@ -142,20 +146,34 @@ async function battleAction(battleId, uid, action, data) {
   const dS = await fetchSpecies(def.speciesId);
 
   if (action === "attack") {
-    const atk = att.attack;
-    const defSt = def.defense;
-    const base = 50 + Math.floor(Math.random() * 30);
-    const stab = aS.types.includes(dS.types[0]) ? 1.5 : 1;
-    const typeEff = getEffectiveness(aS.types[0], dS.types);
-    const dmg = Math.max(1, Math.floor(((2 * att.level / 5 + 2) * base * atk / defSt) / 50 + 2) * stab * typeEff * (0.85 + Math.random() * 0.15));
+    // Use selected move or default to first move
+    const moveIdx = (data !== undefined) ? data : 0;
+    const move = att.moves?.[moveIdx] || { name: "Tackle", type: "normal", power: 40, cat: "physical" };
+    
+    const atkStat = move.cat === "physical" ? att.attack : att.spAttack;
+    const defStat = move.cat === "physical" ? def.defense : def.spDefense;
+    const basePower = move.power || 40;
+    const stab = aS.types.includes(move.type) ? 1.5 : 1;
+    const typeEff = getEffectiveness(move.type, dS.types);
+    
+    // Accuracy check
+    const acc = (move.acc || 100) / 100;
+    if (Math.random() > acc) {
+      b.turn = isU1 ? b.uid2 : b.uid1;
+      save();
+      return { success: true, result: { action: "miss", attName: aS.name, moveName: move.name, attSprite: aS.sprite } };
+    }
+    
+    const dmg = Math.max(1, Math.floor(((2 * att.level / 5 + 2) * basePower * atkStat / defStat) / 50 + 2) * stab * typeEff * (0.85 + Math.random() * 0.15));
     def.hp -= dmg;
+    
     const effText = typeEff > 1 ? "💥 Super effective!" : typeEff < 1 && typeEff > 0 ? "⚠️ Not very effective..." : typeEff === 0 ? "❌ No effect!" : "";
     const crit = Math.random() < 0.0625;
 
-    b.log.push({ action: "attack", attacker: isU1 ? 1 : 2, move: "Tackle", damage: dmg, crit });
+    b.log.push({ action: "attack", attacker: isU1 ? 1 : 2, move: move.name, damage: dmg, crit });
 
-    let result = { action: "attack", damage: dmg, effectiveness: typeEff, crit, attSprite: aS.sprite, defSprite: dS.sprite, attName: aS.name, defName: dS.name };
-    result.description = `${aS.name} used Tackle!${crit ? " 💥 Critical hit!" : ""}${effText ? " " + effText : ""} (${dmg} DMG)`;
+    let result = { action: "attack", moveName: move.name, damage: dmg, effectiveness: typeEff, crit, attSprite: aS.sprite, defSprite: dS.sprite, attName: aS.name, defName: dS.name, moveType: move.type };
+    result.description = `${aS.name} used ${move.name}!${crit ? " 💥 Critical hit!" : ""}${effText ? " " + effText : ""} (${dmg} DMG)`;
 
     if (def.hp <= 0) {
       result.fainted = dS.name;

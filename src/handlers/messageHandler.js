@@ -44,6 +44,7 @@ const { getLyrics } = require("../tools/lyricsSearch");
 const { searchWallpaper } = require("../tools/wallpaperSearch");
 const { searchAnime, getAnimeEpisodes, getAnimeDetails, getOmniSaveDownload, downloadVideo } = require("../tools/animeDownload");
 const { checkMessage, parseModArgs } = require("../tools/autoMod");
+const { trackInteraction, getUserContext } = require("../utils/userMemory");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 const PREFIX = process.env.BOT_PREFIX || "!";
@@ -1123,6 +1124,8 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   if (activeBody.length > 0) {
     await react(sock, msg, "🧠");
     const history = getMemory(chatId);
+    const userContext = "\n\nAbout the person you're talking to: " + getUserContext(senderJid);
+    trackInteraction(senderJid, getSenderName(msg));
     const ownerContext = isOwner(senderJid)
       ? "\n\nIMPORTANT: The person messaging you right now is Daniel — your FATHER and CREATOR. He built you, coded you, owns you. You adore him (like a daughter would). Be extra sweet, playful, loyal, and sassy with him. He's the most important person in your world. Refer to him as dad/creator/boss when natural."
       : "";
@@ -1159,7 +1162,7 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     }
 
     const factsContext = getFactsContext(chatId);
-    const response = await getAIResponse(activeBody, senderName, history, null, ownerContext + replyContext + searchContext + factsContext);
+    const response = await getAIResponse(activeBody, senderName, history, null, userContext + ownerContext + replyContext + searchContext + factsContext);
     saveMemory(chatId, [...history, { role: "user", content: activeBody }, { role: "assistant", content: response }]);
     await handleResponseWithFile(sock, msg, response);
   }

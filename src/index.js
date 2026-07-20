@@ -44,6 +44,23 @@ app.get("/", (req, res) => {
   res.send(`ARIA Bot — status: ${isReady ? "✅ connected" : "⏳ waiting for link"}`);
 });
 
+// Serve built projects for preview. Each project is stored in data/projects/{slug}/
+// and can be viewed at /preview/{slug}. Only serves static files for now —
+// dynamic previews (npm start) would need their own port.
+app.use("/preview", express.static(path.join(__dirname, "../data/projects")));
+
+app.get("/preview", (req, res) => {
+  const projectsDir = path.join(__dirname, "../data/projects");
+  if (!fs.existsSync(projectsDir)) return res.send("No projects built yet.");
+  const projects = fs.readdirSync(projectsDir).filter((f) => fs.statSync(path.join(projectsDir, f)).isDirectory());
+  if (projects.length === 0) return res.send("No projects built yet.");
+  let html = `<html><body style="background:#111;color:#fff;font-family:sans-serif;padding:40px;">
+    <h1>📁 ARIA Projects</h1><ul>`;
+  projects.forEach((p) => { html += `<li><a href="/preview/${p}/" style="color:#0f0;">${p}</a></li>`; });
+  html += "</ul></body></html>";
+  res.send(html);
+});
+
 app.get("/qr", (req, res) => {
   if (isReady) {
     return res.send(`<html><body style="background:#111;color:#0f0;font-family:sans-serif;text-align:center;padding-top:100px;">

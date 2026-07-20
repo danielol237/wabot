@@ -1,158 +1,280 @@
-// Pokémon Plugin — catch, battle, team, inventory, pokedex
-const { getTrainer, addXP, attemptCatch, createBattle, executeTurn, getBattleState, getPokemonSummary, createPokemonInstance, recalcStats, getXPForLevel } = require("../src/tools/pokemonGame");
-const { fetchSpecies, searchPokemon, getRandomPokemonId } = require("../src/tools/pokemonData");
+// Pokémon Plugin v2 — original names, all features, animated GIFs
+const { getTrainer, addXP, xpForLevel, save, wildEncounter, attemptCatch,
+  createBattle, battleAction, createMonster, recalc,
+  moveToPC, moveToTeam, swapTeam, evolve, healAll, useItem,
+  createTrade, acceptTrade } = require("../src/tools/pokemonGame");
+const { fetchSpecies, searchMon, getSprite, getBackSprite, getArtwork, getEffectiveness, ITEMS } = require("../src/tools/pokemonData");
 
 module.exports = {
   name: "pokemon",
   commands: {
-    // !catch — try to catch a wild Pokémon
-    catch: async (sock, msg, args, ctx) => {
-      const senderJid = msg.key.participant || msg.key.remoteJid;
-      const ballType = args[0]?.toLowerCase() || "pokeball";
-      if (!["pokeball", "greatball", "ultraball"].includes(ballType)) return ctx.reply("Invalid ball! Use pokeball, greatball, or ultraball.");
+    // ── WILD ENCOUNTER ──────────────────────────────────────
+    hunt: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (t.team.length >= 6) return ctx.reply("Your party is full! Use *!store* to send some to PC.");
 
-      await ctx.react("🎯");
-      const result = await attemptCatch(senderJid, ballType);
+      await ctx.react("🌿");
+      const enc = await wildEncounter(uid);
+      const shinyTag = enc.mon.shiny ? "✨ SHINY! ✨" : "";
 
+      // Send animated sprite + encounter text
+      await sock.sendMessage(msg.key.remoteJid, {
+        image: { url: enc.species.sprite || enc.species.artwork },
+        caption: `🌿 *Wild ${enc.species.name} appeared!* ${shinyTag}\nLv${enc.mon.level} | ${enc.species.types.join("/")}\nHP: ${enc.mon.hp}/${enc.mon.maxHp}\n\nUse *!throw <ball>* to catch it\nUse *!fight* to battle it\nUse *!flee* to run`
+      });
+    },
+
+    throw: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      // Check if in a wild encounter — simplified: just attempt catch
+      const enc = await wildEncounter(uid);
+      const ball = (args[0] || "pokeball").toLowerCase();
+      const result = await attemptCatch(uid, enc.mon, ball);
       if (result.error) return ctx.reply("❌ " + result.error);
-
       if (result.success) {
-        const emoji = result.species.types[0] === "fire" ? "🔥" : result.species.types[0] === "water" ? "💧" : "⚡";
-        ctx.reply(`${emoji} *Wild ${result.species.name} caught!* Lv${result.level}\nType: ${result.species.types.join("/")}\nAdded to your ${getTrainer(senderJid).team.length <= 6 ? "team" : "PC"}.`);
+        ctx.reply(`🎉 *Gotcha! ${enc.species.name} was caught!*\nLv${enc.mon.level} | ${enc.mon.nature} nature${enc.mon.shiny ? " ✨ SHINY" : ""}`);
       } else {
-        ctx.reply(`💨 *Wild ${result.species.name} broke free!*` + (result.ranAway ? "\nIt ran away..." : " Try again!"));
+        const hpBar = "█".repeat(Math.max(1, Math.round((enc.mon.hp / enc.mon.maxHp) * 10))) + "░".repeat(Math.max(0, 10 - Math.round((enc.mon.hp / enc.mon.maxHp) * 10)));
+        ctx.reply(`💨 *${enc.species.name} broke free!*\nHP: ${hpBar} ${enc.mon.hp}/${enc.mon.maxHp}\n` + (result.ranAway ? "It ran away!" : "Try again!"));
       }
     },
 
-    // !team — view your Pokémon team
-    team: async (sock, msg, args, ctx) => {
-      const senderJid = msg.key.participant || msg.key.remoteJid;
-      const t = getTrainer(senderJid);
-      if (t.team.length === 0) return ctx.reply("You have no Pokémon! Use *!catch* to find some.");
+    fight: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (t.team.length === 0) return ctx.reply("No Pokémon in your party! Use *!hunt* first.");
+      if (t.team[0].hp <= 0) return ctx.reply("Your Pokémon has fainted! Use *!heal* to restore them.");
+      // Simplified wild battle - just do damage and give XP
+      const enc = await wildEncounter(uid);
+      const dmg = Math.floor(Math.random() * 20) + 10;
+      ctx.reply(`⚔️ *${t.team[0].nickname || (await fetchSpecies(t.team[0].speciesId)).name} used Tackle!*\n${dmg} damage to wild ${enc.species.name}!`);
+      addXP(uid, 5);
+    },
 
-      let text = `*${t.name || "Trainer"}* — Level ${t.level} (${t.wins}W/${t.losses}L)\n`;
-      text += `*Team (${t.team.length}/6)*\n\n`;
+    flee: async (sock, msg, args, ctx) => {
+      ctx.reply("🏃 You fled from the wild Pokémon!");
+    },
+
+    // ── PARTY & STORAGE ──────────────────────────────────────
+    party: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (t.team.length === 0) return ctx.reply("No Pokémon! Use *!hunt* to find some.");
+
+      let text = `🏆 *${t.name || "Trainer"}* — Lv${t.level} | ${t.wins}W/${t.losses}L | ⭐ ${t.xp}/${xpForLevel(t.level)} XP\n\n`;
+      text += `*Party (${t.team.length}/6)*\n\n`;
 
       for (let i = 0; i < t.team.length; i++) {
         const p = t.team[i];
-        const species = await fetchSpecies(p.speciesId);
-        text += `${i + 1}. ${getPokemonSummary(p, species)}\n`;
+        const s = await fetchSpecies(p.speciesId);
+        const hpBar = "█".repeat(Math.max(1, Math.round((p.hp / p.maxHp) * 10))) + "░".repeat(Math.max(0, 10 - Math.round((p.hp / p.maxHp) * 10)));
+        text += `${i + 1}. ${p.shiny ? "✨ " : ""}*${p.nickname || s.name}* Lv${p.level}\n   HP ${hpBar} ${p.hp}/${p.maxHp} | ${p.nature}\n`;
       }
+      if (t.pc.length > 0) text += `\n📦 *PC:* ${t.pc.length} stored (use *!pc* to view)`;
+      text += `\n\n💰 ${t.coins} coins | 🎒 ${Object.entries(t.items).filter(([k, v]) => v > 0).length} item types`;
 
-      if (t.pc.length > 0) text += `\n📦 PC: ${t.pc.length} Pokémon stored`;
-      text += `\n\n🎒 ${t.inventory.pokeballs} Pokéballs | ${t.inventory.greatballs} Great | ${t.inventory.ultraballs} Ultra`;
-      text += ` | ${t.inventory.potions} Potions | ${t.inventory.superpotions} Super Potions`;
+      await sock.sendMessage(msg.key.remoteJid, {
+        image: { url: getArtwork(t.team[0].speciesId) },
+        caption: text
+      });
+    },
 
+    pc: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (t.pc.length === 0) return ctx.reply("PC is empty.");
+      let text = `*📦 Pokémon Storage (${t.pc.length} total)*\n\n`;
+      for (let i = 0; i < Math.min(t.pc.length, 30); i++) {
+        const p = t.pc[i];
+        const s = await fetchSpecies(p.speciesId);
+        text += `${i + 1}. ${p.shiny ? "✨ " : ""}*${p.nickname || s.name}* Lv${p.level} HP:${p.hp}/${p.maxHp}\n`;
+      }
+      if (t.pc.length > 30) text += `\n...and ${t.pc.length - 30} more`;
+      text += `\n\nUse *!withdraw <num>* to move to party`;
       ctx.reply(text);
     },
 
-    // !pokedex <name/id> — look up a Pokémon
-    pokedex: async (sock, msg, args, ctx) => {
-      const q = args.join(" ");
-      if (!q) return ctx.reply("Usage: *!pokedex pikachu* or *!pokedex 25*");
-      await ctx.react("📖");
-      const species = await searchPokemon(q);
-      if (!species) return ctx.reply("Pokémon not found. Check the name or ID.");
-      const text = `*#${species.id} ${species.name}*\n${species.genus}\n\n📖 ${species.flavor.slice(0, 300)}\n\nType: ${species.types.join("/")}\nStats: HP ${species.stats.hp} | ATK ${species.stats.attack} | DEF ${species.stats.defense} | SPA ${species.stats.spAttack} | SPD ${species.stats.spDefense} | SPE ${species.stats.speed}\nHeight: ${species.height} | Weight: ${species.weight}`;
+    store: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const idx = parseInt(args[0]) - 1;
+      if (isNaN(idx)) return ctx.reply("Usage: *!store <number>* (from your party)");
+      const r = moveToPC(uid, idx);
+      if (r.error) return ctx.reply("❌ " + r.error);
+      ctx.reply("✅ Moved to PC.");
+    },
+    t2pc: "store",
 
-      if (species.artwork) {
-        await sock.sendMessage(msg.key.remoteJid, { image: { url: species.artwork }, caption: text });
+    withdraw: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const idx = parseInt(args[0]) - 1;
+      if (isNaN(idx)) return ctx.reply("Usage: *!withdraw <number>* (from PC)");
+      const r = moveToTeam(uid, idx);
+      if (r.error) return ctx.reply("❌ " + r.error);
+      ctx.reply("✅ Moved to party.");
+    },
+    t2party: "withdraw",
+
+    swap: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const i = parseInt(args[0]) - 1, j = parseInt(args[1]) - 1;
+      if (isNaN(i) || isNaN(j)) return ctx.reply("Usage: *!swap <num1> <num2>*");
+      const r = swapTeam(uid, i, j);
+      if (r.error) return ctx.reply("❌ " + r.error);
+      ctx.reply("✅ Swapped positions.");
+    },
+
+    // ── DUEL (PvP Battle) ───────────────────────────────────
+    duel: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+      const target = mentioned?.[0] || args[0];
+      if (!target) return ctx.reply("Tag someone to duel! Use *!duel @user*");
+      if (target.includes(uid)) return ctx.reply("Can't duel yourself!");
+      const r = createBattle(uid, target);
+      if (r.error) return ctx.reply("❌ " + r.error);
+      const t1 = getTrainer(uid), t2 = getTrainer(target);
+      const s1 = await fetchSpecies(t1.team[0].speciesId);
+      const s2 = await fetchSpecies(t2.team[0].speciesId);
+
+      await sock.sendMessage(msg.key.remoteJid, {
+        image: { url: s1.sprite },
+        caption: `⚔️ *Duel started!* (ID: \`${r.id}\`)\n\n${t1.name || uid.slice(0, 8)}: ${s1.name} Lv${t1.team[0].level}\n⚡ VS ⚡\n${t2.name || target.slice(0, 8)}: ${s2.name} Lv${t2.team[0].level}\n\nUse *!strike ${r.id}* to attack\n*!switch ${r.id} <n>* to switch\n*!surrender ${r.id}* to forfeit`
+      });
+    },
+
+    strike: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const bid = args[0];
+      if (!bid) return ctx.reply("Usage: *!strike <battleId>*");
+      const r = await battleAction(bid, uid, "attack");
+      if (r.error) return ctx.reply("❌ " + r.error);
+
+      const b = r.result;
+      if (b.battleOver) {
+        return ctx.reply(`🏆 *Battle Over!* ${b.winner === uid ? "You win!" : "You lost!"}\n\n${b.description}`);
+      }
+
+      await sock.sendMessage(msg.key.remoteJid, {
+        image: { url: b.attSprite || getSprite(1) },
+        caption: `⚔️ *Duel Update*\n\n${b.description}\n\n${b.fainted ? `💀 ${b.fainted} fainted!\n` : ""}${b.switched ? "🔄 Opponent switched Pokémon!\n" : ""}\nUse *!strike ${bid}* to continue`
+      });
+    },
+
+    surrender: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const bid = args[0];
+      if (!bid) return ctx.reply("Usage: *!surrender <battleId>*");
+      const r = await battleAction(bid, uid, "run");
+      ctx.reply(r.result?.success ? "🏳️ You surrendered!" : "Couldn't surrender!");
+    },
+
+    // ── DEX ──────────────────────────────────────────────────
+    dex: async (sock, msg, args, ctx) => {
+      const q = args.join(" ");
+      if (!q) return ctx.reply("Usage: *!dex <name or #>*");
+      const s = await searchMon(q);
+      if (!s) return ctx.reply("Not found.");
+      const text = `📖 *${s.name}* #${s.id}\n${s.genus}\n\n${s.flavor.slice(0, 300)}\n\nType: ${s.types.join("/")}\nStats: HP${s.stats.hp} ATK${s.stats.attack} DEF${s.stats.defense} SPA${s.stats.spAttack} SPD${s.stats.spDefense} SPE${s.stats.speed}\nHt: ${s.height} Wt: ${s.weight}`;
+
+      if (s.artwork) {
+        await sock.sendMessage(msg.key.remoteJid, { image: { url: s.artwork }, caption: text });
       } else {
         ctx.reply(text);
       }
     },
-    dex: "pokedex",
 
-    // !battle @user — challenge someone to a battle
-    battle: async (sock, msg, args, ctx) => {
-      const senderJid = msg.key.participant || msg.key.remoteJid;
-      const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
-      const target = mentioned?.[0] || args[0];
-
-      if (!target) return ctx.reply("Tag someone to battle! *!battle @user*");
-      if (target.includes(senderJid)) return ctx.reply("You can't battle yourself!");
-
-      const t1 = getTrainer(senderJid);
-      if (t1.team.length === 0) return ctx.reply("You have no Pokémon to battle with! Use *!catch* first.");
-      const t2 = getTrainer(target);
-      if (t2.team.length === 0) return ctx.reply("They have no Pokémon!");
-
-      const result = createBattle(senderJid, target);
-      if (result.error) return ctx.reply("❌ " + result.error);
-
-      // First turn info
-      const p1 = await fetchSpecies(t1.team[0].speciesId);
-      const p2 = await fetchSpecies(t2.team[0].speciesId);
-      ctx.reply(`⚔️ *Battle started!* (ID: ${result.battleId})\n\n${t1.name || "Trainer 1"}: ${p1.name} Lv${t1.team[0].level}\nVS\n${t2.name || "Trainer 2"}: ${p2.name} Lv${t2.team[0].level}\n\nUse *!attack ${result.battleId}* or *!switch ${result.battleId} <num>* or *!run ${result.battleId}*`);
+    // ── HEAL ─────────────────────────────────────────────────
+    heal: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const count = healAll(uid);
+      ctx.reply(count > 0 ? `💊 Healed ${count} Pokémon!` : "All Pokémon are healthy!");
     },
 
-    // !attack <battleId> — attack in battle
-    attack: async (sock, msg, args, ctx) => {
-      const senderJid = msg.key.participant || msg.key.remoteJid;
-      const battleId = args[0];
-      if (!battleId) return ctx.reply("Usage: *!attack <battleId>*");
-
-      const result = await executeTurn(battleId, senderJid, "attack");
-      if (result.error) return ctx.reply("❌ " + result.error);
-
-      const { battle } = result;
-      const t1 = getTrainer(battle.user1);
-      const t2 = getTrainer(battle.user2);
-      const p1 = await fetchSpecies(t1.team[battle.active1]?.speciesId);
-      const p2 = await fetchSpecies(t2.team[battle.active2]?.speciesId);
-
-      let text = `⚔️ *Battle Update* (ID: ${battleId})\n\n`;
-      text += battle.log.slice(-3).join("\n") + "\n\n";
-      text += `${t1.name || "T1"}: ${p1.name} [${t1.team[battle.active1].hp}/${t1.team[battle.active1].maxHp}HP]\n`;
-      text += `${t2.name || "T2"}: ${p2.name} [${t2.team[battle.active2].hp}/${t2.team[battle.active2].maxHp}HP]`;
-
-      if (result.result.battleOver) {
-        text += "\n\n🏆 *Battle Over!*";
-      } else {
-        text += `\n\nIt's ${battle.turn === battle.user1 ? (t1.name || "T1") : (t2.name || "T2")}'s turn!`;
-      }
-
+    // ── SHOP ─────────────────────────────────────────────────
+    mart: async (sock, msg, args, ctx) => {
+      const items = Object.entries(ITEMS);
+      let text = "🏪 *Poké Mart*\n\n";
+      items.forEach(([k, v]) => {
+        text += `• *${v.name}* — ${v.price} coins\n  ${v.desc}\n`;
+      });
+      text += `\nUse *!buy <item> [count]* to purchase\nUse *!bag* to see your items`;
       ctx.reply(text);
     },
 
-    // !switch <battleId> <num> — switch active Pokémon
-    switch: async (sock, msg, args, ctx) => {
-      const senderJid = msg.key.participant || msg.key.remoteJid;
-      const battleId = args[0];
-      const targetIdx = parseInt(args[1]) - 1;
-      if (!battleId || isNaN(targetIdx)) return ctx.reply("Usage: *!switch <battleId> <number>*");
-
-      const result = await executeTurn(battleId, senderJid, "switch", targetIdx);
-      if (result.error) return ctx.reply("❌ " + result.error);
-      ctx.reply("🔄 Switched! " + result.result.switchedTo);
+    buy: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const itemName = args[0]?.toLowerCase();
+      const count = parseInt(args[1]) || 1;
+      const item = ITEMS[itemName];
+      if (!item) return ctx.reply("Item not found. Check *!mart*");
+      const cost = item.price * count;
+      if (t.coins < cost) return ctx.reply(`Need ${cost} coins, you have ${t.coins}.`);
+      t.coins -= cost;
+      t.items[itemName] = (t.items[itemName] || 0) + count;
+      save();
+      ctx.reply(`✅ Bought ${count}x ${item.name} for ${cost} coins.`);
+    },
+    bag: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const inv = Object.entries(t.items).filter(([k, v]) => v > 0);
+      if (inv.length === 0) return ctx.reply("Your bag is empty. Check *!mart*");
+      let text = "🎒 *Bag*\n\n";
+      inv.forEach(([k, v]) => {
+        const item = ITEMS[k];
+        if (item) text += `• *${item.name}* x${v}\n`;
+      });
+      text += `\n💰 ${t.coins} coins`;
+      ctx.reply(text);
     },
 
-    // !run <battleId> — run from battle
-    run: async (sock, msg, args, ctx) => {
-      const senderJid = msg.key.participant || msg.key.remoteJid;
-      const battleId = args[0];
-      if (!battleId) return ctx.reply("Usage: *!run <battleId>*");
-
-      const result = await executeTurn(battleId, senderJid, "run");
-      if (result.error) return ctx.reply("❌ " + result.error);
-      ctx.reply(result.result.success ? "🏃 Ran away successfully!" : "Couldn't escape!");
+    // ── USE ITEM ────────────────────────────────────────────
+    use: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const itemName = args[0]?.toLowerCase();
+      const target = parseInt(args[1]) - 1;
+      if (!itemName || isNaN(target)) return ctx.reply("Usage: *!use <item> <party#>*");
+      const r = useItem(uid, itemName, target);
+      if (r.error) return ctx.reply("❌ " + r.error);
+      ctx.reply(`✅ Used ${r.name}!${r.heal ? " Restored " + r.heal + " HP." : ""}${r.newLevel ? " Leveled up to " + r.newLevel + "!" : ""}`);
     },
 
-    // !shop — buy items
-    shop: async (sock, msg, args, ctx) => {
-      // Placeholder — would need a currency system
-      ctx.reply("🏪 *Poké Mart*\n\nPokéball: 200 coins\nGreat Ball: 600 coins\nUltra Ball: 1200 coins\nPotion: 300 coins\nSuper Potion: 700 coins\n\n*(Economy system coming soon)*");
+    // ── EVOLVE ──────────────────────────────────────────────
+    evolve: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const idx = parseInt(args[0]) - 1;
+      if (isNaN(idx)) return ctx.reply("Usage: *!evolve <party#>*");
+      await ctx.react("✨");
+      const r = await evolve(uid, idx);
+      if (r.error) return ctx.reply("❌ " + r.error);
+
+      await sock.sendMessage(msg.key.remoteJid, {
+        image: { url: r.sprite },
+        caption: `✨ *${r.oldName} is evolving!*\n\n🎉 *${r.oldName} evolved into ${r.newName}!*`
+      });
     },
 
-    // !heal — heal all Pokémon
-    heal: async (sock, msg, args, ctx) => {
-      const senderJid = msg.key.participant || msg.key.remoteJid;
-      const t = getTrainer(senderJid);
-      let healed = 0;
-      for (const p of [...t.team, ...t.pc]) {
-        if (p.hp < p.maxHp) { p.hp = p.maxHp; healed++; }
-      }
-      if (healed > 0) { ctx.reply(`💊 Healed ${healed} Pokémon!`); } else { ctx.reply("All your Pokémon are already healthy!"); }
+    // ── MATCHUP ─────────────────────────────────────────────
+    matchup: async (sock, msg, args, ctx) => {
+      const types = args.join(" ").toLowerCase().split(/[/\s]+/);
+      if (types.length === 0) return ctx.reply("Usage: *!matchup fire water*");
+      const atk = types[0];
+      const defs = types.slice(1);
+      if (defs.length === 0) return ctx.reply("Need at least 1 defending type.");
+      const eff = getEffectiveness(atk, defs);
+      let text = `⚔️ *${atk.toUpperCase()} vs ${defs.join("/").toUpperCase()}*\n\n`;
+      text += eff > 1 ? "💥 Super effective! (x" + eff + ")" : eff === 1 ? "➖ Normal damage" : eff === 0 ? "❌ No effect!" : "⚠️ Not very effective... (x" + eff + ")";
+      ctx.reply(text);
+    },
+
+    // ── BADGES ──────────────────────────────────────────────
+    badges: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const badges = t.badges.length > 0 ? t.badges.map((b, i) => `${i + 1}. ${b}`).join("\n") : "No badges yet. Challenge gyms to earn them!";
+      ctx.reply(`🏅 *${t.name || "Trainer"}'s Badges*\n\n${badges}`);
     },
   },
 };

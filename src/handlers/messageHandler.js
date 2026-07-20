@@ -848,6 +848,81 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     return;
   }
 
+  // ── TIKTOK ───────────────────────────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}tiktok`)) {
+    const args = activeBody.split(" ");
+    const sub = args[1]?.toLowerCase();
+
+    // !tiktok <url> — download a TikTok video
+    if (args[1] && args[1].includes("tiktok.com")) {
+      await react(sock, msg, "⬇️");
+      await reply(sock, msg, "⬇️ Downloading TikTok...");
+      const { v4: uuidv4 } = require("uuid");
+      const id = uuidv4();
+      const outputPath = path.join(__dirname, "../../temp", `${id}.%(ext)s`);
+      const { exec } = require("child_process");
+      exec(`yt-dlp -f "best[filesize<50M]/best" --max-filesize 50M -o "${outputPath}" "${args[1]}"`, { timeout: 120000 }, async (err, stdout, stderr) => {
+        try {
+          const files = require("fs").readdirSync(path.join(__dirname, "../../temp")).filter((f) => f.startsWith(id));
+          if (files.length === 0) return reply(sock, msg, "❌ Download failed.");
+          const fp = path.join(__dirname, "../../temp", files[0]);
+          const buffer = require("fs").readFileSync(fp);
+          await sock.sendMessage(chatId, { video: buffer, caption: "📱 TikTok downloaded" });
+          try { require("fs").unlinkSync(fp); } catch (_) {}
+        } catch (e) {
+          reply(sock, msg, `❌ ${e.message}`);
+        }
+      });
+      return;
+    }
+
+    // !tiktok search <query> — search TikTok videos
+    if (sub === "search" && args.slice(2).join(" ")) {
+      await react(sock, msg, "🔍");
+      const query = args.slice(2).join(" ");
+      // Use web search to find TikTok videos
+      const { searchWeb } = require("../tools/webSearch");
+      const results = await searchWeb(\`site:tiktok.com \${query}\`);
+      const urls = results.match(/https?:\/\/(?:www\.)?tiktok\.com\/[^\s"']+/g) || [];
+      const unique = [...new Set(urls)].slice(0, 5);
+      if (unique.length === 0) return reply(sock, msg, "❌ No TikTok videos found.");
+      let text = `*📱 TikTok Results for "${query}"*\n\n`;
+      unique.forEach((u, i) => { text += \`\${i + 1}. \${u}\n\`; });
+      text += \`\nSend \\`\${PREFIX}tiktok <url>\\` to download one.\`;
+      return reply(sock, msg, text);
+    }
+
+    return reply(sock, msg, \`Usage:\n\\`\${PREFIX}tiktok <url>\\` — Download TikTok video\n\\`\${PREFIX}tiktok search <query>\\` — Search TikTok\`);
+  }
+
+  // ── MUSIC DOWNLOAD ─────────────────────────────────────────────
+  if (activeLower.startsWith(\`\${PREFIX}music\`) || activeLower.startsWith(\`\${PREFIX}song\`)) {
+    const query = activeBody.split(" ").slice(1).join(" ");
+    if (!query) return reply(sock, msg, \`Usage: \\`\${PREFIX}music <song name>\\` to search and download\`);
+    await react(sock, msg, "🎵");
+    await reply(sock, msg, \`🔍 Searching for "\${query}"...\`);
+
+    const { v4: uuidv4 } = require("uuid");
+    const id = uuidv4();
+    const outputPath = path.join(__dirname, "../../temp", \`\${id}.%(ext)s\`);
+    const { exec } = require("child_process");
+
+    // Use yt-dlp to search YouTube and download best audio
+    exec(\`yt-dlp -f "bestaudio[filesize<20M]/bestaudio" --max-filesize 20M --extract-audio --audio-format mp3 -o "\${outputPath}" "ytsearch1:\${query}"\`, { timeout: 120000 }, async (err, stdout, stderr) => {
+      try {
+        const files = require("fs").readdirSync(path.join(__dirname, "../../temp")).filter((f) => f.startsWith(id));
+        if (files.length === 0) return reply(sock, msg, "❌ Couldn't find or download that song.");
+        const fp = path.join(__dirname, "../../temp", files[0]);
+        const buffer = require("fs").readFileSync(fp);
+        await sock.sendMessage(chatId, { audio: buffer, mimetype: "audio/mp4", fileName: files[0], caption: \`🎵 \${query}\` });
+        try { require("fs").unlinkSync(fp); } catch (_) {}
+      } catch (e) {
+        reply(sock, msg, \`❌ \${e.message}\`);
+      }
+    });
+    return;
+  }
+
   // ── SCHEDULED MESSAGES ──────────────────────────────────────────
   if (activeLower.startsWith(`${PREFIX}schedule`)) {
     // !schedule "message" at <time>

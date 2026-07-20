@@ -577,5 +577,53 @@ module.exports = {
       return ctx.reply("Usage:\n*!monitor crypto bitcoin* — watch BTC price\n*!monitor list* — list active\n*!monitor stop <id>* — stop");
     },
 
+
+    // ── GITHUB INTEGRATION ──────────────────────────────────
+    github: async (sock, msg, args, ctx) => {
+      const sub = args[0]?.toLowerCase();
+      const { repoInfo, listPRs, listCommits, runGit } = require("../src/tools/gitIntegration");
+
+      if (sub === "repo" && args[1]) {
+        const parts = args[1].split("/");
+        const owner = parts[0], repo = parts[1] || "wabot";
+        const info = await repoInfo(owner, repo);
+        if (info.error) return ctx.reply("Error: " + info.error);
+        return ctx.reply(`📦 *${info.name}*\n${info.desc}\n⭐ ${info.stars} | 🍴 ${info.forks} | 🐛 ${info.issues}\n🔗 ${info.url}`);
+      }
+
+      if (sub === "prs" && args[1]) {
+        const parts = args[1].split("/");
+        const prs = await listPRs(parts[0], parts[1] || "wabot");
+        if (prs.length === 0) return ctx.reply("No open PRs.");
+        let t = "*📋 Open PRs*\n\n";
+        prs.forEach(pr => { t += `#${pr.number} ${pr.title} by @${pr.user}\n`; });
+        return ctx.reply(t);
+      }
+
+      if (sub === "commits" && args[1]) {
+        const parts = args[1].split("/");
+        const commits = await listCommits(parts[0], parts[1] || "wabot");
+        if (commits.length === 0) return ctx.reply("No commits.");
+        let t = "*📝 Recent Commits*\n\n";
+        commits.forEach(c => { t += `📄 ${c.message}\n   ${c.author} • ${c.date}\n`; });
+        return ctx.reply(t);
+      }
+
+      if (sub === "commit") {
+        if (!args.slice(1).join(" ")) return ctx.reply("Usage: *!github commit <message>*");
+        const r = await runGit('add -A && git commit -m "' + args.slice(1).join(" ") + '"');
+        if (r.error) return ctx.reply("❌ " + r.error);
+        return ctx.reply("✅ " + r.output);
+      }
+
+      if (sub === "push") {
+        const r = await runGit("push origin HEAD");
+        if (r.error) return ctx.reply("❌ " + r.error);
+        return ctx.reply("✅ " + r.output);
+      }
+
+      return ctx.reply("Usage:\n*!github repo <name>* — repo info\n*!github prs <name>* — open PRs\n*!github commits <name>* — recent commits\n*!github commit <msg>* — commit locally\n*!github push* — push to GitHub");
+    },
+
   },
 };

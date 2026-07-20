@@ -148,6 +148,14 @@ async function startBot() {
       lastError = null;
       startTaskPoller(sock);
 
+      // Start autonomous mode — ARIA sends proactive messages
+      try {
+        const { init } = require("./tools/autonomous");
+        init(sock);
+      } catch (e) {
+        console.error("Autonomous init error:", e.message);
+      }
+
       // Request pairing code once the connection is open and if not yet registered
       if (USE_PAIRING_CODE && !sock.authState.creds.registered && !pairingCodeRequested) {
         pairingCodeRequested = true;

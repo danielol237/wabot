@@ -625,5 +625,55 @@ module.exports = {
       return ctx.reply("Usage:\n*!github repo <name>* — repo info\n*!github prs <name>* — open PRs\n*!github commits <name>* — recent commits\n*!github commit <msg>* — commit locally\n*!github push* — push to GitHub");
     },
 
+
+    // ── EXPANDED ANIME ──────────────────────────────────────
+    trending: async (sock, msg, args, ctx) => {
+      const { getTrending } = require("../src/tools/animeExpanded");
+      const list = await getTrending();
+      if (list.length === 0) return ctx.reply("Couldn't fetch trending.");
+      let t = "*🔥 Trending Anime*\n\n";
+      list.slice(0, 8).forEach((a, i) => { t += `${i+1}. *${a.title}* ⭐${a.score}\n`; });
+      ctx.reply(t);
+    },
+    airing: async (sock, msg, args, ctx) => {
+      const { getAiring } = require("../src/tools/animeExpanded");
+      const list = await getAiring();
+      if (list.length === 0) return ctx.reply("Couldn't fetch airing.");
+      let t = "*📺 Currently Airing*\n\n";
+      list.slice(0, 8).forEach((a, i) => { t += `${i+1}. *${a.title}* ⭐${a.score} (${a.episodes} eps)\n`; });
+      ctx.reply(t);
+    },
+    arandom: async (sock, msg, args, ctx) => {
+      const { getRandom } = require("../src/tools/animeExpanded");
+      const a = await getRandom();
+      if (!a) return ctx.reply("Couldn't fetch.");
+      ctx.reply(`🎲 *${a.title}*\n${a.synopsis}\n⭐ ${a.score} | ${a.type} | ${a.status}`);
+    },
+    character: async (sock, msg, args, ctx) => {
+      const q = args.join(" ");
+      if (!q) return ctx.reply("Usage: *!character <name>*");
+      const { searchCharacter } = require("../src/tools/animeExpanded");
+      const list = await searchCharacter(q);
+      if (list.length === 0) return ctx.reply("No characters found.");
+      let t = "*🎭 Characters*\n\n";
+      list.slice(0, 5).forEach(c => {
+        t += `*${c.name}*\n`;
+        if (c.anime.length > 0) t += `Anime: ${c.anime.join(", ")}\n`;
+        t += "\n";
+      });
+      ctx.reply(t);
+    },
+    schedule: async (sock, msg, args, ctx) => {
+      const day = (args[0] || "").toLowerCase();
+      const days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+      if (!days.includes(day)) return ctx.reply("Usage: *!schedule monday* (monday-sunday)");
+      const { getSchedule } = require("../src/tools/animeExpanded");
+      const list = await getSchedule(day);
+      if (list.length === 0) return ctx.reply("No anime scheduled for " + day);
+      let t = `*📅 ${day.charAt(0).toUpperCase() + day.slice(1)} Schedule*\n\n`;
+      list.slice(0, 10).forEach(a => { t += `• *${a.title}* — ${a.time} ⭐${a.score}\n`; });
+      ctx.reply(t);
+    },
+
   },
 };

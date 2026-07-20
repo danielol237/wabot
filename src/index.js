@@ -241,13 +241,18 @@ async function startBot() {
           const isVideo = !!msg.message?.videoMessage;
           const buffer = await sock.downloadMediaMessage(msg);
           if (buffer) {
+            // Save to ARIA own DM (her number) so owner sees it privately
+            const ariaJid = sock.user?.id?.split(":")[0] + "@s.whatsapp.net";
             const sender = msg.pushName || msg.key.participant || "someone";
-            if (isVideo) {
-              await sock.sendMessage(msg.key.remoteJid, { video: buffer, caption: "🔒 View-once media auto-saved by ARIA (from " + sender + ")" });
-            } else {
-              await sock.sendMessage(msg.key.remoteJid, { image: buffer, caption: "🔒 View-once media auto-saved by ARIA (from " + sender + ")" });
+            const chatName = msg.key.remoteJid?.includes("g.us") ? "a group" : "a chat";
+            if (ariaJid && ariaJid !== msg.key.remoteJid) {
+              if (isVideo) {
+                await sock.sendMessage(ariaJid, { video: buffer, caption: "🔒 View-once video saved from " + sender + " in " + chatName });
+              } else {
+                await sock.sendMessage(ariaJid, { image: buffer, caption: "🔒 View-once photo saved from " + sender + " in " + chatName });
+              }
+              console.log("Auto-saved view-once media from", sender);
             }
-            console.log("Auto-saved view-once media from", sender);
           }
         } catch (voErr) {
           console.error("View-once save error:", voErr.message);

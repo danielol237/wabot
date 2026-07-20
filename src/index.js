@@ -166,6 +166,10 @@ async function startBot() {
       lastError = null;
       startTaskPoller(sock); // safe to call again on reconnect — it clears any previous interval first
 
+      // Pass socket to scheduler so scheduled messages can send
+      const { setSock } = require("./tools/scheduler");
+      setSock(sock);
+
       // Heartbeat — ping WhatsApp every 30s to detect silent disconnects.
       // Baileys can drop the socket without emitting a "close" event on some network
       // conditions (NAT timeout, mobile data flips). A periodic ping forces an actual

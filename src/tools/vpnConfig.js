@@ -131,16 +131,29 @@ Custom Headers:
 // Test connectivity to a host
 async function testHost(host, port) {
   return new Promise((resolve) => {
-    // Quick TCP connectivity test
+    // Try TCP connection first
     exec(`timeout 5 bash -c "echo > /dev/tcp/${host}/${port}" 2>&1`, { timeout: 8000 }, (err, stdout, stderr) => {
       if (err) {
-        // Try ICMP ping
         exec(`timeout 3 ping -c 1 -W 3 ${host} 2>&1`, { timeout: 6000 }, (err2, stdout2) => {
-          if (err2) resolve({ reachable: false, method: "tcp+ping", error: err2.message });
-          else resolve({ reachable: true, method: "ping", rtt: stdout2 });
+          if (err2) resolve({ reachable: false, error: "Host unreachable" });
+          else resolve({ reachable: true, method: "ping" });
         });
       } else {
-        resolve({ reachable: true, method: "tcp", port: `${host}:${port}` });
+        resolve({ reachable: true, method: "tcp" });
+      }
+    });
+  });
+}
+
+// Active test: try to connect through a proxy and check if data flows
+async function activeTest(host, port, testUrl = "http://connectivitycheck.gstatic.com/generate_204") {
+  return new Promise((resolve) => {
+    // Try curl through a proxy to test real connectivity
+    exec(`timeout 10 curl -s -o /dev/null -w "%{http_code}" --proxy http://${host}:${port} "${testUrl}" 2>&1`, { timeout: 15000 }, (err, stdout) => {
+      if (err || !stdout) {
+        resolve({ working: false, error: "Proxy test failed" });
+      } else {
+        resolve({ working: true, httpCode: stdout.trim(), note: "Proxy responded. Test on actual MTN network to confirm zero-rating." });
       }
     });
   });
@@ -193,4 +206,4 @@ async function generateVPNConfig(carrier, method = "openvpn") {
   };
 }
 
-module.exports = { generateVPNConfig, searchExploits, testHost, CARRIER_CONFIGS };
+module.exports = { generateVPNConfig, searchExploits, testHost, activeTest, CARRIER_CONFIGS };

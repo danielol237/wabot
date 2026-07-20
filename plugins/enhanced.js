@@ -361,7 +361,7 @@ module.exports = {
       await ctx.react("🔍");
       await ctx.reply("Searching for " + carrier.toUpperCase() + " exploits and generating config...");
 
-      const { generateVPNConfig } = require("../src/tools/vpnConfig");
+      const { generateVPNConfig, activeTest } = require("../src/tools/vpnConfig");
       const result = await generateVPNConfig(carrier, method);
 
       if (result.error) return ctx.reply("Error: " + result.error);
@@ -370,7 +370,13 @@ module.exports = {
       vpnMsg += "Host: " + result.host + ":" + result.port + "\n";
       vpnMsg += "Method: " + method + "\n";
       vpnMsg += "Status: " + (result.connectivity.reachable ? "Host reachable ✅" : "Host unreachable ⚠️") + "\n\n";
-      vpnMsg += result.warning;
+
+      // Active test
+      await ctx.reply("Testing proxy connectivity...");
+      const testResult = await activeTest(result.host, result.port);
+      vpnMsg += "Proxy test: " + (testResult.working ? "Working ✅ (HTTP " + testResult.httpCode + ")" : "Failed ❌") + "\n";
+      if (testResult.note) vpnMsg += testResult.note + "\n";
+      vpnMsg += "\n" + result.warning;
 
       await sock.sendMessage(msg.key.remoteJid, { text: vpnMsg });
 

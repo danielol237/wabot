@@ -471,6 +471,89 @@ module.exports = {
       ctx.reply(text);
     },
 
+
+    // ── GYM CHALLENGE ────────────────────────────────────────
+    gym: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+
+      // Custom gym roster - original names/types
+      const GYMS = [
+        { id: 1, name: "Verdant Grove", type: "grass", leader: "Sylvia", levelCap: 12, badge: "Leaf Badge" },
+        { id: 2, name: "Cinder Forge", type: "fire", leader: "Blaze", levelCap: 16, badge: "Ember Badge" },
+        { id: 3, name: "Storm Peak", type: "electric", leader: "Volt", levelCap: 20, badge: "Bolt Badge" },
+        { id: 4, name: "Abyss Depths", type: "water", leader: "Marina", levelCap: 25, badge: "Tide Badge" },
+        { id: 5, name: "Iron Bastion", type: "steel", leader: "Ferrum", levelCap: 30, badge: "Alloy Badge" },
+        { id: 6, name: "Shadow Vale", type: "ghost", leader: "Wraith", levelCap: 35, badge: "Phantom Badge" },
+        { id: 7, name: "Crystal Spire", type: "psychic", leader: "Lumina", levelCap: 40, badge: "Mind Badge" },
+        { id: 8, name: "Frost Cavern", type: "ice", leader: "Glaciel", levelCap: 45, badge: "Permafrost Badge" },
+        { id: 9, name: "Dragon's Nest", type: "dragon", leader: "Drake", levelCap: 50, badge: "Wyrm Badge" },
+      ];
+
+      const gymNum = parseInt(args[0]);
+
+      // Show gym list if no number given
+      if (!gymNum || isNaN(gymNum)) {
+        let text = "🏟️ *Pokémon Gyms*\n\n";
+        text += "Defeat all 9 gyms to become Champion!\n\n";
+        GYMS.forEach((g) => {
+          const completed = t.badges?.includes(g.badge);
+          const unlocked = t.badges ? g.id <= t.badges.length + 1 : g.id === 1;
+          const status = completed ? "✅ Completed" : (unlocked ? "🆕 Available" : "🔒 Locked");
+          text += (completed ? "✅" : unlocked ? "🆕" : "🔒") + " " + g.id + ". *" + g.name + "*\n";
+          text += "   Leader: " + g.leader + " (" + g.type + ") | Cap: Lv" + g.levelCap + "\n";
+          text += "   Status: " + status + "\n\n";
+        });
+        text += "Use *!gym <number>* to challenge!";
+        return ctx.reply(text);
+      }
+
+      // Challenge a gym
+      const gym = GYMS.find(g => g.id === gymNum);
+      if (!gym) return ctx.reply("Invalid gym. Use *!gyms* to see all.");
+
+      // Check if already completed
+      if (t.badges?.includes(gym.badge)) return ctx.reply("You already defeated " + gym.name + " Gym!");
+
+      // Check if unlocked
+      const prevCompleted = t.badges ? t.badges.length : 0;
+      if (gym.id > prevCompleted + 1) return ctx.reply("Complete the previous gym first!");
+
+      // Check team
+      if (t.team.length === 0) return ctx.reply("You need Pokémon to challenge a gym!");
+
+      // Check level cap
+      const overleveled = t.team.some(p => p.level > gym.levelCap);
+      if (overleveled) return ctx.reply("Your Pokémon are too high level! Max allowed: Lv" + gym.levelCap);
+
+      // Battle simulation - simplified gym fight
+      await ctx.react("⚔️");
+      ctx.reply("⚔️ *Challenge issued!*\n\n" + t.name + " vs " + gym.leader + " (" + gym.name + " Gym)\n\nCalculating battle...");
+
+      // Simple win calculation based on team strength vs gym
+      const teamPower = t.team.reduce((sum, p) => sum + p.level, 0);
+      const gymPower = gym.levelCap * 3 * (1 + gym.id * 0.1);
+      const winChance = Math.min(0.95, teamPower / gymPower * 0.8 + 0.1);
+      const won = Math.random() < winChance;
+
+      if (won) {
+        if (!t.badges) t.badges = [];
+        t.badges.push(gym.badge);
+        const xpReward = 30 + gym.id * 10;
+        addXP(uid, xpReward);
+        save();
+
+        await sock.sendMessage(msg.key.remoteJid, {
+          image: { url: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/showdown/" + t.team[0].speciesId + ".gif" },
+          caption: "🏆 *Victory!*\n\nYou defeated " + gym.leader + " and earned the *" + gym.badge + "*!\n⭐ +" + xpReward + " XP\n\n" + (gym.id < GYMS.length ? "Next: *" + GYMS[gym.id].name + " Gym*" : "🎉 *You've conquered all gyms! You're the Champion!*")
+        });
+      } else {
+        ctx.reply("💔 *Defeated!*\n\n" + gym.leader + " was too strong. Train your Pokémon and try again!");
+      }
+    },
+    gyms: "gym",
+
+    // ── BADGES ──────────────────────────────────────────────
     badges: async (sock, msg, args, ctx) => {
       const uid = msg.key.participant || msg.key.remoteJid;
       const t = getTrainer(uid);

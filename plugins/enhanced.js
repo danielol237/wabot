@@ -348,5 +348,45 @@ module.exports = {
     },
     sticker: "s",
 
+
+    // ── VPN CONFIG GENERATOR ─────────────────────────────────
+    vpn: async (sock, msg, args, ctx) => {
+      const carrier = (args[0] || "").toLowerCase();
+      const method = (args[1] || "openvpn").toLowerCase();
+
+      if (!carrier || !["mtn", "orange"].includes(carrier)) {
+        return ctx.reply("Usage: *!vpn <mtn|orange> [method]*\nMethods: openvpn (default), shadowsocks, proxy\n\nARIA searches for current zero-rating exploits and generates a config.");
+      }
+
+      await ctx.react("🔍");
+      await ctx.reply("Searching for " + carrier.toUpperCase() + " exploits and generating config...");
+
+      const { generateVPNConfig } = require("../src/tools/vpnConfig");
+      const result = await generateVPNConfig(carrier, method);
+
+      if (result.error) return ctx.reply("Error: " + result.error);
+
+      let vpnMsg = "*" + result.carrier + " VPN Config*\n";
+      vpnMsg += "Host: " + result.host + ":" + result.port + "\n";
+      vpnMsg += "Method: " + method + "\n";
+      vpnMsg += "Status: " + (result.connectivity.reachable ? "Host reachable ✅" : "Host unreachable ⚠️") + "\n\n";
+      vpnMsg += result.warning;
+
+      await sock.sendMessage(msg.key.remoteJid, { text: vpnMsg });
+
+      // Send the config file
+      const fs = require("fs");
+      const buffer = fs.readFileSync(result.filePath);
+      try {
+        await sock.sendMessage(msg.key.remoteJid, { document: buffer, fileName: result.filename, mimetype: "text/plain", caption: "ARIA VPN Config for " + result.carrier });
+      } catch (e) {
+        // Fallback: send as text
+        ctx.reply("Config (save as " + result.filename + "):\n\n" + result.config.slice(0, 3000));
+      }
+
+      // Cleanup
+      try { fs.unlinkSync(result.filePath); } catch (_) {}
+    },
+
   },
 };

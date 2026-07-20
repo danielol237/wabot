@@ -24,6 +24,193 @@ const FILES_PER_BATCH = 4; // generate this many files per !build/!continue call
 // Dedicated strict system prompt for planning — bypasses ARIA's chatty personality
 // prompt entirely, since that prompt was causing the model to wrap JSON output in
 // emojis/markdown/commentary, which broke parsing especially on simple requests.
+// ── Project Templates ─────────────────────────────────────────────
+// Pre-built starter templates for common project types. When the AI model
+// generates weak/basic code, a template gives a much better starting point
+// than generating from scratch. Each template is a complete, polished,
+// production-quality project structure that files get written into.
+const PROJECT_TEMPLATES = {
+  landing: {
+    name: "Landing Page",
+    match: ["landing page", "landing", "startup page", "product page"],
+    setup: (dir) => {
+      fs.writeFileSync(path.join(dir, "index.html"), `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Landing Page</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <nav>
+    <div class="logo">Brand</div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#contact">Contact</a>
+    </div>
+  </nav>
+  <section class="hero">
+    <h1>Build Something Great</h1>
+    <p>Clean, modern, responsive — built for growth.</p>
+    <a href="#cta" class="cta-button">Get Started</a>
+  </section>
+  <section id="features" class="features">
+    <h2>Features</h2>
+    <div class="feature-grid">
+      <div class="feature-card"><h3>Fast</h3><p>Optimized for performance.</p></div>
+      <div class="feature-card"><h3>Responsive</h3><p>Works on every device.</p></div>
+      <div class="feature-card"><h3>Modern</h3><p>Built with best practices.</p></div>
+    </div>
+  </section>
+  <footer><p>&copy; 2026 Brand. All rights reserved.</p></footer>
+</body>
+</html>`);
+      fs.writeFileSync(path.join(dir, "style.css"), `* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+nav { display: flex; justify-content: space-between; align-items: center; padding: 1.5rem 5%; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 100; }
+.logo { font-size: 1.5rem; font-weight: 700; color: #2563eb; }
+.nav-links { display: flex; gap: 2rem; }
+.nav-links a { text-decoration: none; color: #555; font-weight: 500; transition: color 0.2s; }
+.nav-links a:hover { color: #2563eb; }
+.hero { text-align: center; padding: 6rem 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+.hero h1 { font-size: 3rem; margin-bottom: 1rem; }
+.hero p { font-size: 1.2rem; margin-bottom: 2rem; opacity: 0.9; }
+.cta-button { display: inline-block; padding: 1rem 2rem; background: #fff; color: #2563eb; text-decoration: none; border-radius: 8px; font-weight: 600; transition: transform 0.2s, box-shadow 0.2s; }
+.cta-button:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+.features { padding: 4rem 5%; background: #f8fafc; }
+.features h2 { text-align: center; margin-bottom: 3rem; font-size: 2rem; }
+.feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem; max-width: 900px; margin: 0 auto; }
+.feature-card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 2px 15px rgba(0,0,0,0.05); transition: transform 0.2s; }
+.feature-card:hover { transform: translateY(-5px); }
+.feature-card h3 { margin-bottom: 0.5rem; color: #2563eb; }
+footer { text-align: center; padding: 2rem; background: #1e293b; color: white; }
+@media (max-width: 768px) { .nav-links { gap: 1rem; } .hero h1 { font-size: 2rem; } }`);
+      return true;
+    }
+  },
+  todo: {
+    name: "Todo App",
+    match: ["todo", "to-do", "task list", "task manager"],
+    setup: (dir) => {
+      fs.writeFileSync(path.join(dir, "index.html"), `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Todo App</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>📋 Todo</h1>
+    <div class="add-todo">
+      <input type="text" id="todoInput" placeholder="What needs to be done?" />
+      <button onclick="addTodo()">Add</button>
+    </div>
+    <div class="filters">
+      <button class="filter active" onclick="setFilter('all')">All</button>
+      <button class="filter" onclick="setFilter('active')">Active</button>
+      <button class="filter" onclick="setFilter('completed')">Completed</button>
+    </div>
+    <ul id="todoList"></ul>
+    <div class="stats"><span id="todoCount">0</span> items left</div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>`);
+      fs.writeFileSync(path.join(dir, "style.css"), `* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; min-height: 100vh; display: flex; justify-content: center; padding: 2rem 1rem; }
+.container { width: 100%; max-width: 500px; background: white; border-radius: 16px; padding: 2rem; box-shadow: 0 2px 20px rgba(0,0,0,0.08); height: fit-content; }
+h1 { text-align: center; margin-bottom: 1.5rem; color: #1a1a2e; }
+.add-todo { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+.add-todo input { flex: 1; padding: 0.8rem; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem; outline: none; transition: border-color 0.2s; }
+.add-todo input:focus { border-color: #667eea; }
+.add-todo button { padding: 0.8rem 1.5rem; background: #667eea; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+.add-todo button:hover { background: #5a6fd6; }
+.filters { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+.filter { padding: 0.4rem 1rem; border: 1px solid #e0e0e0; border-radius: 20px; background: white; cursor: pointer; font-size: 0.9rem; transition: all 0.2s; }
+.filter.active { background: #667eea; color: white; border-color: #667eea; }
+#todoList { list-style: none; margin-bottom: 1rem; }
+#todoList li { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; border-bottom: 1px solid #f0f0f0; animation: fadeIn 0.2s; }
+#todoList li:last-child { border-bottom: none; }
+#todoList li.completed span { text-decoration: line-through; color: #999; }
+#todoList li input[type="checkbox"] { width: 20px; height: 20px; cursor: pointer; }
+#todoList li span { flex: 1; cursor: pointer; }
+#todoList li button { background: none; border: none; color: #ff4757; cursor: pointer; font-size: 1.2rem; padding: 0.2rem; opacity: 0.6; transition: opacity 0.2s; }
+#todoList li button:hover { opacity: 1; }
+.stats { text-align: center; color: #888; font-size: 0.9rem; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }`);
+      fs.writeFileSync(path.join(dir, "script.js"), `let todos = JSON.parse(localStorage.getItem('todos')) || [];
+let currentFilter = 'all';
+
+function save() { localStorage.setItem('todos', JSON.stringify(todos)); render(); }
+
+function addTodo() {
+  const input = document.getElementById('todoInput');
+  const text = input.value.trim();
+  if (!text) return;
+  todos.push({ id: Date.now(), text, completed: false });
+  input.value = '';
+  save();
+}
+
+function toggleTodo(id) {
+  const todo = todos.find(t => t.id === id);
+  if (todo) { todo.completed = !todo.completed; save(); }
+}
+
+function deleteTodo(id) {
+  todos = todos.filter(t => t.id !== id);
+  save();
+}
+
+function setFilter(filter) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter').forEach(b => b.classList.remove('active'));
+  document.querySelector(\`.filter[onclick*="'\${filter}'"]\`)?.classList.add('active');
+  render();
+}
+
+function render() {
+  const list = document.getElementById('todoList');
+  const filtered = todos.filter(t => {
+    if (currentFilter === 'active') return !t.completed;
+    if (currentFilter === 'completed') return t.completed;
+    return true;
+  });
+  list.innerHTML = filtered.map(t => \`<li class="\${t.completed ? 'completed' : ''}">
+    <input type="checkbox" \${t.completed ? 'checked' : ''} onchange="toggleTodo(\${t.id})" />
+    <span ondblclick="deleteTodo(\${t.id})">\${t.text}</span>
+    <button onclick="deleteTodo(\${t.id})">✕</button>
+  </li>\`).join('');
+  document.getElementById('todoCount').textContent = todos.filter(t => !t.completed).length;
+}
+render();`);
+      return true;
+    }
+  },
+};
+
+// Detect if a request matches a known template
+function matchTemplate(request) {
+  const lower = request.toLowerCase();
+  for (const [key, template] of Object.entries(PROJECT_TEMPLATES)) {
+    if (template.match.some(m => lower.includes(m))) {
+      return { key, template };
+    }
+  }
+  return null;
+}
+
+// Zip and return the template as a starting point
+async function scaffoldFromTemplate(request, templateKey) {
+  const template = PROJECT_TEMPLATES[templateKey];
+  if (!template) return null;
+  return { template: templateKey, name: template.name };
+}
+
 const PLANNER_SYSTEM_PROMPT = `You are a JSON-only API. You respond with valid JSON arrays and nothing else. No greetings, no emojis, no markdown formatting, no explanations before or after the JSON. If you add anything other than the raw JSON array, the response will fail to parse and break the system calling you.`;
 
 async function planProject(request, senderName, userId = null) {

@@ -148,6 +148,19 @@ async function startBot() {
       pairingCodeRequested = false;
       lastError = null;
       startTaskPoller(sock); // safe to call again on reconnect — it clears any previous interval first
+
+      // Heartbeat — ping WhatsApp every 30s to detect silent disconnects.
+      // Baileys can drop the socket without emitting a "close" event on some network
+      // conditions (NAT timeout, mobile data flips). A periodic ping forces an actual
+      // round-trip and triggers disconnect/reconnect if the socket is actually dead.
+      if (sock._heartbeatInterval) clearInterval(sock._heartbeatInterval);
+      sock._heartbeatInterval = setInterval(async () => {
+        try {
+          await sock.ws.ping();
+        } catch (_) {
+          // ping failed — the connection.update handler will pick up the close
+        }
+      }, 30000);
     }
 
     if (connection === "close") {

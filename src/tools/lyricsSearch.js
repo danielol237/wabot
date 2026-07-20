@@ -1,13 +1,5 @@
 const axios = require("axios");
 
-// Switched from lyrics.ovh to LRCLIB — lyrics.ovh has a known history of going
-// fully down intermittently (documented GitHub issue: "all requests returning
-// 404, was working fine a couple hours ago"). LRCLIB is a dedicated, actively
-// maintained lyrics database (~3M songs) with a free, keyless API.
-//
-// IMPORTANT: per copyright limits, this returns only a short preview/snippet,
-// never the full lyrics verbatim — reproducing complete song lyrics is not
-// something ARIA does regardless of the source API.
 async function getLyrics(songQuery) {
   try {
     const parts = songQuery.split(" - ");
@@ -21,7 +13,7 @@ async function getLyrics(songQuery) {
     }
 
     const url = `https://lrclib.net/api/search?track_name=${encodeURIComponent(title)}${artist ? `&artist_name=${encodeURIComponent(artist)}` : ""}`;
-    const res = await axios.get(url, { timeout: 10000 });
+    const res = await axios.get(url, { timeout: 15000 });
 
     const match = res.data?.[0];
     if (!match) {
@@ -33,16 +25,12 @@ async function getLyrics(songQuery) {
       return { success: false, error: "Found the song but no lyrics are available for it." };
     }
 
-    // Only return a short preview — never the complete lyrics, regardless of length
-    const lines = fullLyrics.split("\n").filter((l) => l.trim());
-    const preview = lines.slice(0, 4).join("\n");
-
     return {
       success: true,
       artist: match.artistName || artist,
       title: match.trackName || title,
-      preview,
-      isPreviewOnly: true,
+      lyrics: fullLyrics,
+      isPreviewOnly: false,
     };
   } catch (err) {
     console.error("Lyrics search error:", err.message);
@@ -51,4 +39,3 @@ async function getLyrics(songQuery) {
 }
 
 module.exports = { getLyrics };
-

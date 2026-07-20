@@ -43,6 +43,10 @@ const { extractText } = require("../tools/visionAI");
 const { getLyrics } = require("../tools/lyricsSearch");
 const { searchWallpaper } = require("../tools/wallpaperSearch");
 const { searchAnime, getAnimeEpisodes, getAnimeDetails, getOmniSaveDownload, downloadVideo } = require("../tools/animeDownload");
+const { checkMessage, resetFloodTracker, parseModArgs, getModSettings } = require("../tools/autoMod");
+const { createPoll, vote, closePoll, formatPoll, formatPollShort, getActivePolls, findPollByShortId } = require("../tools/polls");
+const { trackAction, popLastAction, getHistory, clearHistory } = require("../tools/commandHistory");
+const { scheduleMessage, cancelSchedule, listSchedules, formatSchedules } = require("../tools/scheduler");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 const PREFIX = process.env.BOT_PREFIX || "!";
@@ -843,6 +847,160 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     }
     return;
   }
+
+  // ── SCHEDULED MESSAGES ──────────────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}schedule`)) {
+    // !schedule "message" at <time>
+    const match = activeBody.match(/${PREFIX}schedule\s+"([^"]+)"\s+at\s+(.+)/i);
+    if (!match) return reply(sock, msg, `Usage: \`${PREFIX}schedule "Your message" at every day at 09:00\``);
+    const schedMsg = match[1];
+    const timeStr = match[2].trim();
+    const result = scheduleMessage(chatId, schedMsg, timeStr, senderJid);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    trackAction(chatId, { type: "schedule", id: result.id, message: schedMsg });
+    return reply(sock, msg, `✅ Scheduled: "${schedMsg}" at ${timeStr} (ID: \`${result.id}\`)`);
+  }
+
+  // !schedules — list all scheduled messages in this chat
+  if (activeLower.startsWith(`${PREFIX}schedules`)) {
+    const list = listSchedules(chatId);
+    if (list.length === 0) return reply(sock, msg, "No scheduled messages in this chat.");
+    return reply(sock, msg, `*⏰ Scheduled Messages*\n\n${formatSchedules(list)}`);
+  }
+
+  // !cancel <id> — cancel a scheduled message
+  if (activeLower.startsWith(`${PREFIX}cancel`)) {
+    const id = args[1];
+    if (!id) return reply(sock, msg, `Usage: \`${PREFIX}cancel <schedule_id>\``);
+    const result = cancelSchedule(id, senderJid);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    trackAction(chatId, { type: "cancel_schedule", id });
+    return reply(sock, msg, `✅ Cancelled schedule \`${id}\``);
+  }
+
+  // ── POLLS ──────────────────────────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}poll`)) {
+    const args = activeBody.split(" ");
+    const sub = args[1]?.toLowerCase();
+
+    // !poll create "Question" "Option 1" "Option 2" ...
+    if (sub === "create" || sub === "new") {
+      const optionMatches = activeBody.match(/"([^"]+)"/g);
+      if (!optionMatches || optionMatches.length < 3) return reply(sock, msg, `Usage: \`${PREFIX}poll create "Question" "Option 1" "Option 2" "Option 3"\``);
+      const question = optionMatches[0].replace(/"/g, "");
+      const options = optionMatches.slice(1).map((o) => o.replace(/"/g, ""));
+      if (options.length < 2) return reply(sock, msg, "Need at least 2 options.");
+      if (options.length > 10) return reply(sock, msg, "Max 10 options.");
+      const pollId = createPoll(question, options, senderJid, chatId);
+      trackAction(chatId, { type: "poll_create", pollId, question });
+      return reply(sock, msg, formatPoll(pollId));
+    }
+
+    // !polls — list active polls
+    if (sub === "list" || !sub) {
+      const active = getActivePolls(chatId);
+      if (active.length === 0) return reply(sock, msg, "No active polls in this chat.");
+      const text = active.map((p) => formatPollShort(p)).join("\n");
+      return reply(sock, msg, `*📊 Active Polls*\n\n${text}`);
+    }
+
+    return reply(sock, msg, `Usage: \`${PREFIX}poll create "Q" "Opt1" "Opt2"\` or \`${PREFIX}poll list\``);
+  }
+
+  // !vote <poll_id> <option_number>
+  if (activeLower.startsWith(`${PREFIX}vote`)) {
+    const shortId = args[1];
+    const optionNum = parseInt(args[2]);
+    if (!shortId || isNaN(optionNum)) return reply(sock, msg, `Usage: \`${PREFIX}vote <poll_id> <number>\``);
+    const poll = findPollByShortId(shortId);
+    if (!poll) return reply(sock, msg, "Poll not found. Check \`!polls\` for active polls.");
+    const result = vote(poll.id, optionNum - 1, senderJid);
+    if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+    return reply(sock, msg, `✅ Voted! ${formatPollShort(poll)}`);
+  }
+
+  // ── UNDO & HISTORY ──────────────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}undo`)) {
+    const last = popLastAction(chatId);
+    if (!last) return reply(sock, msg, "Nothing to undo.");
+    return reply(sock, msg, `↩️ Undid: ${last.type}${last.question ? \` (\${last.question})\` : ""}${last.id ? \` (\\`\${last.id}\\`)\` : ""}`);
+  }
+
+  if (activeLower.startsWith(`${PREFIX}history`)) {
+    const recent = getHistory(chatId, 10);
+    if (recent.length === 0) return reply(sock, msg, "No recent actions.");
+    const text = recent.map((a, i) => `${i + 1}. ${a.type}${a.question ? \`: \${a.question}\` : ""}${a.id ? \` (\\`\${a.id}\\`)\` : ""} — ${new Date(a.timestamp).toLocaleTimeString()}`).join("\n");
+    return reply(sock, msg, `*📜 Recent Actions*\n\n${text}`);
+  }
+
+  // ── YOUTUBE / SOCIAL DOWNLOAD ──────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}yt`) || activeLower.startsWith(`${PREFIX}youtube`)) {
+    const url = args[1];
+    const format = args[2]?.toLowerCase() || "best";
+    if (!url) return reply(sock, msg, `Usage: \`${PREFIX}yt <url>\` or \`${PREFIX}yt <url> mp3\` for audio only`);
+    await react(sock, msg, "⬇️");
+    await reply(sock, msg, "⬇️ Downloading...");
+
+    let formatArg = "best[filesize<50M]/best";
+    let isAudio = false;
+    if (format === "mp3" || format === "audio" || format === "m4a") {
+      formatArg = "bestaudio[filesize<50M]/bestaudio";
+      isAudio = true;
+    } else if (format === "720" || format === "720p") {
+      formatArg = "best[height<=720][filesize<50M]/best[height<=720]";
+    } else if (format === "1080" || format === "1080p") {
+      formatArg = "best[height<=1080][filesize<50M]/best[height<=1080]";
+    }
+
+    const { v4: uuidv4 } = require("uuid");
+    const id = uuidv4();
+    const ext = isAudio ? "mp3" : "mp4";
+    const outputPath = path.join(__dirname, "../../temp", `${id}.%(ext)s`);
+
+    // Use exec from child_process — already available via ./downloader.js pattern
+    const { exec } = require("child_process");
+    exec(\`yt-dlp -f "\${formatArg}" --max-filesize 50M -o "\${outputPath}" "\${url}"\`, { timeout: 120000 }, async (err, stdout, stderr) => {
+      try {
+        const files = require("fs").readdirSync(path.join(__dirname, "../../temp")).filter((f) => f.startsWith(id));
+        if (files.length === 0) return reply(sock, msg, "❌ Download failed. The URL might be invalid or the file is too large.");
+        const fp = path.join(__dirname, "../../temp", files[0]);
+        const buffer = require("fs").readFileSync(fp);
+        if (isAudio) {
+          await sock.sendMessage(chatId, { audio: buffer, mimetype: "audio/mp4" });
+        } else {
+          await sock.sendMessage(chatId, { video: buffer, caption: "⬇️ Downloaded" });
+        }
+        try { require("fs").unlinkSync(fp); } catch (_) {}
+      } catch (e) {
+        reply(sock, msg, \`❌ Send error: \${e.message}\`);
+      }
+    });
+    return;
+  }
+
+  // ── AUTO-MOD INTEGRATION ───────────────────────────────────────
+  // Check message against mod rules BEFORE any other handling
+  const modResult = checkMessage(activeBody, getSenderName(msg), chatId);
+  if (modResult) {
+    const warnMsg = \`⚠️ *Mod Warning*: \${modResult.reason}\`;
+    if (modResult.action === "warn") {
+      const { addWarning } = require("../utils/groupSettings");
+      addWarning(chatId, senderJid);
+      await sock.sendMessage(chatId, { text: warnMsg, mentions: [senderJid] }, { quoted: msg });
+      // Don't return — still process the message? Actually for banned words, block it.
+      if (modResult.reason.startsWith("Banned word")) return;
+    }
+    if (modResult.action === "kick") {
+      try { await sock.groupParticipantsUpdate(chatId, [senderJid], "remove"); } catch (_) {}
+      return;
+    }
+  }
+
+  // Track this action for undo
+  trackAction(chatId, {
+    type: activeLower.startsWith("!") ? "command" : "chat",
+    text: activeBody.slice(0, 50),
+  });
 
   // ── ANIME ───────────────────────────────────────────────────────
   if (activeLower.startsWith(`${PREFIX}anime`)) {

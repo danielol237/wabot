@@ -77,7 +77,7 @@ function formatPoll(pollId) {
   });
 
   text += `\\nTotal: ${totalVotes} vote${totalVotes !== 1 ? "s" : ""}`;
-  if (poll.active) text += `\\n_Vote by replying with \\`!vote ${pollId.slice(-6)} <number>\\`_`;
+  if (poll.active) text += `\n_Vote by replying with \`!vote ${pollId.slice(-6)} <number>\`_`;
   else text += `\\n_(Closed)_`;
 
   return text;

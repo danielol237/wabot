@@ -4,6 +4,7 @@ const { getTrainer, addXP, xpForLevel, save, wildEncounter, attemptCatch,
   moveToPC, moveToTeam, swapTeam, evolve, healAll, useItem,
   createTrade, acceptTrade } = require("../src/tools/pokemonGame");
 const { fetchSpecies, searchMon, getSprite, getBackSprite, getArtwork, getEffectiveness, ITEMS } = require("../src/tools/pokemonData");
+const { getMove } = require("../src/tools/pokemonMoves");
 
 module.exports = {
   name: "pokemon",
@@ -137,27 +138,64 @@ module.exports = {
       const s1 = await fetchSpecies(t1.team[0].speciesId);
       const s2 = await fetchSpecies(t2.team[0].speciesId);
 
+      const moves1 = t1.team[0].moves || [];
+      const moves2 = t2.team[0].moves || [];
+      let moveText = "\n\n*Your moves:*\n";
+      moves1.forEach((m, i) => {
+        moveText += (i + 1) + ". " + m.name + " (" + m.type + ", " + (m.power || 0) + ")\n";
+      });
+
       await sock.sendMessage(msg.key.remoteJid, {
         image: { url: s1.sprite },
-        caption: `⚔️ *Duel started!* (ID: \`${r.id}\`)\n\n${t1.name || uid.slice(0, 8)}: ${s1.name} Lv${t1.team[0].level}\n⚡ VS ⚡\n${t2.name || target.slice(0, 8)}: ${s2.name} Lv${t2.team[0].level}\n\nUse *!strike ${r.id}* to attack\n*!switch ${r.id} <n>* to switch\n*!surrender ${r.id}* to forfeit`
+        caption: `⚔️ *Duel started!* (ID: \`${r.id}\`)\n\n${t1.name || uid.slice(0, 8)}: ${s1.name} Lv${t1.team[0].level}\n⚡ VS ⚡\n${t2.name || target.slice(0, 8)}: ${s2.name} Lv${t2.team[0].level}\n\nUse *!strike ${r.id} <move#>${moveText}\n*!switch ${r.id} <n>* to switch\n*!surrender ${r.id}* to forfeit`
       });
     },
 
     strike: async (sock, msg, args, ctx) => {
       const uid = msg.key.participant || msg.key.remoteJid;
       const bid = args[0];
-      if (!bid) return ctx.reply("Usage: *!strike <battleId>*");
-      const r = await battleAction(bid, uid, "attack");
+      const moveIdx = parseInt(args[1]) - 1;
+      if (!bid) return ctx.reply("Usage: *!strike <battleId> <move#>*");
+      
+      // If no move specified, show available moves
+      if (isNaN(moveIdx)) {
+        const b = Object.values(require("../src/tools/pokemonGame").battleState || {}).find(bs => bs.id === bid);
+        // Try to find the battle
+        const t = getTrainer(uid);
+        if (t.team[0]?.moves) {
+          let txt = "⚔️ *Choose a move*\n\n";
+          t.team[0].moves.forEach((m, i) => {
+            txt += (i + 1) + ". " + m.name + " (" + m.type + ", " + (m.power || 0) + ")\n";
+          });
+          txt += "\nUse *!strike " + bid + " <number>*";
+          return ctx.reply(txt);
+        }
+        return ctx.reply("Usage: *!strike <battleId> <move#>*");
+      }
+
+      const r = await battleAction(bid, uid, "attack", moveIdx);
       if (r.error) return ctx.reply("❌ " + r.error);
 
       const b = r.result;
+
+      if (b.action === "miss") {
+        return ctx.reply(`❌ ${b.attName}'s ${b.moveName} missed!`);
+      }
+
       if (b.battleOver) {
         return ctx.reply(`🏆 *Battle Over!* ${b.winner === uid ? "You win!" : "You lost!"}\n\n${b.description}`);
       }
 
+      // Show moves for next turn
+      const t = getTrainer(uid);
+      let moveList = "\n\n*Your moves:*\n";
+      (t.team[0]?.moves || []).forEach((m, i) => {
+        moveList += (i + 1) + ". " + m.name + " (" + m.type + ", " + (m.power || 0) + ")\n";
+      });
+
       await sock.sendMessage(msg.key.remoteJid, {
         image: { url: b.attSprite || getSprite(1) },
-        caption: `⚔️ *Duel Update*\n\n${b.description}\n\n${b.fainted ? `💀 ${b.fainted} fainted!\n` : ""}${b.switched ? "🔄 Opponent switched Pokémon!\n" : ""}\nUse *!strike ${bid}* to continue`
+        caption: `⚔️ *Duel Update*\n\n${b.description}${b.fainted ? "*💀 " + b.fainted + " fainted!*\n" : ""}${b.switched ? "*🔄 Opponent switched!*\n" : ""}${moveList}\nUse *!strike ${bid} <move#>*`
       });
     },
 

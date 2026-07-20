@@ -1,4 +1,5 @@
 const axios = require("axios");
+const fs = require("fs");
 const { getAIResponse } = require("../tools/ai");
 const { searchWeb } = require("../tools/webSearch");
 const { generateImage } = require("../tools/imageGen");
@@ -41,6 +42,7 @@ const { renderCodeImage } = require("../tools/carbon");
 const { extractText } = require("../tools/visionAI");
 const { getLyrics } = require("../tools/lyricsSearch");
 const { searchWallpaper } = require("../tools/wallpaperSearch");
+const { searchAnime, getAnimeEpisodes, getAnimeDetails, getOmniSaveDownload, downloadVideo } = require("../tools/animeDownload");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 const PREFIX = process.env.BOT_PREFIX || "!";
@@ -828,11 +830,134 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     await react(sock, msg, "🎵");
     const result = await getLyrics(query);
     if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
-    return reply(
-      sock,
-      msg,
-      `🎵 *${result.title}* — ${result.artist}\n\n${result.preview}\n\n_(Preview only — full lyrics aren't reproduced here for copyright reasons. Search the title on Genius or your music app for the complete song.)_`
-    );
+    const header = `🎵 *${result.title}* — ${result.artist}\n\n`;
+    const lyrics = result.lyrics;
+    if ((header + lyrics).length <= 4000) {
+      return reply(sock, msg, header + lyrics);
+    }
+    await sock.sendMessage(msg.key.remoteJid, { text: header }, { quoted: msg });
+    const chunks = splitMessage(lyrics, 3900);
+    for (const chunk of chunks) {
+      await sock.sendMessage(msg.key.remoteJid, { text: chunk });
+      await sleep(300);
+    }
+    return;
+  }
+
+  // ── ANIME ───────────────────────────────────────────────────────
+  if (activeLower.startsWith(`${PREFIX}anime`)) {
+    const args = activeBody.split(" ");
+    const subcommand = args[1]?.toLowerCase();
+    const query = args.slice(2).join(" ");
+
+    // !anime search <name>
+    if (subcommand === "search" && query) {
+      await react(sock, msg, "🔍");
+      const results = await searchAnime(query);
+      if (results.length === 0) return reply(sock, msg, "❌ No anime found.");
+      let text = `*📺 Anime Search Results*\n\n`;
+      results.slice(0, 8).forEach((a, i) => {
+        text += `${i + 1}. *${a.title}*\n   ID: ${a.id} | ⭐ ${a.score || "N/A"} | ${a.episodes || "?"} eps\n`;
+      });
+      text += `\nUse \`${PREFIX}anime info <id>\` for details or \`${PREFIX}anime dl <id> <ep>\` to download an episode.`;
+      return reply(sock, msg, text);
+    }
+
+    // !anime info <mal_id>
+    if (subcommand === "info" && args[2]) {
+      await react(sock, msg, "📋");
+      const detail = await getAnimeDetails(args[2]);
+      if (!detail) return reply(sock, msg, "❌ Couldn't find that anime.");
+      return reply(
+        sock,
+        msg,
+        `*📺 ${detail.title}*\n\n⭐ *Score:* ${detail.score || "N/A"}\n📺 *Type:* ${detail.type || "N/A"}\n📊 *Status:* ${detail.status}\n🎬 *Episodes:* ${detail.episodes || "Unknown"}\n📅 *Year:* ${detail.year || "N/A"}\n🎭 *Genres:* ${detail.genres.join(", ") || "N/A"}\n🏢 *Studios:* ${detail.studios.join(", ") || "N/A"}\n\n${detail.synopsis ? detail.synopsis.slice(0, 500) + "..." : ""}\n\nUse \`${PREFIX}anime dl ${detail.id} 1\` to download episode 1.`
+      );
+    }
+
+    // !anime episodes <mal_id>
+    if (subcommand === "episodes" && args[2]) {
+      await react(sock, msg, "📋");
+      const episodes = await getAnimeEpisodes(args[2]);
+      if (episodes.length === 0) return reply(sock, msg, "❌ No episodes found or data unavailable.");
+      let text = `*📺 Episodes*\n\n`;
+      episodes.slice(0, 15).forEach((ep) => {
+        text += `• Ep ${ep.episode}: ${ep.title || "No title"}\n`;
+      });
+      if (episodes.length > 15) text += `\n...and ${episodes.length - 15} more`;
+      text += `\n\nUse \`${PREFIX}anime dl ${args[2]} <ep>\` to download an episode.`;
+      return reply(sock, msg, text);
+    }
+
+    // !anime dl <mal_id> <ep>
+    if ((subcommand === "dl" || subcommand === "download") && args[2] && args[3]) {
+      await react(sock, msg, "⏳");
+      const malId = args[2];
+      const epNum = args[3];
+
+      // Get anime details first so we know the title
+      const detail = await getAnimeDetails(malId);
+      if (!detail) return reply(sock, msg, "❌ Couldn't find that anime.");
+
+      await reply(sock, msg, `🎬 Searching for *${detail.title}* Ep ${epNum}...`);
+
+      // Try OmniSave first for direct download links
+      const omniscrape = await searchOmniSave(detail.title).catch(() => []);
+
+      if (omniscrape.length > 0) {
+        const match = omniscrape[0];
+        const downloads = await getOmniSaveDownload(match.subjectId, match.detailPath, 0, parseInt(epNum) - 1);
+        if (downloads?.downloads?.length > 0) {
+          const sorted = downloads.downloads.sort((a, b) => b.resolution - a.resolution);
+          const best = sorted.find((d) => parseInt(d.size) < 500 * 1024 * 1024) || sorted[0];
+          await reply(sock, msg, `⬇️ Downloading... (${Math.round(parseInt(best.size) / 1024 / 1024)}MB, ${best.resolution}p)`);
+
+          const dl = await downloadVideo(best.url);
+          if (dl.success) {
+            await reply(sock, msg, `✅ Downloaded! Sending...`);
+            const buffer = fs.readFileSync(dl.filePath);
+            try {
+              if (dl.size < 15 * 1024 * 1024) {
+                await sock.sendMessage(msg.key.remoteJid, { document: buffer, fileName: `${detail.title}_Ep${epNum}.mp4`, mimetype: "video/mp4", caption: `🎬 ${detail.title} — Episode ${epNum}` });
+              } else {
+                await sock.sendMessage(msg.key.remoteJid, { text: `📥 *${detail.title}* Ep ${epNum}\n⬇️ [Download Link](${best.url})\n\n_(File too large for WhatsApp direct send. Use the link above.)_` });
+              }
+            } catch (_) {}
+            try { fs.unlinkSync(dl.filePath); } catch (_) {}
+            return;
+          }
+        }
+      }
+
+      // Fallback: try gogoanime via yt-dlp
+      await reply(sock, msg, `⬇️ Trying alternate source...`);
+      const gogoSearch = detail.title.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/ /g, "-");
+      const urls = [
+        `https://gogoanime3.co/${gogoSearch}-episode-${epNum}`,
+        `https://gogoanime3.co/${gogoSearch}-${epNum}`,
+      ];
+
+      for (const url of urls) {
+        const dl = await downloadVideo(url);
+        if (dl.success) {
+          await reply(sock, msg, `✅ Downloaded! Sending...`);
+          const buffer = fs.readFileSync(dl.filePath);
+          try {
+            if (dl.size < 15 * 1024 * 1024) {
+              await sock.sendMessage(msg.key.remoteJid, { document: buffer, fileName: `${detail.title}_Ep${epNum}.mp4`, mimetype: "video/mp4", caption: `🎬 ${detail.title} — Episode ${epNum}` });
+            } else {
+              await sock.sendMessage(msg.key.remoteJid, { text: `📥 *${detail.title}* Ep ${epNum}\n_(File too large for WhatsApp, uploaded to gofile if available)_` });
+            }
+          } catch (_) {}
+          try { fs.unlinkSync(dl.filePath); } catch (_) {}
+          return;
+        }
+      }
+
+      return reply(sock, msg, "❌ Couldn't download that episode. The source might not be available.");
+    }
+
+    return reply(sock, msg, `Usage:\n\`${PREFIX}anime search <name>\` — Search anime\n\`${PREFIX}anime info <id>\` — Anime details\n\`${PREFIX}anime episodes <id>\` — List episodes\n\`${PREFIX}anime dl <id> <ep>\` — Download an episode`);
   }
 
   // ── WALLPAPER SEARCH ──────────────────────────────────────────

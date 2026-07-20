@@ -394,5 +394,32 @@ module.exports = {
       try { fs.unlinkSync(result.filePath); } catch (_) {}
     },
 
+
+    // ── EVOLVE — self-improvement ──────────────────────────
+    evolve: async (sock, msg, args, ctx) => {
+      await ctx.react("🧬");
+      await ctx.reply("🔍 Scanning my own code for improvements...");
+
+      const { evolve, getEvolutionStats } = require("../src/tools/selfImprove");
+      
+      const result = await evolve();
+      let text = "*🧬 ARIA Evolution Scan*\n\n";
+      text += "Stage: " + result.stats.totalFiles + " files, " + result.stats.totalLines + " lines of code\n\n";
+      
+      if (result.improvements.length > 0) {
+        text += "*Suggested improvements:*\n";
+        result.improvements.forEach(item => text += "• " + item + "\n");
+      } else {
+        text += "No improvements found. I'm running optimally.\n";
+      }
+      
+      const stats = getEvolutionStats();
+      text += "\n*Evolution Stats:*\n";
+      text += "Stage: " + stats.stage + " | Improvements made: " + stats.improvements.length + "\n";
+      text += "Last check: " + stats.lastCheck;
+      
+      ctx.reply(text);
+    },
+
   },
 };

@@ -523,5 +523,59 @@ module.exports = {
       ctx.reply(text);
     },
 
+
+    // ── AI AGENT (multi-step) ───────────────────────────────
+    agent: async (sock, msg, args, ctx) => {
+      const task = args.join(" ");
+      if (!task) return ctx.reply("Usage: *!agent <task>*\nExample: *!agent research the best phone under 500$*");
+
+      await ctx.react("🧠");
+      const { runAgent } = require("../src/tools/advancedAgent");
+      
+      let progressMsgs = [];
+      const onProgress = async (step) => {
+        progressMsgs.push(step);
+        if (progressMsgs.length <= 3) await ctx.reply(step);
+      };
+
+      const result = await runAgent(task, getSenderName(msg), onProgress);
+
+      if (result.length > 4000) {
+        const fs = require("fs");
+        const fp = "/tmp/aria_agent_result.txt";
+        fs.writeFileSync(fp, result);
+        const buf = fs.readFileSync(fp);
+        await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: "agent_result.txt", mimetype: "text/plain", caption: "Agent result" });
+        try { fs.unlinkSync(fp); } catch (_) {}
+      } else {
+        ctx.reply(result);
+      }
+    },
+
+    // ── MONITOR (background alerts) ─────────────────────────
+    monitor: async (sock, msg, args, ctx) => {
+      const sub = args[0]?.toLowerCase();
+      const { startMonitor, stopMonitor, listMonitors, formatMonitors } = require("../src/tools/backgroundMonitor");
+
+      if (sub === "crypto" && args[1]) {
+        const coin = args[1].toLowerCase();
+        const id = "crypto_" + coin + "_" + Date.now();
+        startMonitor(id, "crypto", coin, "cross_up", msg.key.remoteJid);
+        return ctx.reply("📊 Monitoring *" + coin + "* price. I'll alert you when it changes.");
+      }
+
+      if (sub === "stop" && args[1]) {
+        const r = stopMonitor(args[1]);
+        return ctx.reply(r ? "⛔ Monitor stopped." : "Monitor not found.");
+      }
+
+      if (sub === "list" || !sub) {
+        const list = listMonitors(msg.key.remoteJid);
+        return ctx.reply("*📊 Active Monitors*\n\n" + formatMonitors(list));
+      }
+
+      return ctx.reply("Usage:\n*!monitor crypto bitcoin* — watch BTC price\n*!monitor list* — list active\n*!monitor stop <id>* — stop");
+    },
+
   },
 };

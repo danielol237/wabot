@@ -10,6 +10,87 @@ module.exports = {
   name: "pokemon",
   commands: {
     // ── WILD ENCOUNTER ──────────────────────────────────────
+    // ── START YOUR JOURNEY ─────────────────────────────────
+    // 9 starter Pokémon, one from each generation
+    starters: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (t.team.length > 0) return ctx.reply("You already have Pokémon! Your journey has already begun.");
+
+      const STORTERS = [
+        { ids: [1, 4, 7], gen: "Kanto", name: "Bulbasaur/Charmander/Squirtle" },
+        { ids: [152, 155, 158], gen: "Johto", name: "Chikorita/Cyndaquil/Totodile" },
+        { ids: [252, 255, 258], gen: "Hoenn", name: "Treecko/Torchic/Mudkip" },
+        { ids: [387, 390, 393], gen: "Sinnoh", name: "Turtwig/Chimchar/Piplup" },
+        { ids: [495, 498, 501], gen: "Unova", name: "Snivy/Tepig/Oshawott" },
+        { ids: [650, 653, 656], gen: "Kalos", name: "Chespin/Fennekin/Froakie" },
+        { ids: [722, 725, 728], gen: "Alola", name: "Rowlet/Litten/Popplio" },
+        { ids: [810, 813, 816], gen: "Galar", name: "Grookey/Scorbunny/Sobble" },
+        { ids: [906, 909, 912], gen: "Paldea", name: "Sprigatito/Fuecoco/Quaxly" },
+      ];
+
+      // If no arguments, show all regions
+      if (!args[0]) {
+        let text = "🌟 *Choose your starter Pokémon!* 🌟\n\n";
+        text += "Pick 3 from any region:\n\n";
+        STORTERS.forEach((r, i) => {
+          text += (i + 1) + ". " + r.gen + " — " + r.name + "\n";
+        });
+        text += "\nUse *!starters <region #> <slot> (1-3)*\n";
+        text += "Example: *!starters 1 1* (pick Gen 1 for slot 1)\n";
+        text += "Do this 3 times to pick your team of 3!";
+        return ctx.reply(text);
+      }
+
+      // Pick a starter
+      const regionIdx = parseInt(args[0]) - 1;
+      const slotNum = parseInt(args[1]) || (t.team.length + 1);
+      if (isNaN(regionIdx) || regionIdx < 0 || regionIdx >= STORTERS.length) return ctx.reply("Invalid region. Use *!starters* to see regions.");
+      
+      // Show the 3 choices for this region
+      const region = STORTERS[regionIdx];
+      const speciesList = await Promise.all(region.ids.map(id => fetchSpecies(id)));
+      
+      if (!args[2]) {
+        let text = "🌟 *" + region.gen + " starters*\n\n";
+        speciesList.forEach((s, i) => {
+          text += (i + 1) + ". " + s.name + " — " + s.types.join("/") + "\n";
+        });
+        text += "\nChoose: *!starters " + (regionIdx + 1) + " " + (slotNum) + " <1/2/3>*";
+        return ctx.reply(text);
+      }
+
+      const choice = parseInt(args[2]) - 1;
+      if (isNaN(choice) || choice < 0 || choice >= speciesList.length) return ctx.reply("Invalid choice. Pick 1, 2, or 3.");
+
+      const chosen = speciesList[choice];
+      const mon = createMonster(chosen.id, 10);
+      await recalc(mon);
+      
+      // Add to team (or first available slot)
+      while (t.team.length < slotNum - 1 && t.team.length < 6) {
+        // Fill empty slots if needed
+        t.team.push(null);
+      }
+      if (slotNum <= 6) {
+        if (t.team[slotNum - 1]) return ctx.reply("Slot " + slotNum + " is already taken!");
+        t.team[slotNum - 1] = mon;
+      } else {
+        t.team.push(mon);
+      }
+      
+      // Remove null entries
+      t.team = t.team.filter(m => m !== null);
+      save();
+
+      await sock.sendMessage(msg.key.remoteJid, {
+        image: { url: chosen.sprite },
+        caption: "🌟 " + t.name + " chose " + chosen.name + " (Lv10)!\n\nYour journey begins!" + (t.team.length < 3 ? "\nPick more with *!starters*" : "\nUse *!hunt* to find wild Pokémon!")
+      });
+    },
+    journey: "starters",
+    begin: "starters",
+
     hunt: async (sock, msg, args, ctx) => {
       const uid = msg.key.participant || msg.key.remoteJid;
       const t = getTrainer(uid);
@@ -34,7 +115,9 @@ module.exports = {
       const result = await attemptCatch(uid, enc.mon, ball);
       if (result.error) return ctx.reply("❌ " + result.error);
       if (result.success) {
-        ctx.reply(`🎉 *Gotcha! ${enc.species.name} was caught!*\nLv${enc.mon.level} | ${enc.mon.nature} nature${enc.mon.shiny ? " ✨ SHINY" : ""}`);
+        const xpGain = 20 + enc.mon.level * 2;
+        addXP(uid, xpGain);
+        ctx.reply(`🎉 *Gotcha! ${enc.species.name} was caught!*\nLv${enc.mon.level} | ${enc.mon.nature} nature${enc.mon.shiny ? " ✨ SHINY" : ""}\n⭐ +${xpGain} XP`);
       } else {
         const hpBar = "█".repeat(Math.max(1, Math.round((enc.mon.hp / enc.mon.maxHp) * 10))) + "░".repeat(Math.max(0, 10 - Math.round((enc.mon.hp / enc.mon.maxHp) * 10)));
         ctx.reply(`💨 *${enc.species.name} broke free!*\nHP: ${hpBar} ${enc.mon.hp}/${enc.mon.maxHp}\n` + (result.ranAway ? "It ran away!" : "Try again!"));
@@ -49,8 +132,9 @@ module.exports = {
       // Simplified wild battle - just do damage and give XP
       const enc = await wildEncounter(uid);
       const dmg = Math.floor(Math.random() * 20) + 10;
-      ctx.reply(`⚔️ *${t.team[0].nickname || (await fetchSpecies(t.team[0].speciesId)).name} used Tackle!*\n${dmg} damage to wild ${enc.species.name}!`);
-      addXP(uid, 5);
+      const xpGain = 8 + enc.mon.level;
+      addXP(uid, xpGain);
+      ctx.reply(`⚔️ *${t.team[0].nickname || (await fetchSpecies(t.team[0].speciesId)).name} used Tackle!*\n${dmg} damage to wild ${enc.species.name}!\n⭐ +${xpGain} XP`);
     },
 
     flee: async (sock, msg, args, ctx) => {

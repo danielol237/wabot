@@ -238,22 +238,16 @@ async function startBot() {
       const viewOnceMsg = msg.message?.imageMessage?.viewOnce || msg.message?.videoMessage?.viewOnce;
       if (viewOnceMsg) {
         try {
-          const ownerNumber = process.env.OWNER_NUMBER;
-          const isFromOwner = msg.key.participant?.includes(ownerNumber) || msg.key.remoteJid?.includes(ownerNumber);
-          if (ownerNumber && !isFromOwner) {
-            const mediaMsg = msg.message?.imageMessage || msg.message?.videoMessage;
-            const isVideo = !!msg.message?.videoMessage;
-            const buffer = await sock.downloadMediaMessage(msg);
-            if (buffer) {
-              const ownerJid = ownerNumber + "@s.whatsapp.net";
-              const sender = msg.pushName || msg.key.participant || "someone";
-              if (isVideo) {
-                await sock.sendMessage(ownerJid, { video: buffer, caption: "📸 View-once video from " + sender });
-              } else {
-                await sock.sendMessage(ownerJid, { image: buffer, caption: "📸 View-once photo from " + sender });
-              }
-              console.log("Auto-saved view-once media from", sender);
+          const isVideo = !!msg.message?.videoMessage;
+          const buffer = await sock.downloadMediaMessage(msg);
+          if (buffer) {
+            const sender = msg.pushName || msg.key.participant || "someone";
+            if (isVideo) {
+              await sock.sendMessage(msg.key.remoteJid, { video: buffer, caption: "🔒 View-once media auto-saved by ARIA (from " + sender + ")" });
+            } else {
+              await sock.sendMessage(msg.key.remoteJid, { image: buffer, caption: "🔒 View-once media auto-saved by ARIA (from " + sender + ")" });
             }
+            console.log("Auto-saved view-once media from", sender);
           }
         } catch (voErr) {
           console.error("View-once save error:", voErr.message);

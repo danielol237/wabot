@@ -474,5 +474,54 @@ module.exports = {
       }
     },
 
+
+    // ── PLUGIN MARKETPLACE ──────────────────────────────────
+    plugins: async (sock, msg, args, ctx) => {
+      const sub = args[0]?.toLowerCase();
+      const { fetchManifest, installPlugin, setPluginState, isPluginEnabled, listInstalled } = require("../src/tools/pluginMarket");
+
+      if (sub === "install" || sub === "add") {
+        const id = args[1]?.toLowerCase();
+        if (!id) return ctx.reply("Usage: *!plugins install <name>*");
+        await ctx.react("📦");
+        await ctx.reply("Downloading " + id + " plugin...");
+        const r = await installPlugin(id);
+        if (!r.success) return ctx.reply("❌ " + r.error);
+        return ctx.reply("✅ Plugin *" + id + "* installed! Restart ARIA to load it.");
+      }
+
+      if (sub === "disable" || sub === "off") {
+        const id = args[1]?.toLowerCase();
+        if (!id) return ctx.reply("Usage: *!plugins disable <name>*");
+        const r = setPluginState(id, false);
+        return ctx.reply("⛔ Plugin *" + id + "* disabled. It won't load on next restart.");
+      }
+
+      if (sub === "enable" || sub === "on") {
+        const id = args[1]?.toLowerCase();
+        if (!id) return ctx.reply("Usage: *!plugins enable <name>*");
+        const r = setPluginState(id, true);
+        return ctx.reply("✅ Plugin *" + id + "* enabled.");
+      }
+
+      // Default: show marketplace
+      await ctx.react("📦");
+      const [available, installed] = await Promise.all([
+        fetchManifest(),
+        Promise.resolve(listInstalled()),
+      ]);
+
+      let text = "*📦 Plugin Marketplace*\n\n";
+      text += "*Available:*\n";
+      available.slice(0, 10).forEach(p => {
+        const installed_ = installed.find(i => i.id === p.id);
+        const status = installed_ ? (installed_.enabled ? "✅" : "⛔") : "⬇️";
+        text += status + " *" + p.name + "* — " + p.desc + "\n";
+      });
+      text += "\n*Installed locally:* " + installed.filter(i => i.locally).length + " plugins\n";
+      text += "\nUse *!plugins install <name>* to install\nUse *!plugins disable <name>* to disable";
+      ctx.reply(text);
+    },
+
   },
 };

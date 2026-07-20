@@ -122,23 +122,7 @@ async function startBot() {
 
   // If using pairing code and not yet registered, request the code ONCE.
   // IMPORTANT: requesting a pairing code naturally causes Baileys to close the
-  // connection with status 428 right after — that's expected protocol behavior,
-  // NOT an error. The old code treated every close as "reconnect immediately",
-  // which re-requested a fresh pairing code every ~3 seconds, invalidating
-  // whatever code you were trying to type and causing WhatsApp to reject the
-  // rapid repeated requests with 401s — an infinite self-inflicted loop.
-  if (USE_PAIRING_CODE && !sock.authState.creds.registered && !pairingCodeRequested) {
-    pairingCodeRequested = true;
-    try {
-      const code = await sock.requestPairingCode(process.env.PHONE_NUMBER.replace(/[^0-9]/g, ""));
-      pairingCode = code;
-      console.log(`\n📱 Pairing code: ${code}\n(Enter this in WhatsApp → Linked Devices → Link with phone number instead)\nYou have about 60 seconds — don't worry if the connection log looks like it closed, that's normal right after requesting a code.\n`);
-    } catch (err) {
-      console.error("Failed to request pairing code:", err.message);
-      lastError = `Pairing code request failed: ${err.message}`;
-      pairingCodeRequested = false; // allow retry on genuine failure
-    }
-  }
+
 
   sock.ev.on("creds.update", saveCreds);
 
@@ -161,10 +145,20 @@ async function startBot() {
       console.log("✅ ARIA is online and ready!");
       isReady = true;
       latestQrDataUrl = null;
-      pairingCode = null;
-      pairingCodeRequested = false;
       lastError = null;
-      startTaskPoller(sock); // safe to call again on reconnect — it clears any previous interval first
+      startTaskPoller(sock);
+
+      // Request pairing code once the connection is open and if not yet registered
+      if (USE_PAIRING_CODE && !sock.authState.creds.registered && !pairingCodeRequested) {
+        pairingCodeRequested = true;
+        sock.requestPairingCode(process.env.PHONE_NUMBER.replace(/[^0-9]/g, "")).then(code => {
+          pairingCode = code;
+          console.log(`\n📱 Pairing code: ${code}\n(Enter this in WhatsApp → Linked Devices → Link with phone number instead)\n`);
+        }).catch(err => {
+          console.error("Pairing code failed:", err.message);
+          pairingCodeRequested = false;
+        });
+      } // safe to call again on reconnect — it clears any previous interval first
 
       // Pass socket to scheduler so scheduled messages can send
       const { setSock } = require("./tools/scheduler");

@@ -421,5 +421,58 @@ module.exports = {
       ctx.reply(text);
     },
 
+
+    // ── WEB BROWSING ────────────────────────────────────────
+    browse: async (sock, msg, args, ctx) => {
+      const url = args[0];
+      if (!url) return ctx.reply("Usage: *!browse <url>* or *!browse search <query>*");
+
+      if (args[0] === "search" && args.slice(1).join(" ")) {
+        await ctx.react("🔍");
+        await ctx.reply("Searching the web...");
+        const { searchAndBrowse } = require("../src/tools/webBrowser");
+        const result = await searchAndBrowse(args.slice(1).join(" "));
+        if (!result.success) return ctx.reply("Search failed: " + result.error);
+        // If it's very long, send as file
+        if (result.text.length > 4000) {
+          const fs = require("fs");
+          const fp = "/tmp/aria_search.txt";
+          fs.writeFileSync(fp, result.text);
+          const buf = fs.readFileSync(fp);
+          await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: "search_result.txt", mimetype: "text/plain", caption: "Search results" });
+          try { fs.unlinkSync(fp); } catch (_) {}
+        } else {
+          ctx.reply(result.text);
+        }
+        return;
+      }
+
+      await ctx.react("🌐");
+      await ctx.reply("Loading " + url + "...");
+      const { browse } = require("../src/tools/webBrowser");
+      const result = await browse(url);
+      if (!result.success) return ctx.reply("Failed: " + result.error);
+
+      let text = "*📄 " + result.title + "*\n\n";
+      if (result.description) text += result.description + "\n\n";
+      text += result.content.slice(0, 3000);
+
+      if (result.links.length > 0) {
+        text += "\n\n*Links:*\n";
+        result.links.slice(0, 5).forEach(l => text += "• " + l.text + "\n  " + l.url + "\n");
+      }
+
+      if (text.length > 4000) {
+        const fs = require("fs");
+        const fp = "/tmp/aria_browse.txt";
+        fs.writeFileSync(fp, text);
+        const buf = fs.readFileSync(fp);
+        await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: result.title.slice(0, 30) + ".txt", mimetype: "text/plain", caption: "Browsed: " + result.title });
+        try { fs.unlinkSync(fp); } catch (_) {}
+      } else {
+        ctx.reply(text);
+      }
+    },
+
   },
 };

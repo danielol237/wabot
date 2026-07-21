@@ -741,5 +741,50 @@ module.exports = {
       ctx.reply("Noted. You're feeling " + m + ". " + getPersonalizedGreeting(uid));
     },
 
+
+    // ── CODE INTERPRETER ────────────────────────────────────
+    run: async (sock, msg, args, ctx) => {
+      const lang = args[0]?.toLowerCase();
+      const code = args.slice(1).join(" ");
+
+      if (!lang || !code) return ctx.reply("Usage: *!run <js|py|sh|html|plot> <code>*\nExample: *!run js console.log(\"hello\")*");
+
+      await ctx.react("💻");
+      await ctx.reply("Running " + lang + " code...");
+
+      const { interpret } = require("../src/tools/codeInterpreter");
+      const result = await interpret(lang, code);
+
+      if (result.image) {
+        // Send the plot image
+        const fs = require("fs");
+        const buf = fs.readFileSync(result.image);
+        await sock.sendMessage(msg.key.remoteJid, { image: buf, caption: "Plot result" });
+        try { fs.unlinkSync(result.image); } catch (_) {}
+        return;
+      }
+
+      if (result.html) {
+        // Save and send as file
+        const fs = require("fs");
+        const buf = fs.readFileSync(result.filePath);
+        await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: "output.html", mimetype: "text/html", caption: "HTML output" });
+        try { fs.unlinkSync(result.filePath); } catch (_) {}
+        return;
+      }
+
+      const output = "*Output:*\n" + result.output;
+      if (output.length > 4000) {
+        const fs = require("fs");
+        const fp = "/tmp/aria_code_output.txt";
+        fs.writeFileSync(fp, result.output);
+        const buf = fs.readFileSync(fp);
+        await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: "output.txt", mimetype: "text/plain", caption: "Code output" });
+        try { fs.unlinkSync(fp); } catch (_) {}
+      } else {
+        ctx.reply(output);
+      }
+    },
+
   },
 };

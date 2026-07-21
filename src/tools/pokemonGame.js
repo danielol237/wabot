@@ -32,15 +32,17 @@ const NATURE_MODS = {
   Naive: { spe: 1.1, spd: 0.9 }, Serious: {},
 };
 
-function calcStats(species, level, nature) {
+function calcStats(species, level, nature, ivs, evs) {
   const mod = NATURE_MODS[nature] || {};
+  ivs = ivs || { hp: 15, attack: 15, defense: 15, spAttack: 15, spDefense: 15, speed: 15 };
+  evs = evs || { hp: 0, attack: 0, defense: 0, spAttack: 0, spDefense: 0, speed: 0 };
   return {
-    maxHp: Math.floor((2 * species.stats.hp * level) / 100) + level + 10,
-    attack: Math.floor(Math.floor((2 * species.stats.attack * level) / 100 + 5) * (mod.atk || 1)),
-    defense: Math.floor(Math.floor((2 * species.stats.defense * level) / 100 + 5) * (mod.def || 1)),
-    spAttack: Math.floor(Math.floor((2 * species.stats.spAttack * level) / 100 + 5) * (mod.spa || 1)),
-    spDefense: Math.floor(Math.floor((2 * species.stats.spDefense * level) / 100 + 5) * (mod.spd || 1)),
-    speed: Math.floor(Math.floor((2 * species.stats.speed * level) / 100 + 5) * (mod.spe || 1)),
+    maxHp: Math.floor((2 * (species.stats.hp + (ivs.hp || 15)) * level) / 100) + level + 10 + Math.floor((evs.hp || 0) / 4),
+    attack: Math.floor(Math.floor((2 * (species.stats.attack + (ivs.attack || 15)) * level) / 100 + 5) * (mod.atk || 1)) + Math.floor((evs.attack || 0) / 4),
+    defense: Math.floor(Math.floor((2 * (species.stats.defense + (ivs.defense || 15)) * level) / 100 + 5) * (mod.def || 1)) + Math.floor((evs.defense || 0) / 4),
+    spAttack: Math.floor(Math.floor((2 * (species.stats.spAttack + (ivs.spAttack || 15)) * level) / 100 + 5) * (mod.spa || 1)) + Math.floor((evs.spAttack || 0) / 4),
+    spDefense: Math.floor(Math.floor((2 * (species.stats.spDefense + (ivs.spDefense || 15)) * level) / 100 + 5) * (mod.spd || 1)) + Math.floor((evs.spDefense || 0) / 4),
+    speed: Math.floor(Math.floor((2 * (species.stats.speed + (ivs.speed || 15)) * level) / 100 + 5) * (mod.spe || 1)) + Math.floor((evs.speed || 0) / 4),
   };
 }
 
@@ -74,13 +76,16 @@ async function createMonster(speciesId, level) {
     attack: 0, defense: 0, spAttack: 0, spDefense: 0, speed: 0,
     nature: NATURES[Math.floor(Math.random() * NATURES.length)],
     friendship: 50, shiny: Math.random() < 0.01, evoStone: null, mega: false,
+    ivs: { hp: Math.floor(Math.random() * 32), attack: Math.floor(Math.random() * 32), defense: Math.floor(Math.random() * 32),
+      spAttack: Math.floor(Math.random() * 32), spDefense: Math.floor(Math.random() * 32), speed: Math.floor(Math.random() * 32) },
+    evs: { hp: 0, attack: 0, defense: 0, spAttack: 0, spDefense: 0, speed: 0 },
     moves: getMovesForTypes(s.types, level).slice(0, 4) };
   return mon;
 }
 
 async function recalc(mon) {
   const s = await fetchSpecies(mon.speciesId);
-  const st = calcStats(s, mon.level, mon.nature);
+  const st = calcStats(s, mon.level, mon.nature, mon.ivs, mon.evs);
   mon.maxHp = st.maxHp; mon.attack = st.attack; mon.defense = st.defense;
   mon.spAttack = st.spAttack; mon.spDefense = st.spDefense; mon.speed = st.speed;
   if (mon.hp === 0 || mon.hp > mon.maxHp) mon.hp = mon.maxHp;

@@ -656,5 +656,42 @@ module.exports = {
       }
     },
 
+
+    // ── DAILY QUESTS ───────────────────────────────────────
+    daily: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const now = Date.now();
+      if (now - (t.lastDaily || 0) < 86400000) {
+        const remaining = Math.ceil((86400000 - (now - (t.lastDaily || 0))) / 3600000);
+        return ctx.reply("Daily rewards already claimed! Come back in " + remaining + " hours.");
+      }
+      t.lastDaily = now;
+      t.items.pokeball = (t.items.pokeball || 0) + 5;
+      t.items.potion = (t.items.potion || 0) + 3;
+      t.coins = (t.coins || 0) + 100;
+      addXP(uid, 30);
+      save();
+      ctx.reply("⭐ *Daily Rewards Claimed!*\n+5 Pokéballs\n+3 Potions\n+100 Coins\n+30 XP");
+    },
+
+    // ── BREEDING ────────────────────────────────────────────
+    breed: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const idx1 = parseInt(args[0]) - 1;
+      const idx2 = parseInt(args[1]) - 1;
+      if (isNaN(idx1) || isNaN(idx2)) return ctx.reply("Usage: *!breed <party#> <party#>*");
+      if (!t.team[idx1] || !t.team[idx2]) return ctx.reply("Invalid party members.");
+      const babyId = Math.random() < 0.5 ? t.team[idx1].speciesId : t.team[idx2].speciesId;
+      const level = 1;
+      const mon = createMonster(babyId, level);
+      await recalc(mon);
+      t.pc.push(mon);
+      save();
+      const s = await fetchSpecies(babyId);
+      ctx.reply("🥚 A new *" + s.name + "* (Lv1) hatched! Sent to PC.");
+    },
+
   },
 };

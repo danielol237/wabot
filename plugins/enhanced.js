@@ -931,5 +931,19 @@ module.exports = {
       } catch (e) { ctx.reply("Restore error: " + e.message); }
     },
 
+
+    // ── PLUGIN DOCTOR ───────────────────────────────────────
+    scanplugins: async (sock, msg, args, ctx) => {
+      await ctx.react("🔍");
+      const { scanAll, formatResults } = require("../src/tools/pluginDoctor");
+      const results = scanAll();
+      ctx.reply(formatResults(results));
+    },
+    // ── ANALYTICS ───────────────────────────────────────────
+    analytics: async (sock, msg, args, ctx) => {
+      const { getStats } = require("../src/tools/analytics");
+      ctx.reply(getStats());
+    },
+
   },
 };

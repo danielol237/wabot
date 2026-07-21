@@ -960,5 +960,40 @@ module.exports = {
       await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: result.name + ".js", mimetype: "text/javascript", caption: "✅ Plugin *" + result.name + "* generated & installed! Restart to load." });
     },
 
+
+    // ── PERSISTENT JOBS ─────────────────────────────────────
+    job: async (sock, msg, args, ctx) => {
+      const sub = args[0]?.toLowerCase();
+      const { createJob, executeJob, getJobs, getJob, cancelJob, formatJobList } = require("../src/tools/persistentJobs");
+      const uid = msg.key.participant || msg.key.remoteJid;
+      if (sub === "create" && args.slice(1).join(" ")) {
+        const task = args.slice(1).join(" ");
+        const id = createJob(msg.key.remoteJid, uid, task);
+        ctx.reply("Job *" + id + "* created. I will work on it in the background.");
+        executeJob(id);
+        return;
+      }
+      if (sub === "status" && args[1]) {
+        const j = getJob(args[1]);
+        if (!j) return ctx.reply("Job not found.");
+        const icon = j.status === "completed" ? "✅" : j.status === "cancelled" ? "⛔" : "🔄";
+        return ctx.reply(icon + " Job " + j.id + "\nTask: " + j.task + "\nStatus: " + j.status + "\nProgress: " + j.progress + "\nStep: " + j.currentStep + "/" + j.totalSteps);
+      }
+      if (sub === "view" && args[1]) {
+        const j = getJob(args[1]);
+        if (!j) return ctx.reply("Job not found.");
+        if (!j.result) return ctx.reply("Job still running.");
+        return ctx.reply("Result for " + j.id + "\n\n" + j.result.slice(0, 4000));
+      }
+      if (sub === "cancel" && args[1]) {
+        const r = cancelJob(args[1]);
+        return ctx.reply(r ? "Job cancelled." : "Job not found.");
+      }
+      if (sub === "list" || !sub) {
+        const list = getJobs(msg.key.remoteJid);
+        return ctx.reply("*Jobs*\n\n" + formatJobList(list));
+      }
+      return ctx.reply("Usage: !job create <task> / !job status <id> / !job view <id> / !job cancel <id> / !job list");
+    },
   },
 };

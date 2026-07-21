@@ -995,5 +995,32 @@ module.exports = {
       }
       return ctx.reply("Usage: !job create <task> / !job status <id> / !job view <id> / !job cancel <id> / !job list");
     },
+
+    // ── WORKSPACE ───────────────────────────────────────────
+    workspace: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const sub = args[0]?.toLowerCase();
+      const { createProject, setCurrent, archiveProject, renameProject, formatWorkspace } = require("../src/tools/workspace");
+      if (sub === "new" && args.slice(1).join(" ")) {
+        createProject(uid, args.slice(1).join(" "), "");
+        return ctx.reply("Project created: *" + args.slice(1).join(" ") + "*");
+      }
+      if (sub === "switch" && args[1]) {
+        const p = setCurrent(uid, args.slice(1).join(" "));
+        return ctx.reply(p ? "Switched to *" + p.name + "*" : "Not found.");
+      }
+      if (sub === "archive" && args[1]) {
+        const r = archiveProject(uid, args.slice(1).join(" "));
+        return ctx.reply(r ? "Archived." : "Not found.");
+      }
+      ctx.reply(formatWorkspace(uid));
+    },
+    resume: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      if (!args.join(" ")) return ctx.reply("Usage: *!resume <project name>*");
+      const { setCurrent } = require("../src/tools/workspace");
+      const p = setCurrent(uid, args.join(" "));
+      ctx.reply(p ? "Resuming *" + p.name + "*. What do we do?" : "Project not found.");
+    },
   },
 };

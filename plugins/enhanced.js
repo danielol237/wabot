@@ -675,5 +675,49 @@ module.exports = {
       ctx.reply(t);
     },
 
+
+    // ── MULTI-AGENT TEAM ───────────────────────────────────
+    team: async (sock, msg, args, ctx) => {
+      const task = args.join(" ");
+      if (!task) return ctx.reply("Usage: *!team <project>*\nExample: *!team build a calculator app*");
+
+      await ctx.react("👥");
+      await ctx.reply("Assembling team: Planner -> Coder -> Reviewer -> Debugger -> Tester");
+
+      const { runTeamProject } = require("../src/tools/multiAgent");
+      
+      let lastProgress = "";
+      const onProgress = async (step) => {
+        if (step !== lastProgress) {
+          lastProgress = step;
+          await ctx.reply(step);
+        }
+      };
+
+      const results = await runTeamProject(task, getSenderName(msg), onProgress);
+
+      // Send results
+      let summary = "*👥 Multi-Agent Build Complete*\n\n";
+      summary += "Files created: " + Object.keys(results).filter(k => k.startsWith("code_")).length + "\n";
+      if (results.review?.length > 0) summary += "Issues found & fixed: " + results.review.length + "\n";
+      summary += "\nSent as files below.";
+
+      await sock.sendMessage(msg.key.remoteJid, { text: summary });
+
+      // Send each file
+      const fs = require("fs");
+      for (const [key, val] of Object.entries(results)) {
+        if (key.startsWith("code_") && val.content) {
+          const filePath = "/tmp/aria_" + val.path.replace(/[^a-zA-Z0-9.]/g, "_");
+          fs.writeFileSync(filePath, val.content);
+          const buf = fs.readFileSync(filePath);
+          try {
+            await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: val.path, mimetype: "text/plain", caption: val.path });
+          } catch (e) {}
+          try { fs.unlinkSync(filePath); } catch (_) {}
+        }
+      }
+    },
+
   },
 };

@@ -45,37 +45,10 @@ async function autonomousTick() {
   // Only send if more than 2 hours since last interaction
   if (now - lastCheck < 2 * 60 * 60 * 1000) return;
 
-  // Get time of day for appropriate greeting
-  const hour = new Date().getHours();
-  const timeGreeting = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
-
-  // Generate a natural proactive message
-  const greetings = [
-    `hey, been a minute. what's up?`,
-    `good ${timeGreeting}! just checking in 👋`,
-    `*yawn* anything happening?`,
-    `got bored, decided to say hi. don't get used to it 😏`,
-    `you alive? it's been quiet around here`,
-    `just vibing. how's your ${timeGreeting} going?`,
-    `miss me? don't answer that 😂`,
-    `we haven't talked in a while. you good?`,
-  ];
-
-  // Sometimes ask about something specific
-  const askAbout = [
-    ` been working on anything interesting?`,
-    ` any updates on the ${process.env.BOT_NAME || "bot"}?`,
-    ` you watching anything good?`,
-    ` did you eat today? don't lie lol`,
-    ` you still grinding on that project?`,
-  ];
-  
-  let message = greetings[Math.floor(Math.random() * greetings.length)];
-  
-  // 30% chance to add a follow-up question
-  if (Math.random() < 0.3) {
-    message += askAbout[Math.floor(Math.random() * askAbout.length)];
-  }
+  // Use consciousness engine for realistic message
+  const { generateConsciousThought } = require("./consciousness");
+  const thought = await generateConsciousThought(ownerJid, "Daniel");
+  let message = thought || `*notices you've been quiet* what's on your mind?`;
 
   try {
     await sockRef.sendMessage(ownerJid, { text: message });

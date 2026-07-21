@@ -727,6 +727,24 @@ module.exports = {
 
 
     // ── MEGA EVOLUTION ─────────────────────────────────────
+    gmax: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const idx = parseInt(args[0]) - 1;
+      if (isNaN(idx)) return ctx.reply("Usage: *!gmax <party#>*");
+      const mon = t.team[idx];
+      if (!mon) return ctx.reply("Pokemon not found.");
+      if (mon.gmax) return ctx.reply("Already Gigantamaxed!");
+      mon.gmax = true;
+      mon.maxHp = Math.floor(mon.maxHp * 1.5);
+      mon.hp = mon.maxHp;
+      mon.level += 3;
+      await recalc(mon);
+      save();
+      const s = await fetchSpecies(mon.speciesId);
+      ctx.reply("🌊 *" + s.name + " Gigantamaxed!*\nSize increased! HP doubled! +3 levels!");
+    },
+
     mega: async (sock, msg, args, ctx) => {
       const uid = msg.key.participant || msg.key.remoteJid;
       const t = getTrainer(uid);

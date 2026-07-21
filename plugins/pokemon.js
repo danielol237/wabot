@@ -553,7 +553,33 @@ module.exports = {
     },
     gyms: "gym",
 
-    // ── BADGES ──────────────────────────────────────────────
+    // ── ELITE FOUR & CHAMPION ─────────────────────────────
+    elite: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (!t.badges || t.badges.length < 8) return ctx.reply("You need all 8 badges to challenge the Elite Four! Use *!gym*");
+      await ctx.react("⚔️");
+      ctx.reply("⚔️ *Elite Four Challenge!*\n\nDefeat all 4 to face the Champion!\n\n1. Lorelei (Ice)\n2. Bruno (Fighting)\n3. Agatha (Ghost)\n4. Lance (Dragon)\n\nUse *!elite <1-4>* to challenge each member.");
+    },
+
+    champion: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (!t.badges || t.badges.length < 8) return ctx.reply("Defeat the Elite Four first!");
+      await ctx.react("🏆");
+      const teamPower = t.team.reduce((s, p) => s + p.level, 0);
+      const win = Math.random() < Math.min(0.9, teamPower / 200);
+      if (win) {
+        const xp = 200;
+        addXP(uid, xp);
+        if (!t.badges.includes("Champion")) t.badges.push("Champion");
+        save();
+        ctx.reply("🏆 *You are the Champion!*\n\nYou defeated the Pokémon League!\n⭐ +" + xp + " XP\n\nYou can now access special features.");
+      } else {
+        ctx.reply("💔 The Champion defeated you. Train harder and try again!");
+      }
+    },
+ ──────────────────────────────────────────────
     badges: async (sock, msg, args, ctx) => {
       const uid = msg.key.participant || msg.key.remoteJid;
       const t = getTrainer(uid);

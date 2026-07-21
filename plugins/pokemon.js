@@ -579,12 +579,82 @@ module.exports = {
         ctx.reply("💔 The Champion defeated you. Train harder and try again!");
       }
     },
- ──────────────────────────────────────────────
     badges: async (sock, msg, args, ctx) => {
       const uid = msg.key.participant || msg.key.remoteJid;
       const t = getTrainer(uid);
       const badges = t.badges.length > 0 ? t.badges.map((b, i) => `${i + 1}. ${b}`).join("\n") : "No badges yet. Challenge gyms to earn them!";
       ctx.reply(`🏅 *${t.name || "Trainer"}'s Badges*\n\n${badges}`);
     },
+
+    // ── RAIDS ──────────────────────────────────────────────
+    raid: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (t.team.length === 0) return ctx.reply("No Pokémon in party!");
+      
+      const tiers = [
+        { name: "1-Star", level: 15, reward: 30 },
+        { name: "3-Star", level: 25, reward: 60 },
+        { name: "5-Star", level: 35, reward: 100 },
+        { name: "Mega", level: 45, reward: 150 },
+      ];
+      
+      const tierIdx = parseInt(args[0]) - 1;
+      const tier = tiers[tierIdx] || tiers[Math.floor(Math.random() * tiers.length)];
+      const raidMon = await fetchSpecies(randomId());
+      const teamPower = t.team.reduce((s, p) => s + p.level, 0);
+      const raidPower = tier.level * 4;
+      const win = Math.random() < Math.min(0.85, teamPower / raidPower * 0.7 + 0.1);
+      
+      await ctx.react("⚔️");
+      if (win) {
+        addXP(uid, tier.reward);
+        const rareItem = ["rarecandy", "ultraball", "firestone", "thunderstone"][Math.floor(Math.random() * 4)];
+        t.items[rareItem] = (t.items[rareItem] || 0) + 1;
+        save();
+        ctx.reply("🏆 *" + tier.name + " Raid cleared!*\n\nDefeated a wild " + raidMon.name + "!\n⭐ +" + tier.reward + " XP\n🎁 +1 " + ITEMS[rareItem]?.name);
+      } else {
+        ctx.reply("💔 Raid failed. Train your Pokémon and try again!");
+      }
+    },
+
+    // ── LEGENDARY HUNT ─────────────────────────────────────
+    legendary: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (t.team.length === 0) return ctx.reply("No Pokémon in party!");
+      if (t.level < 15) return ctx.reply("Reach trainer level 15 to hunt legendaries!");
+
+      const legends = [144, 145, 146, 150, 151, 249, 250, 382, 383, 384, 483, 484, 487, 643, 644, 716, 717, 718, 789, 791, 792, 888, 889, 890, 1007, 1008];
+      const targetId = legends[Math.floor(Math.random() * legends.length)];
+      const species = await fetchSpecies(targetId);
+      const level = Math.floor(Math.random() * 20) + 40;
+      
+      await ctx.react("✨");
+      const ball = args[0]?.toLowerCase() || "ultraball";
+      if (ball === "masterball") {
+        t.items.masterball = (t.items.masterball || 0) - 1;
+        const mon = createMonster(targetId, level);
+        await recalc(mon);
+        t.team.push(mon);
+        save();
+        return ctx.reply("✨ *" + species.name + " was caught!*\nLegendary Pokémon added to your team!");
+      }
+      
+      const catchRate = 0.05 + t.level * 0.002;
+      const caught = Math.random() < catchRate;
+      
+      if (caught) {
+        const mon = createMonster(targetId, level);
+        await recalc(mon);
+        t.pc.push(mon);
+        addXP(uid, 200);
+        save();
+        ctx.reply("✨ *" + species.name + " (Lv" + level + ") was caught!*\nLegendary sent to PC! ⭐ +200 XP");
+      } else {
+        ctx.reply("✨ A wild *" + species.name + "* appeared! But it broke free... Keep trying!");
+      }
+    },
+
   },
 };

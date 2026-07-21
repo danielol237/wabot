@@ -868,5 +868,68 @@ module.exports = {
       await sock.sendMessage(msg.key.remoteJid, { audio: audio, mimetype: "audio/mp4" });
     },
 
+
+    // ── TASK BOARD ──────────────────────────────────────────
+    todo: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const { addTask, markDone, deleteTask, formatTasks } = require("../src/tools/taskBoard");
+      const sub = args[0]?.toLowerCase();
+
+      if (sub === "add" && args.slice(1).join(" ")) {
+        const task = addTask(uid, args.slice(1).join(" "));
+        return ctx.reply("✅ Added: " + task.text + " (ID: " + task.id + ")");
+      }
+
+      const id = parseInt(args[0]);
+      if (!isNaN(id)) {
+        const done = markDone(uid, id);
+        if (done) return ctx.reply("🎉 *" + done.text + "* marked as done!");
+        const deleted = deleteTask(uid, id);
+        if (deleted) return ctx.reply("Deleted.");
+        return ctx.reply("Task not found.");
+      }
+
+      // Show all tasks
+      ctx.reply(formatTasks(uid));
+    },
+    done: async (sock, msg, args, ctx) => {
+      // Alias for !todo <n>
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const id = parseInt(args[0]);
+      if (isNaN(id)) return ctx.reply("Usage: *!done <task_number>*");
+      const { markDone } = require("../src/tools/taskBoard");
+      const task = markDone(uid, id);
+      if (!task) return ctx.reply("Task not found.");
+      ctx.reply("🎉 *" + task.text + "* marked complete!");
+    },
+    // ── BACKUP ──────────────────────────────────────────────
+    backup: async (sock, msg, args, ctx) => {
+      await ctx.react("💾");
+      await ctx.reply("Creating backup...");
+      const { createBackup } = require("../src/tools/backupSystem");
+      const result = await createBackup();
+      if (!result.success) return ctx.reply("Backup failed: " + result.error);
+      const fs = require("fs");
+      const buf = fs.readFileSync(result.filePath);
+      await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: "aria_backup.zip", mimetype: "application/zip", caption: "ARIA Backup (" + result.size + ")" });
+      try { fs.unlinkSync(result.filePath); } catch (_) {}
+    },
+    restore: async (sock, msg, args, ctx) => {
+      const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      if (!quoted?.documentMessage) return ctx.reply("Reply to a backup ZIP with *!restore*");
+      await ctx.react("🔄");
+      await ctx.reply("Restoring...");
+      try {
+        const buffer = await sock.downloadMediaMessage({ key: { remoteJid: msg.key.remoteJid, id: msg.message.extendedTextMessage.contextInfo.stanzaId, fromMe: false }, message: { documentMessage: quoted.documentMessage } });
+        const fp = "/tmp/aria_restore.zip";
+        require("fs").writeFileSync(fp, buffer);
+        const { restoreBackup } = require("../src/tools/backupSystem");
+        const r = await restoreBackup(fp);
+        try { require("fs").unlinkSync(fp); } catch (_) {}
+        if (!r.success) return ctx.reply("Restore failed: " + r.error);
+        ctx.reply("✅ Restored! Restart ARIA to apply.");
+      } catch (e) { ctx.reply("Restore error: " + e.message); }
+    },
+
   },
 };

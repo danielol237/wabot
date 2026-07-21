@@ -725,5 +725,26 @@ module.exports = {
       ctx.reply("*" + mon.nickname || "Pokemon" + "* now holds *" + item.name + "*: " + item.desc);
     },
 
+
+    // ── MEGA EVOLUTION ─────────────────────────────────────
+    mega: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const idx = parseInt(args[0]) - 1;
+      if (isNaN(idx)) return ctx.reply("Usage: *!mega <party#>*");
+      const mon = t.team[idx];
+      if (!mon) return ctx.reply("Pokemon not found.");
+      if (mon.mega) return ctx.reply("Already Mega Evolved!");
+      if (!t.items.meganite_x && !t.items.meganite_y) return ctx.reply("You need a Mega Stone! Buy at the mart.");
+      mon.mega = true;
+      mon.level += 5;
+      await recalc(mon);
+      if (t.items.meganite_x > 0) t.items.meganite_x--;
+      else t.items.meganite_y--;
+      save();
+      const s = await fetchSpecies(mon.speciesId);
+      ctx.reply("✨ *" + s.name + " Mega Evolved!*\nPower surged! +5 levels, stats boosted!");
+    },
+
   },
 };

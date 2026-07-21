@@ -693,5 +693,37 @@ module.exports = {
       ctx.reply("🥚 A new *" + s.name + "* (Lv1) hatched! Sent to PC.");
     },
 
+
+    // ── ABILITIES ───────────────────────────────────────────
+    ability: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const idx = parseInt(args[0]) - 1;
+      if (isNaN(idx)) return ctx.reply("Usage: *!ability <party#>*");
+      const mon = t.team[idx] || t.pc[Math.abs(idx)];
+      if (!mon) return ctx.reply("Pokemon not found.");
+      if (!mon.ability) {
+        const { getRandomAbility } = require("../src/tools/pokemonAbilities");
+        mon.ability = getRandomAbility();
+        save();
+      }
+      ctx.reply("*Ability:* " + mon.ability.name + "\n" + mon.ability.desc);
+    },
+    item: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      const idx = parseInt(args[0]) - 1;
+      const itemName = args.slice(1).join(" ");
+      if (isNaN(idx) || !itemName) return ctx.reply("Usage: *!item <party#> <item name>*\nAvailable: Choice Band, Choice Specs, Assault Vest, Life Orb, Leftovers, Focus Sash, Rocky Helmet, Kings Rock, Type boosters");
+      const mon = t.team[idx];
+      if (!mon) return ctx.reply("Pokemon not found.");
+      const { getHeldItem } = require("../src/tools/pokemonAbilities");
+      const item = getHeldItem(itemName);
+      if (!item) return ctx.reply("Item not found.");
+      mon.heldItem = item;
+      save();
+      ctx.reply("*" + mon.nickname || "Pokemon" + "* now holds *" + item.name + "*: " + item.desc);
+    },
+
   },
 };

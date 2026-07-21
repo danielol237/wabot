@@ -719,5 +719,27 @@ module.exports = {
       }
     },
 
+
+    // ── PERSONAL OS ─────────────────────────────────────────
+    remember: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const text = args.join(" ");
+      const separator = text.indexOf(" is ");
+      if (separator === -1) return ctx.reply("Usage: *!remember <key> is <value>*\nExample: *!remember favorite color is blue*");
+      const key = text.slice(0, separator).trim();
+      const value = text.slice(separator + 4).trim();
+      const { remember } = require("../src/tools/personalOS");
+      remember(uid, key, value);
+      ctx.reply("Got it! I'll remember that " + key + " is " + value + ".");
+    },
+    mood: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const m = args.join(" ");
+      if (!m) return ctx.reply("How are you feeling? *!mood happy/sad/tired/etc*");
+      const { trackMood, getPersonalizedGreeting } = require("../src/tools/personalOS");
+      trackMood(uid, m);
+      ctx.reply("Noted. You're feeling " + m + ". " + getPersonalizedGreeting(uid));
+    },
+
   },
 };

@@ -945,5 +945,20 @@ module.exports = {
       ctx.reply(getStats());
     },
 
+
+    // ── AI PLUGIN BUILDER ───────────────────────────────────
+    generateplugin: async (sock, msg, args, ctx) => {
+      const desc = args.join(" ");
+      if (!desc) return ctx.reply("Usage: *!generateplugin <description>*\nExample: *!generateplugin a fortune teller plugin*");
+      await ctx.react("⚡");
+      await ctx.reply("AI is building your plugin...");
+      const { generatePlugin } = require("../src/tools/pluginBuilder");
+      const result = await generatePlugin(desc, getSenderName(msg));
+      if (!result.success) return ctx.reply("❌ " + result.error);
+      const fs = require("fs");
+      const buf = fs.readFileSync(result.path);
+      await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: result.name + ".js", mimetype: "text/javascript", caption: "✅ Plugin *" + result.name + "* generated & installed! Restart to load." });
+    },
+
   },
 };

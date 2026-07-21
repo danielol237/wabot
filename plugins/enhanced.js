@@ -786,5 +786,55 @@ module.exports = {
       }
     },
 
+
+    // ── FILE UNDERSTANDING ─────────────────────────────────
+    analyze: async (sock, msg, args, ctx) => {
+      // Check if replying to a file/attachment
+      const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      const docMsg = quoted?.documentMessage || quoted?.imageMessage;
+      if (!docMsg) return ctx.reply("Reply to a file with *!analyze* to analyze it.");
+
+      await ctx.react("🔍");
+      await ctx.reply("Analyzing file...");
+
+      try {
+        // Download the file
+        const buffer = await sock.downloadMediaMessage(
+          { key: { remoteJid: msg.key.remoteJid, id: msg.message.extendedTextMessage.contextInfo.stanzaId, fromMe: false },
+            message: { documentMessage: docMsg } }
+        );
+
+        if (!buffer) return ctx.reply("Couldn't download the file.");
+
+        // Save temporarily
+        const fs = require("fs");
+        const fileName = docMsg.fileName || "file";
+        const filePath = "/tmp/aria_" + fileName;
+        fs.writeFileSync(filePath, buffer);
+
+        const { analyzeFile } = require("../src/tools/fileUnderstanding");
+        const result = await analyzeFile(filePath);
+
+        let text = "*📄 File Analysis*\n\n";
+        text += "Name: " + result.info.name + "\n";
+        text += "Size: " + result.info.size + "\n";
+        text += "Type: " + (result.info.type || "Unknown") + "\n";
+        if (result.info.lines) text += "Lines: " + result.info.lines + "\n";
+        if (result.info.functions) text += "Functions: " + result.info.functions + "\n";
+        if (result.info.contents) text += "Contents: " + result.info.contents + "\n";
+        if (result.info.extensions) text += "Extensions: " + result.info.extensions + "\n";
+        text += "\n" + result.summary;
+
+        if (result.content) {
+          text += "\n\n*Preview:*\n" + result.content.slice(0, 1500);
+        }
+
+        ctx.reply(text);
+        try { fs.unlinkSync(filePath); } catch (_) {}
+      } catch (e) {
+        ctx.reply("Analysis failed: " + e.message);
+      }
+    },
+
   },
 };

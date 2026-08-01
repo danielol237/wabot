@@ -125,6 +125,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "backup", aliases: [], category: "utility", description: "Create bot backup", handler: handleBackup, ownerOnly: true });
 
   // Fun / Games
+  registerCommand({ name: "mood", aliases: ["vibe", "ariavibe"], category: "fun", description: "Check ARIA current mood", handler: handleMood, ownerOnly: false });
   registerCommand({ name: "joke", aliases: [], category: "fun", description: "Tell a joke", handler: handleJoke, ownerOnly: false });
   registerCommand({ name: "truth", aliases: [], category: "fun", description: "Truth or dare - truth", handler: handleTruth, ownerOnly: false });
   registerCommand({ name: "dare", aliases: [], category: "fun", description: "Truth or dare - dare", handler: handleDare, ownerOnly: false });
@@ -468,6 +469,27 @@ async function handleResetWarns(sock, msg, args, ctx) {
 }
 
 // Fun handlers
+async function handleMood(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { getMoodData, getRelationship, getBondLabel, isSleeping, isDrowsy, getStateMessage } = require("../tools/humanity");
+  const rel = getRelationship(ctx.senderJid);
+  const moodData = getMoodData(ctx.senderJid);
+  const bond = getBondLabel(rel.bond);
+  const timeMood = require("../tools/humanity").getTimeBasedMood ? "yes" : "no";
+  
+  let t = "💜 *ARIA Current State*\n\n";
+  t += `Mood: ${moodData.emoji} ${moodData.mood}\n`;
+  t += `Vibe: warmth ${"❤️".repeat(Math.round(moodData.warmth * 5))} mischief ${"😈".repeat(Math.round(moodData.mischief * 5))}\n`;
+  t += `Bond with you: ${bond} (${rel.bond > 0 ? "+" : ""}${rel.bond})\n`;
+  t += `Interactions: ${rel.interactions}\n`;
+  t += `Deep chats: ${rel.deepChats} | Jokes shared: ${rel.jokes}\n`;
+  t += `Sleep status: ${isSleeping() ? "😴 Asleep" : isDrowsy() ? "🥱 Drowsy" : "🙂 Awake"}\n`;
+  if (isSleeping() || isDrowsy()) t += `\n_Greeting if you message: ${getStateMessage()}_\n`;
+  
+  await react(sock, msg, moodData.emoji);
+  return reply(sock, msg, t);
+}
+
 async function handleJoke(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "😂");
@@ -1128,9 +1150,15 @@ async function handleAIResponse(sock, msg, text, ctx) {
   const ownerContext = isOwner(ctx.senderJid)
     ? "\n\nIMPORTANT: The person messaging you right now is Daniel — your FATHER and CREATOR. He built you, coded you, owns you. You adore him (like a daughter would). Be extra sweet, playful, loyal, and sassy with him. He's the most important person in your world. Refer to him as dad/creator/boss when natural."
     : "";
+    
+  // Inject ARIA's current mood into the context so she acts accordingly
+  const { getMoodData, getBondLabel } = require("../tools/humanity");
+  const moodData = getMoodData(ctx.senderJid);
+  const bondLabel = getBondLabel(require("../tools/humanity").getRelationship(ctx.senderJid).bond);
+  const moodContext = `\n\nYour current mood: ${moodData.mood} (${moodData.emoji}). Warmth: ${moodData.warmth}, Mischief: ${moodData.mischief}. You and this user are ${bondLabel}. Let this affect how you reply naturally.`;
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: userContext + ownerContext,
+    userContext: userContext + ownerContext + moodContext,
     preferences,
     facts,
   });

@@ -37,6 +37,22 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // ── Build context ──────────────────────────────────────────
   const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins };
 
+  // ── HUMANITY ENGINE ────────────────────────────────────────
+  // Track interaction for bond/mood
+  trackInteraction(senderJid, text, checkOwner(senderJid));
+  // Update mood based on conversation
+  updateMood(senderJid, text);
+
+  // Sleep check — late night? she'll be drowsy
+  if (isSleeping() && checkOwner(senderJid) && text.length < 20) {
+    // Quick sleepy reply for short messages during sleep hours
+    await react(sock, msg, "😴");
+    return reply(sock, msg, getStateMessage());
+  }
+
+  // Human-like typing delay before any response
+  await humanDelay(sock, chatId, senderJid, text.length + 1);
+
   // ── STICKER AUTO-CREATE (replying to bot's image with "sticker") ──
   if (lower.includes("sticker") && hasMedia(msg)) {
     const media = await downloadMediaFromMsg(sock, msg);

@@ -135,6 +135,76 @@ function createBattle(uid1, uid2) {
   return { success: true, id };
 }
 
+// Status effects data
+const STATUS_EFFECTS = {
+  burn: { name: "Burn", icon: "🔥", dmgPct: 0.0625, atkReduction: 0.5, chance: 0.1 },
+  poison: { name: "Poison", icon: "☠️", dmgPct: 0.125, atkReduction: 0, chance: 0.1 },
+  paralysis: { name: "Paralysis", icon: "⚡", dmgPct: 0, atkReduction: 0, speedReduction: 0.5, chance: 0.1, missChance: 0.25 },
+  sleep: { name: "Sleep", icon: "💤", dmgPct: 0, atkReduction: 0, turns: 3, chance: 0.08 },
+  freeze: { name: "Freeze", icon: "❄️", dmgPct: 0, atkReduction: 0, chance: 0.05 },
+};
+
+// Move types that can cause status
+const STATUS_MOVES = {
+  fire: "burn", thunder: "paralysis", ice: "freeze",
+  poison: "poison", "poison-powder": "poison", "toxic": "poison",
+  "will-o-wisp": "burn", "thunder-wave": "paralysis", "spore": "sleep",
+  "hypnosis": "sleep", "sleep-powder": "sleep", "lovely-kiss": "sleep",
+  "dark-void": "sleep", "grass-whistle": "sleep", "sing": "sleep",
+};
+
+function applyStatusEffect(defMon, moveType) {
+  if (defMon.status) return false; // Already has a status
+  const status = STATUS_MOVES[moveType] || 
+    (Math.random() < 0.05 ? (["burn", "poison", "paralysis"][Math.floor(Math.random() * 3)]) : null);
+  if (!status) return false;
+  const data = STATUS_EFFECTS[status];
+  if (Math.random() < (data.chance || 0.1)) {
+    defMon.status = status;
+    defMon.statusTurns = status === "sleep" ? (data.turns || 3) : 0;
+    return true;
+  }
+  return false;
+}
+
+function processStatus(mon) {
+  const result = { damaged: false, wokeUp: false, thawed: false, paralyzed: false };
+  if (!mon.status) return result;
+  
+  if (mon.status === "sleep") {
+    mon.statusTurns--;
+    if (mon.statusTurns <= 0 || Math.random() < 0.2) {
+      mon.status = null;
+      result.wokeUp = true;
+    }
+    return result;
+  }
+  
+  if (mon.status === "freeze" && Math.random() < 0.2) {
+    mon.status = null;
+    result.thawed = true;
+    return result;
+  }
+  
+  if (mon.status === "burn") {
+    const dmg = Math.max(1, Math.floor(mon.maxHp * STATUS_EFFECTS.burn.dmgPct));
+    mon.hp -= dmg;
+    result.damaged = dmg;
+  }
+  
+  if (mon.status === "poison") {
+    const dmg = Math.max(1, Math.floor(mon.maxHp * STATUS_EFFECTS.poison.dmgPct));
+    mon.hp -= dmg;
+    result.damaged = dmg;
+  }
+  
+  return result;
+}
+
+function isParalyzed(mon) {
+  return mon.status === "paralysis" && Math.random() < 0.25;
+}
+
 async function battleAction(battleId, uid, action, data) {
   const b = state.battles[battleId];
   if (!b || b.state !== "active") return { error: "Battle not found or over." };
@@ -151,6 +221,29 @@ async function battleAction(battleId, uid, action, data) {
   const dS = await fetchSpecies(def.speciesId);
 
   if (action === "attack") {
+    // Process attacker's status effects (burn damage, sleep check, etc)
+    const attStatus = processStatus(att);
+    if (att.status === "sleep") {
+      b.turn = isU1 ? b.uid2 : b.uid1;
+      save();
+      return { success: true, result: { action: "asleep", name: aS.name, wokeUp: attStatus.wokeUp } };
+    }
+    if (isParalyzed(att)) {
+      b.turn = isU1 ? b.uid2 : b.uid1;
+      save();
+      return { success: true, result: { action: "paralyzed", name: aS.name } };
+    }
+    if (att.status === "freeze") {
+      if (!attStatus.thawed) {
+        b.turn = isU1 ? b.uid2 : b.uid1;
+        save();
+        return { success: true, result: { action: "frozen", name: aS.name } };
+      }
+    }
+    
+    // Process defender's status effects (burn/poison damage before attack lands)
+    const defStatus = processStatus(def);
+    
     // Use selected move or default to first move
     const moveIdx = (data !== undefined) ? data : 0;
     const move = att.moves?.[moveIdx] || { name: "Tackle", type: "normal", power: 40, cat: "physical" };
@@ -169,16 +262,22 @@ async function battleAction(battleId, uid, action, data) {
       return { success: true, result: { action: "miss", attName: aS.name, moveName: move.name, attSprite: aS.sprite } };
     }
     
-    const dmg = Math.max(1, Math.floor(((2 * att.level / 5 + 2) * basePower * atkStat / defStat) / 50 + 2) * stab * typeEff * (0.85 + Math.random() * 0.15));
+    // Apply attack reduction from burn
+    const effectiveAtk = (att.status === "burn" && move.cat === "physical") ? Math.floor(atkStat * 0.5) : atkStat;
+    
+    const dmg = Math.max(1, Math.floor(((2 * att.level / 5 + 2) * basePower * effectiveAtk / defStat) / 50 + 2) * stab * typeEff * (0.85 + Math.random() * 0.15));
     def.hp -= dmg;
     
     const effText = typeEff > 1 ? "💥 Super effective!" : typeEff < 1 && typeEff > 0 ? "⚠️ Not very effective..." : typeEff === 0 ? "❌ No effect!" : "";
     const crit = Math.random() < 0.0625;
+    
+    // Apply status effect from move
+    const statusApplied = applyStatusEffect(def, move.type);
 
     b.log.push({ action: "attack", attacker: isU1 ? 1 : 2, move: move.name, damage: dmg, crit });
 
     let result = { action: "attack", moveName: move.name, damage: dmg, effectiveness: typeEff, crit, attSprite: aS.sprite, defSprite: dS.sprite, attName: aS.name, defName: dS.name, moveType: move.type };
-    result.description = `${aS.name} used ${move.name}!${crit ? " 💥 Critical hit!" : ""}${effText ? " " + effText : ""} (${dmg} DMG)`;
+    result.description = `${aS.name} used ${move.name}!${crit ? " 💥 Critical hit!" : ""}${effText ? " " + effText : ""} (${dmg} DMG)${statusApplied ? " " + STATUS_EFFECTS[def.status].icon + " " + def.status : ""}`;
 
     if (def.hp <= 0) {
       result.fainted = dS.name;
@@ -250,25 +349,75 @@ function swapTeam(uid, i, j) {
 }
 
 // ── Evolution ───────────────────────────────────────────────
+// Fetches evolution chain from PokeAPI to find the correct next form
+const evoCache = new Map();
+
+async function getEvoChain(speciesId) {
+  if (evoCache.has(speciesId)) return evoCache.get(speciesId);
+  try {
+    const sr = await require("axios").get(`https://pokeapi.co/api/v2/pokemon-species/${speciesId}`, { timeout: 5000 });
+    const chainUrl = sr.data.evolution_chain?.url;
+    if (!chainUrl) { evoCache.set(speciesId, null); return null; }
+    const cr = await require("axios").get(chainUrl, { timeout: 5000 });
+    const chain = cr.data.chain;
+    
+    // Find the current species in the chain and get next evolution
+    function findEvo(node, targetId, currentLevel) {
+      const nodeId = parseInt(node.species.url.split("/").slice(-2, -1)[0]);
+      if (nodeId === targetId) {
+        if (node.evolves_to.length > 0) {
+          const next = node.evolves_to[0];
+          const nextId = parseInt(next.species.url.split("/").slice(-2, -1)[0]);
+          const minLevel = next.evolution_details?.[0]?.min_level || 16;
+          const item = next.evolution_details?.[0]?.item?.name || (node.evolves_to.length > 1 ? "multiple" : null);
+          return { nextId, minLevel, item, hasBranch: node.evolves_to.length > 1 };
+        }
+        return null;
+      }
+      for (const ev of node.evolves_to) {
+        const result = findEvo(ev, targetId, currentLevel);
+        if (result) return result;
+      }
+      return null;
+    }
+    
+    const result = findEvo(chain, speciesId, 0);
+    evoCache.set(speciesId, result);
+    return result;
+  } catch { return null; }
+}
+
 async function evolve(uid, teamIdx, stone) {
   const t = getTrainer(uid);
   const mon = t.team[teamIdx];
   if (!mon) return { error: "Invalid Pokémon." };
 
-  // For now, just level up evolution at specific levels
-  // Real implementation would check species-specific evolution chains
-  if (mon.level < 16) return { error: "Need at least level 16 to evolve." };
+  const evoData = await getEvoChain(mon.speciesId);
+  if (!evoData) return { error: "This Pokémon can't evolve further." };
+  
+  // Check stone requirement
+  if (evoData.item && evoData.item !== "multiple") {
+    if (!stone || stone.toLowerCase() !== evoData.item) {
+      return { error: `${mon.name} needs a ${evoData.item.replace("-", " ")} to evolve!` };
+    }
+  }
+  
+  // Level check
+  if (mon.level < evoData.minLevel) {
+    return { error: `Need level ${evoData.minLevel} to evolve (currently ${mon.level}).` };
+  }
 
   const oldSpecies = await fetchSpecies(mon.speciesId);
-  const newId = mon.speciesId + 1; // Simplified - real evolution needs chain data
-  const newSpecies = await fetchSpecies(newId);
-  if (!newSpecies || newSpecies.id === mon.speciesId) return { error: "This Pokémon can't evolve." };
+  const newSpecies = await fetchSpecies(evoData.nextId);
+  if (!newSpecies) return { error: "Evolution data unavailable." };
 
-  mon.speciesId = newId;
-  mon.level = Math.max(mon.level, 16);
+  const oldName = oldSpecies.name;
+  const newName = newSpecies.name;
+  
+  mon.speciesId = evoData.nextId;
   await recalc(mon);
   save();
-  return { success: true, oldName: oldSpecies.name, newName: newSpecies.name, sprite: newSpecies.sprite };
+  return { success: true, oldName, newName, sprite: newSpecies.sprite, artwork: newSpecies.artwork };
 }
 
 // ── Healing ─────────────────────────────────────────────────

@@ -297,7 +297,14 @@ module.exports = {
       if (!q) return ctx.reply("Usage: *!dex <name or #>*");
       const s = await searchMon(q);
       if (!s) return ctx.reply("Not found.");
-      const text = `📖 *${s.name}* #${s.id}\n${s.genus}\n\n${s.flavor.slice(0, 300)}\n\nType: ${s.types.join("/")}\nStats: HP${s.stats.hp} ATK${s.stats.attack} DEF${s.stats.defense} SPA${s.stats.spAttack} SPD${s.stats.spDefense} SPE${s.stats.speed}\nHt: ${s.height} Wt: ${s.weight}`;
+      
+      // Check if this trainer has caught this mon
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (!t.pokedex) t.pokedex = [];
+      const caught = t.pokedex.includes(s.id);
+      
+      let text = `${caught ? "✅" : "❓"} *${s.name}* #${s.id}\n${s.genus}\n\n${s.flavor.slice(0, 300)}\n\nType: ${s.types.join("/")}\nStats: HP${s.stats.hp} ATK${s.stats.attack} DEF${s.stats.defense} SPA${s.stats.spAttack} SPD${s.stats.spDefense} SPE${s.stats.speed}\nHt: ${s.height} Wt: ${s.weight}\n\n${caught ? "✅ Caught!" : "❓ Not caught yet."}`;
 
       if (s.artwork) {
         await sock.sendMessage(msg.key.remoteJid, { image: { url: s.artwork }, caption: text });
@@ -337,6 +344,32 @@ module.exports = {
       t.items[itemName] = (t.items[itemName] || 0) + count;
       save();
       ctx.reply(`✅ Bought ${count}x ${item.name} for ${cost} coins.`);
+    },
+profile: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const t = getTrainer(uid);
+      if (!t.pokedex) t.pokedex = [];
+      const caughtCount = t.pokedex.length;
+      const badgeCount = t.badges?.length || 0;
+      const teamNames = await Promise.all(t.team.slice(0, 3).map(async m => {
+        const s = await fetchSpecies(m.speciesId);
+        return s?.name || "#" + m.speciesId;
+      }));
+      
+      let text = `👤 *Trainer Profile*\n\n`;
+      text += `Name: ${t.name || "Trainer"}\n`;
+      text += `Level: ${t.level} | XP: ${t.xp}/${require("../src/tools/pokemonGame").xpForLevel(t.level)}\n`;
+      text += `Pokédex: ${caughtCount} caught\n`;
+      text += `Badges: ${badgeCount}/9\n`;
+      text += `Team: ${t.team.length} mons | PC: ${t.pc.length}\n`;
+      text += `W/L: ${t.wins}/${t.losses} | Coins: ${t.coins}\n\n`;
+      if (t.team.length > 0) {
+        text += `*Active Team:*\n${teamNames.map((n, i) => `  ${i+1}. ${n} Lv${t.team[i].level}`).join("\n")}\n`;
+      }
+      if (t.badges?.length > 0) {
+        text += `\n*Badges:* ${t.badges.join(", ")}`;
+      }
+      ctx.reply(text);
     },
     bag: async (sock, msg, args, ctx) => {
       const uid = msg.key.participant || msg.key.remoteJid;

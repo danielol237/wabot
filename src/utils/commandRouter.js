@@ -142,7 +142,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "leaderboard", aliases: ["lb", "top"], category: "fun", description: "View card leaderboard", handler: handleLeaderboard, ownerOnly: false });
 
   // Pokémon Spawn
-  registerCommand({ name: "pspawn", aliases: ["spawnrate", "spawns"], category: "fun", description: "Configure wild spawn rate", handler: handlePSpawn, ownerOnly: false });
+  registerCommand({ name: "pspawn", aliases: ["spawnrate", "spawns"], category: "admin", description: "Configure global wild spawn rate", handler: handlePSpawn, ownerOnly: true });
 
   // Anime
   registerCommand({ name: "anime", aliases: ["animesearch"], category: "anime", description: "Search anime", handler: handleAnimeSearch, ownerOnly: false });
@@ -810,24 +810,33 @@ async function handleTrending(sock, msg, args, ctx) {
 
 async function handlePSpawn(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  const uid = ctx.senderJid;
+  const { isOwner } = require("../utils/permissions");
+  
+  // Owner-only
+  if (!isOwner(ctx.senderJid)) {
+    return reply(sock, msg, "❌ Only the bot owner can configure spawns.");
+  }
+
+  const { getSpawnStats, setSpawnLimit, getGlobalSpawnConfig, DEFAULT_SPAWNS_PER_DAY } = require("../tools/pokemonSpawn");
+  const { getTimePeriod } = require("../tools/pokemonSpawn");
   
   if (!args) {
-    const stats = getSpawnStats(uid);
-    const timePeriod = require("../tools/pokemonSpawn").getTimePeriod();
-    let t = `🦎 *Pokémon Spawn Config*\n\n`;
+    const stats = getSpawnStats();
+    const period = getTimePeriod();
+    let t = `🦎 *Global Spawn Control* [OWNER]\n\n`;
     t += `📅 Daily limit: ${stats.dailyLimit}\n`;
     t += `✅ Used today: ${stats.totalToday}\n`;
     t += `🎯 Remaining: ${stats.remaining}\n`;
-    t += `⏰ Next spawn in: ${stats.nextSpawnMinutes === Infinity ? "N/A" : stats.nextSpawnMinutes + " min"}\n`;
-    t += `🌙 Time period: ${timePeriod}\n\n`;
-    t += `Usage:\n`;
-    t += `!pspawn — show this status\n`;
-    t += `!pspawn set <N> — set daily spawns (1-50)\n`;
-    t += `!pspawn reset — reset to ${require("../tools/pokemonSpawn").DEFAULT_SPAWNS_PER_DAY}\n`;
-    t += `!pspawn disable — pause auto spawns\n`;
-    t += `!pspawn enable — resume auto spawns\n\n`;
-    t += `_Auto-spawns trigger when you message me and a spawn is due. Higher trainer level = rarer finds!_`;
+    t += `⏰ Interval: every ${stats.intervalMin} min\n`;
+    t += `⏳ Next in: ${stats.nextSpawnMinutes} min\n`;
+    t += `${period.emoji} Time: ${period.name} (${period.boost.join(", ")} boosted)\n`;
+    t += `📊 Status: ${stats.enabled ? "🟢 Active" : "🔴 Paused"}\n\n`;
+    t += `*Usage:*\n`;
+    t += `!pspawn set <N> — set daily spawns (0-100)\n`;
+    t += `!pspawn reset — reset to ${DEFAULT_SPAWNS_PER_DAY}\n`;
+    t += `!pspawn disable — pause all spawns\n`;
+    t += `!pspawn enable — resume all spawns\n\n`;
+    t += `_Wild Pokémon spawn globally across all active chats. Rarity: common → mythical._`;
     return reply(sock, msg, t);
   }
 
@@ -836,35 +845,32 @@ async function handlePSpawn(sock, msg, args, ctx) {
 
   if (action === "set" && parts[1]) {
     const limit = parseInt(parts[1]);
-    if (isNaN(limit)) return reply(sock, msg, "Usage: !pspawn set <number 1-50>");
-    const clamped = setSpawnLimit(uid, limit);
+    if (isNaN(limit)) return reply(sock, msg, "Usage: !pspawn set <number 0-100>");
+    const clamped = setSpawnLimit(limit);
     await react(sock, msg, "✅");
-    return reply(sock, msg, `✅ Daily spawn limit set to ${clamped}.`);
+    return reply(sock, msg, `✅ Global spawn rate set to ${clamped} per day (every ${Math.round(1440 / Math.max(clamped, 1))} min).`);
   }
 
   if (action === "reset") {
-    const def = require("../tools/pokemonSpawn").DEFAULT_SPAWNS_PER_DAY;
-    setSpawnLimit(uid, def);
+    setSpawnLimit(DEFAULT_SPAWNS_PER_DAY);
     await react(sock, msg, "🔄");
-    return reply(sock, msg, `🔄 Reset daily spawns to ${def}.`);
+    return reply(sock, msg, `🔄 Reset global spawns to ${DEFAULT_SPAWNS_PER_DAY} per day.`);
   }
 
   if (action === "disable") {
-    const { getSpawnConfig } = require("../tools/pokemonSpawn");
-    getSpawnConfig(uid).enabled = false;
+    getGlobalSpawnConfig().enabled = false;
     const { save } = require("../tools/pokemonGame");
     save();
     await react(sock, msg, "⏸️");
-    return reply(sock, msg, "⏸️ Auto-spawns paused.");
+    return reply(sock, msg, "⏸️ All spawns paused.");
   }
 
   if (action === "enable") {
-    const { getSpawnConfig } = require("../tools/pokemonSpawn");
-    getSpawnConfig(uid).enabled = true;
+    getGlobalSpawnConfig().enabled = true;
     const { save } = require("../tools/pokemonGame");
     save();
     await react(sock, msg, "▶️");
-    return reply(sock, msg, "▶️ Auto-spawns resumed.");
+    return reply(sock, msg, "▶️ Spawns resumed.");
   }
 
   return reply(sock, msg, "Usage: !pspawn [set <N>|reset|disable|enable]");

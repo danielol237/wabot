@@ -6,6 +6,7 @@ const fs = require("fs");
 
 async function handleResponseWithFile(sock, msg, result) {
   const { reply, react, sleep } = require("../utils/baileysHelpers");
+  const { log, error, warn } = require("../utils/logger");
   const chatId = msg.key.remoteJid;
 
   if (!result.files || result.files.length === 0) return;
@@ -37,7 +38,7 @@ async function handleResponseWithFile(sock, msg, result) {
         }
       }
     } catch (err) {
-      console.error("File send error:", err.message);
+      error("File send error:", err.message);
     }
     return;
   }
@@ -66,7 +67,7 @@ async function handleResponseWithFile(sock, msg, result) {
         }
       }
     } catch (err) {
-      console.error("File send error:", err.message);
+      error("File send error:", err.message);
     }
   }
 }

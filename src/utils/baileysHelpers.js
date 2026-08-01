@@ -1,6 +1,7 @@
 // Baileys-native helper functions for ARIA WhatsApp bot
 const { downloadMediaMessage } = require("@whiskeysockets/baileys");
 const { wasSentByBot } = require("./botMessages");
+const { log, error, warn } = require("./logger");
 
 function getMessageText(msg) {
   return (
@@ -39,7 +40,7 @@ async function reply(sock, msg, text, options = {}) {
       await sleep(400);
     }
   } catch (err) {
-    console.error("Reply error:", err.message);
+    error("Reply error:", err.message);
   }
 }
 
@@ -123,7 +124,7 @@ async function downloadMediaFromMsg(sock, msg) {
       filename: mediaMsg?.fileName || null,
     };
   } catch (err) {
-    console.error("Media download error:", err.message);
+    error("Media download error:", err.message);
     return null;
   }
 }

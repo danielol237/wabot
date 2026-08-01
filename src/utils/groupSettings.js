@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { log, error, warn } = require("./logger");
 
 const DATA_DIR = path.join(__dirname, "../../data");
 const SETTINGS_FILE = path.join(DATA_DIR, "groupSettings.json");
@@ -14,7 +15,7 @@ try {
     settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
   }
 } catch (err) {
-  console.error("Group settings file corrupt, starting fresh:", err.message);
+  error("Group settings file corrupt, starting fresh:", err.message);
   settings = {};
 }
 
@@ -22,7 +23,7 @@ function save() {
   try {
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
   } catch (err) {
-    console.error("Failed to save group settings:", err.message);
+    error("Failed to save group settings:", err.message);
   }
 }
 

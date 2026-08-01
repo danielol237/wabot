@@ -1,5 +1,6 @@
 const Groq = require("groq-sdk");
 const axios = require("axios");
+const { log, error, warn } = require("../utils/logger");
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 
@@ -111,7 +112,7 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
         }
         return content;
       } catch (err) {
-        console.error(`Cerebras error (${model}):`, err.response?.data?.error?.message || err.message);
+        error(`Cerebras error (${model}):`, err.response?.data?.error?.message || err.message);
         const errMsg = err.response?.data?.error?.message || err.message || "";
         if (!errMsg.toLowerCase().includes("not found") && !errMsg.toLowerCase().includes("deprecated")) break;
       }
@@ -146,7 +147,7 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
         }
         return content;
       } catch (err) {
-        console.error(`Gemini error (${model}):`, err.response?.data?.error?.message || err.message);
+        error(`Gemini error (${model}):`, err.response?.data?.error?.message || err.message);
         // If this specific model is gone, try the next one in the list.
         // Any other error (rate limit, network) falls through to Groq instead.
         const errMsg = err.response?.data?.error?.message || err.message || "";
@@ -182,7 +183,7 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
         }
         return content;
       } catch (err) {
-        console.error(`Groq error (${model}):`, err.message);
+        error(`Groq error (${model}):`, err.message);
         // If it's a decommissioned-model error, try the next model in the list.
         // For any other error (rate limit, network, etc.), stop retrying and fall through to OpenRouter.
         if (!err.message?.includes("decommissioned")) break;
@@ -209,7 +210,7 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
       );
       return res.data.choices[0]?.message?.content || "No response.";
     } catch (err) {
-      console.error("OpenRouter error:", err.message);
+      error("OpenRouter error:", err.message);
     }
   }
 

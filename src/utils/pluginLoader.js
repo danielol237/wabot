@@ -22,17 +22,18 @@ function loadPlugins() {
     try {
       const pluginPath = path.join(PLUGINS_DIR, file);
       const plugin = require(pluginPath);
+      const { log, error, warn } = require("./logger");
 
       if (!plugin.name || !plugin.commands) {
-        console.error(`Plugin ${file} is missing required "name" or "commands" export, skipping.`);
+        error(`Plugin ${file} is missing required "name" or "commands" export, skipping.`);
         continue;
       }
 
       loaded.push(plugin);
-      console.log(`🧩 Loaded plugin: ${plugin.name} (${Object.keys(plugin.commands).join(", ")})`);
+      log(`🧩 Loaded plugin: ${plugin.name} (${Object.keys(plugin.commands).join(", ")})`);
     } catch (err) {
       // A broken plugin should never take down the whole bot — log it and move on
-      console.error(`Failed to load plugin ${file}:`, err.message);
+      error(`Failed to load plugin ${file}:`, err.message);
     }
   }
 

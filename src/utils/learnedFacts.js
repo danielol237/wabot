@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { log, error, warn } = require("./logger");
 
 const DATA_DIR = path.join(__dirname, "../../data");
 const FACTS_FILE = path.join(DATA_DIR, "learnedFacts.json");
@@ -18,7 +19,7 @@ try {
     facts = JSON.parse(fs.readFileSync(FACTS_FILE, "utf8"));
   }
 } catch (err) {
-  console.error("Learned facts file corrupt, starting fresh:", err.message);
+  error("Learned facts file corrupt, starting fresh:", err.message);
   facts = {};
 }
 
@@ -26,7 +27,7 @@ function save() {
   try {
     fs.writeFileSync(FACTS_FILE, JSON.stringify(facts, null, 2));
   } catch (err) {
-    console.error("Failed to save learned facts:", err.message);
+    error("Failed to save learned facts:", err.message);
   }
 }
 

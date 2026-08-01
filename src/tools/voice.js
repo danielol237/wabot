@@ -6,6 +6,7 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const { log, error, warn } = require("../utils/logger");
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 const TEMP_DIR = path.join(__dirname, "../../temp");
@@ -28,7 +29,7 @@ async function transcribeVoice(audioBuffer, mimetype = "audio/ogg") {
     });
     return { success: true, text: transcription.text };
   } catch (err) {
-    console.error("Transcription error:", err.message);
+    error("Transcription error:", err.message);
     return { success: false, error: err.message };
   } finally {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -42,7 +43,7 @@ async function textToSpeech(text, voice = "en-US-JennyNeural") {
   if (process.env.ELEVENLABS_API_KEY) {
     const result = await elevenLabsTTS(text);
     if (result.success) return result;
-    console.error("ElevenLabs failed, falling back to FreeTTS:", result.error);
+    error("ElevenLabs failed, falling back to FreeTTS:", result.error);
   }
   return await freeTTS(text, voice);
 }
@@ -88,7 +89,7 @@ async function freeTTS(text, voice) {
     );
     return { success: true, buffer: Buffer.from(res.data) };
   } catch (err) {
-    console.error("FreeTTS error:", err.response?.status, err.message);
+    error("FreeTTS error:", err.response?.status, err.message);
     return { success: false, error: err.response?.data?.message || err.message };
   }
 }

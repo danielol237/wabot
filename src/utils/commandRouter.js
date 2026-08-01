@@ -248,7 +248,7 @@ async function routeMessage(sock, msg, context) {
       try {
         await found.handler(sock, msg, args, ctx);
       } catch (err) {
-        console.error(`Plugin "${found.plugin.name}" command "${commandName}" crashed:`, err.message);
+        error(`Plugin "${found.plugin.name}" command "${commandName}" crashed:`, err.message);
         const { reply: r } = require("./baileysHelpers");
         await r(sock, msg, `⚠️ The "${commandName}" plugin command hit an error and didn't complete.`);
       }
@@ -658,7 +658,7 @@ async function handleCode(sock, msg, args, ctx) {
   const lines = args.split("\n");
   const lang = lines[0]?.split(/\s+/)[0] || "js";
   const code = lines.slice(1).join("\n").trim() || lines.slice(1).join("\n");
-  if (!code) return reply(sock, msg, `Usage: !run js\\nconsole.log('hello')`);
+  if (!code) return reply(sock, msg, `Usage: !run js\\nlog('hello')`);
   await react(sock, msg, "💻");
   const { interpret } = require("../tools/codeInterpreter");
   const result = await interpret(lang, code);
@@ -1018,6 +1018,7 @@ const intentHandlers = {
 // ── AI Response (catch-all) ──────────────────────────────────
 async function handleAIResponse(sock, msg, text, ctx) {
   const { reply, react, sleep, isQuotingBotMessage, getQuotedMessageText, hasVoiceNote, downloadMediaFromMsg, hasMedia } = require("./baileysHelpers");
+  const { log, error, warn } = require("./logger");
   
   // Check voice notes
   if (hasVoiceNote(msg)) {
@@ -1062,7 +1063,7 @@ async function handleAIResponse(sock, msg, text, ctx) {
     saveMemory(ctx.chatId, text, response);
     trackInteraction(ctx.senderJid, text);
     if (process.env.DEBUG_REPLIES === "true") {
-      console.log("AI REPLY:", response);
+      log("AI REPLY:", response);
     }
   }
 }

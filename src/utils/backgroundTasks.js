@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { log, error, warn } = require("./logger");
 
 const DATA_DIR = path.join(__dirname, "../../data");
 const TASKS_FILE = path.join(DATA_DIR, "backgroundTasks.json");
@@ -15,7 +16,7 @@ try {
     tasks = JSON.parse(fs.readFileSync(TASKS_FILE, "utf8"));
   }
 } catch (err) {
-  console.error("Background tasks file corrupt, starting fresh:", err.message);
+  error("Background tasks file corrupt, starting fresh:", err.message);
   tasks = {};
 }
 
@@ -23,7 +24,7 @@ function save() {
   try {
     fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2));
   } catch (err) {
-    console.error("Failed to save background tasks:", err.message);
+    error("Failed to save background tasks:", err.message);
   }
 }
 

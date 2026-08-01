@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { log, error, warn } = require("./logger");
 
 const DATA_DIR = path.join(__dirname, "../../data");
 const MEMORY_FILE = path.join(DATA_DIR, "memory.json");
@@ -16,10 +17,10 @@ try {
     const raw = fs.readFileSync(MEMORY_FILE, "utf8");
     const parsed = JSON.parse(raw);
     memory = new Map(Object.entries(parsed));
-    console.log(`💾 Loaded memory for ${memory.size} chat(s) from disk.`);
+    log(`💾 Loaded memory for ${memory.size} chat(s) from disk.`);
   }
 } catch (err) {
-  console.error("Memory file corrupt or unreadable, starting fresh:", err.message);
+  error("Memory file corrupt or unreadable, starting fresh:", err.message);
   memory = new Map();
 }
 
@@ -33,7 +34,7 @@ function scheduleSave() {
       const obj = Object.fromEntries(memory);
       fs.writeFileSync(MEMORY_FILE, JSON.stringify(obj, null, 2), "utf8");
     } catch (err) {
-      console.error("Failed to save memory to disk:", err.message);
+      error("Failed to save memory to disk:", err.message);
     }
   }, 2000);
 }
@@ -64,7 +65,7 @@ function flushNow() {
     const obj = Object.fromEntries(memory);
     fs.writeFileSync(MEMORY_FILE, JSON.stringify(obj, null, 2), "utf8");
   } catch (err) {
-    console.error("Failed to flush memory:", err.message);
+    error("Failed to flush memory:", err.message);
   }
 }
 

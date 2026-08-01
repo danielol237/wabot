@@ -25,7 +25,7 @@ const SESSIONS_DIR = path.join(__dirname, "../sessions");
 // Load plugins once at startup. A broken plugin logs an error and gets
 // skipped — it never prevents the rest of the bot from starting.
 const loadedPlugins = loadPlugins();
-console.log(`🧩 ${loadedPlugins.length} plugin(s) loaded.`);
+log(`🧩 ${loadedPlugins.length} plugin(s) loaded.`);
 
 const app = express();
 app.use(express.json());
@@ -130,19 +130,19 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr && !USE_PAIRING_CODE) {
-      console.log("📱 New QR generated! Visit /qr to scan it.");
+      log("📱 New QR generated! Visit /qr to scan it.");
       qrcodeTerminal.generate(qr, { small: true });
       try {
         latestQrDataUrl = await QRCode.toDataURL(qr, { width: 300 });
         qrGeneratedAt = Date.now();
         lastError = null;
       } catch (err) {
-        console.error("QR image generation failed:", err.message);
+        error("QR image generation failed:", err.message);
       }
     }
 
     if (connection === "open") {
-      console.log("✅ ARIA is online and ready!");
+      log("✅ ARIA is online and ready!");
       isReady = true;
       latestQrDataUrl = null;
       lastError = null;
@@ -153,7 +153,7 @@ async function startBot() {
         const { init } = require("./tools/autonomous");
         init(sock);
       } catch (e) {
-        console.error("Autonomous init error:", e.message);
+        error("Autonomous init error:", e.message);
       }
 
       // Request pairing code once the connection is open and if not yet registered
@@ -161,9 +161,9 @@ async function startBot() {
         pairingCodeRequested = true;
         sock.requestPairingCode(process.env.PHONE_NUMBER.replace(/[^0-9]/g, "")).then(code => {
           pairingCode = code;
-          console.log(`\n📱 Pairing code: ${code}\n(Enter this in WhatsApp → Linked Devices → Link with phone number instead)\n`);
+          log(`\n📱 Pairing code: ${code}\n(Enter this in WhatsApp → Linked Devices → Link with phone number instead)\n`);
         }).catch(err => {
-          console.error("Pairing code failed:", err.message);
+          error("Pairing code failed:", err.message);
           pairingCodeRequested = false;
         });
       } // safe to call again on reconnect — it clears any previous interval first
@@ -191,7 +191,7 @@ async function startBot() {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
-      console.log("⚠️ Connection closed. Status code:", statusCode, "Reconnecting:", shouldReconnect);
+      log("⚠️ Connection closed. Status code:", statusCode, "Reconnecting:", shouldReconnect);
 
       // If we're mid-pairing (code issued, not yet registered), DON'T reconnect
       // immediately — that's what caused the loop. Give the person time to actually
@@ -200,7 +200,7 @@ async function startBot() {
       const reconnectDelay = isPendingPairing ? 45000 : 3000;
 
       if (isPendingPairing && statusCode !== DisconnectReason.loggedOut) {
-        console.log("⏳ Waiting for pairing code to be entered before retrying...");
+        log("⏳ Waiting for pairing code to be entered before retrying...");
       }
 
       if (shouldReconnect) {
@@ -208,12 +208,12 @@ async function startBot() {
           // If still not registered after the wait, allow a fresh pairing code request
           if (isPendingPairing) pairingCodeRequested = false;
           startBot().catch((err) => {
-            console.error("Reconnect failed:", err.message);
+            error("Reconnect failed:", err.message);
             lastError = err.message;
           });
         }, reconnectDelay);
       } else {
-        console.log("❌ Logged out. Need a fresh QR scan — clearing session.");
+        log("❌ Logged out. Need a fresh QR scan — clearing session.");
         lastError = "Logged out — restart the service to get a fresh QR.";
         pairingCodeRequested = false;
         // Clear session files so next boot generates a fresh QR
@@ -221,10 +221,10 @@ async function startBot() {
           fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
           fs.mkdirSync(SESSIONS_DIR, { recursive: true });
         } catch (err) {
-          console.error("Failed to clear session:", err.message);
+          error("Failed to clear session:", err.message);
         }
         setTimeout(() => startBot().catch((err) => {
-          console.error("Restart after logout failed:", err.message);
+          error("Restart after logout failed:", err.message);
           lastError = err.message;
         }), 5000);
       }
@@ -253,18 +253,18 @@ async function startBot() {
               } else {
                 await sock.sendMessage(ariaJid, { image: buffer, caption: "🔒 View-once photo saved from " + sender + " in " + chatName });
               }
-              console.log("Auto-saved view-once media from", sender);
+              log("Auto-saved view-once media from", sender);
             }
           }
         } catch (voErr) {
-          console.error("View-once save error:", voErr.message);
+          error("View-once save error:", voErr.message);
         }
       }
 
       try {
         await handleMessage(sock, msg, loadedPlugins);
       } catch (err) {
-        console.error("Message handler error:", err);
+        error("Message handler error:", err);
         try {
           const { logError } = require("./tools/botAdmin");
           logError("messageHandler", err.message);
@@ -305,7 +305,7 @@ async function startBot() {
         }
       }
     } catch (err) {
-      console.error("group-participants.update handler error:", err.message);
+      error("group-participants.update handler error:", err.message);
     }
   });
 
@@ -313,15 +313,16 @@ async function startBot() {
 }
 
 startBot().catch((err) => {
-  console.error("❌ Failed to start bot:", err.message);
+  error("❌ Failed to start bot:", err.message);
   lastError = err.message;
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
+app.listen(PORT, () => log(`🚀 Server on port ${PORT}`));
 
 // Flush memory to disk on shutdown so nothing's lost on a clean restart/deploy
 const { flushNow } = require("./utils/memory");
+const { log, error, warn } = require("./utils/logger");
 process.on("SIGINT", () => { flushNow(); process.exit(0); });
 process.on("SIGTERM", () => { flushNow(); process.exit(0); });
 

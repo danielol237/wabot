@@ -13,6 +13,7 @@ const { transcribeVoice } = require("../tools/voice");
 const { getAIResponse } = require("../tools/ai");
 const { getPreferences } = require("../utils/userPreferences");
 const { getFactsContext } = require("../utils/learnedFacts");
+const { log, error, warn } = require("../utils/logger");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 

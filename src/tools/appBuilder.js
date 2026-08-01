@@ -77,7 +77,7 @@ Example output:
     if (!Array.isArray(files) || files.length === 0) throw new Error("Empty plan");
     return { success: true, files: files.slice(0, MAX_FILES) };
   } catch (err) {
-    console.error("Plan parsing failed:", err.message, "Raw response:", response.slice(0, 300));
+    error("Plan parsing failed:", err.message, "Raw response:", response.slice(0, 300));
     return { success: false, error: "Couldn't plan this project. Try describing it more simply, e.g. 'a todo app in HTML/CSS/JS'." };
   }
 }
@@ -125,7 +125,7 @@ async function reviewProjectFiles(projectDir, fileList, senderName) {
     const issues = JSON.parse(cleaned);
     return Array.isArray(issues) ? issues : [];
   } catch (err) {
-    console.error("Reviewer agent failed to produce usable output:", err.message);
+    error("Reviewer agent failed to produce usable output:", err.message);
     return []; // reviewer failing shouldn't block the build — just means no extra issues caught
   }
 }
@@ -308,7 +308,7 @@ async function processProjectBatch(projectId, senderName, onProgress) {
 
       markFileStatus(project.id, i, verification.valid ? "done" : "done_with_warning", content);
     } catch (err) {
-      console.error(`Failed to generate ${filePlan.path}:`, err.message);
+      error(`Failed to generate ${filePlan.path}:`, err.message);
       markFileStatus(project.id, i, "failed");
     }
 
@@ -395,10 +395,11 @@ async function finalizeProject(project, projectDir, onProgress) {
     if (onProgress) await onProgress("🌐 *Deployer:* Setting up a live preview...");
     try {
       const { deployToVercel } = require("./vercelDeploy");
+      const { log, error, warn } = require("../utils/logger");
       const deployResult = await deployToVercel(projectDir, project.goal);
       if (deployResult.success) previewUrl = deployResult.url;
     } catch (err) {
-      console.error("Vercel deploy step failed (non-fatal):", err.message);
+      error("Vercel deploy step failed (non-fatal):", err.message);
     }
   }
 
@@ -567,7 +568,7 @@ Which ONE file is most likely the cause? Respond with ONLY the file path, nothin
     fs.writeFileSync(fullPath, fixedContent, "utf8");
     return true;
   } catch (err) {
-    console.error("Build repair attempt failed:", err.message);
+    error("Build repair attempt failed:", err.message);
     return false;
   }
 }
@@ -576,7 +577,7 @@ function zipDirectory(sourceDir, outPath) {
   return new Promise((resolve) => {
     exec(`cd "${sourceDir}" && zip -r "${outPath}" .`, (err, stdout, stderr) => {
       if (err) {
-        console.error("Zip error:", stderr);
+        error("Zip error:", stderr);
         resolve({ success: false, error: "Failed to package the project." });
       } else {
         resolve({ success: true });
@@ -589,7 +590,7 @@ function cleanupDir(dir) {
   try {
     if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
   } catch (err) {
-    console.error("Cleanup failed:", err.message);
+    error("Cleanup failed:", err.message);
   }
 }
 

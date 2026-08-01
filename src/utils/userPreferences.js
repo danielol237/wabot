@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { log, error, warn } = require("./logger");
 
 const DATA_DIR = path.join(__dirname, "../../data");
 const PREFS_FILE = path.join(DATA_DIR, "userPreferences.json");
@@ -18,7 +19,7 @@ try {
     prefs = JSON.parse(fs.readFileSync(PREFS_FILE, "utf8"));
   }
 } catch (err) {
-  console.error("Preferences file corrupt, starting fresh:", err.message);
+  error("Preferences file corrupt, starting fresh:", err.message);
   prefs = {};
 }
 
@@ -26,7 +27,7 @@ function save() {
   try {
     fs.writeFileSync(PREFS_FILE, JSON.stringify(prefs, null, 2));
   } catch (err) {
-    console.error("Failed to save preferences:", err.message);
+    error("Failed to save preferences:", err.message);
   }
 }
 

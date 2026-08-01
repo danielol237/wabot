@@ -122,15 +122,84 @@ async function attemptCatch(uid, mon, ballType) {
 }
 
 // ── Battle ──────────────────────────────────────────────────
+// ── PvP Queue ─────────────────────────────────────────────
+function getQueue() {
+  if (!state.battleQueue) state.battleQueue = [];
+  return state.battleQueue;
+}
+
+function joinQueue(uid) {
+  const queue = getQueue();
+  // Check if already in queue
+  if (queue.includes(uid)) return { error: "Already in queue!" };
+  
+  // Check if someone's waiting
+  if (queue.length > 0) {
+    const opponent = queue.shift();
+    save();
+    const result = createBattle(uid, opponent);
+    if (result.success) {
+      return { success: true, battleId: result.id, opponent };
+    }
+    return { error: "Battle creation failed." };
+  }
+  
+  queue.push(uid);
+  save();
+  return { success: true, position: queue.length };
+}
+
+function leaveQueue(uid) {
+  const queue = getQueue();
+  const idx = queue.indexOf(uid);
+  if (idx === -1) return false;
+  queue.splice(idx, 1);
+  save();
+  return true;
+}
+
+function getQueueSize() {
+  return getQueue().length;
+}
+
 function createBattle(uid1, uid2) {
   const t1 = getTrainer(uid1), t2 = getTrainer(uid2);
   if (t1.team.length === 0) return { error: "No Pokémon in party!" };
   if (t2.team.length === 0) return { error: "They have no Pokémon!" };
   const id = uid();
+  
+  // Init weather
+  const weather = { type: "clear", turnsLeft: 0 };
+  
+  // Check for weather abilities on active mons
+  const mon1 = t1.team[0], mon2 = t2.team[0];
+  for (const mon of [mon1, mon2]) {
+    const weatherType = checkWeatherAbilities(mon);
+    if (weatherType) {
+      weather.type = weatherType;
+      weather.turnsLeft = WEATHER_TYPES[weatherType]?.duration || 5;
+      break; // First weather ability sets the weather
+    }
+  }
+  
   state.battles[id] = {
     id, uid1, uid2, active1: 0, active2: 0, turn: uid1,
-    state: "active", winner: null, log: [],
+    state: "active", winner: null, log: [], weather,
   };
+  
+  // Apply Intimidate on switch-in
+  for (const [isAttacker, mon, oppMon] of [[true, mon1, mon2], [false, mon2, mon1]]) {
+    const abilResult = applyAbility(mon.ability, "switchIn", mon, oppMon, null);
+    if (abilResult.effect?.type === "debuff") {
+      const stat = abilResult.effect.stat;
+      const mul = abilResult.effect.multiplier;
+      if (stat === "attack") oppMon.attack = Math.floor(oppMon.attack * mul);
+      if (stat === "defense") oppMon.defense = Math.floor(oppMon.defense * mul);
+      if (stat === "spAttack") oppMon.spAttack = Math.floor(oppMon.spAttack * mul);
+      if (stat === "speed") oppMon.speed = Math.floor(oppMon.speed * mul);
+    }
+  }
+  
   save();
   return { success: true, id };
 }
@@ -143,6 +212,159 @@ const STATUS_EFFECTS = {
   sleep: { name: "Sleep", icon: "💤", dmgPct: 0, atkReduction: 0, turns: 3, chance: 0.08 },
   freeze: { name: "Freeze", icon: "❄️", dmgPct: 0, atkReduction: 0, chance: 0.05 },
 };
+
+// ── Weather System ──────────────────────────────────────────
+const WEATHER_TYPES = {
+  clear: { name: "Clear", emoji: "☀️", duration: 0 },
+  rain: { name: "Rain", emoji: "🌧️", duration: 5, boostType: "water", resistType: "fire", boostMul: 1.5, resistMul: 0.5 },
+  sun: { name: "Sun", emoji: "☀️", duration: 5, boostType: "fire", resistType: "water", boostMul: 1.5, resistMul: 0.5 },
+  sandstorm: { name: "Sandstorm", emoji: "🌪️", duration: 5, chipDmg: 0.0625, chipTypes: ["rock", "ground", "steel"] },
+  hail: { name: "Hail", emoji: "❄️", duration: 5, chipDmg: 0.0625, chipTypes: ["ice"] },
+};
+
+function initWeather(battleId) {
+  const b = state.battles[battleId];
+  if (!b) return;
+  b.weather = { type: "clear", turnsLeft: 0 };
+}
+
+function checkWeatherAbilities(mon) {
+  // Called when a mon enters battle — checks for weather-summoning abilities
+  if (!mon.ability) return null;
+  const abil = require("./pokemonAbilities").getAbility(mon.ability);
+  if (!abil || abil.type !== "weather") return null;
+  return abil.weather;
+}
+
+function getWeatherDamage(monType, weather) {
+  if (weather.type === "sandstorm" && !weather.chipTypes.includes(monType)) {
+    return Math.max(1, Math.floor(weather.chipDmg * 100));
+  }
+  if (weather.type === "hail" && !weather.chipTypes.includes(monType)) {
+    return Math.max(1, Math.floor(weather.chipDmg * 100));
+  }
+  return 0;
+}
+
+function applyWeatherBoosts(moveType, weather) {
+  if (moveType === weather.boostType) return weather.boostMul || 1;
+  if (moveType === weather.resistType) return weather.resistMul || 1;
+  return 1;
+}
+
+// ── Ability Activation ─────────────────────────────────────
+function applyAbility(abilityName, context, att, def, move) {
+  if (!abilityName) return { effect: null, messages: [] };
+  const abil = require("./pokemonAbilities").getAbility(abilityName);
+  if (!abil) return { effect: null, messages: [] };
+  
+  const msg = [];
+  let effect = null;
+  
+  switch (abil.type) {
+    case "boost":
+      if (abil.condition === "lowHp" && att.hp < att.maxHp * 0.3) {
+        if (abil.stat === "attack" || abil.stat === "spAttack" || abil.stat === "defense" || abil.stat === "spDefense" || abil.stat === "speed") {
+          effect = { type: "statBoost", stat: abil.stat, multiplier: abil.multiplier };
+        } else if (move && abil.stat === move.type) {
+          effect = { type: "damageBoost", multiplier: abil.multiplier };
+        }
+      }
+      if (abil.condition === "statused" && att.status) {
+        effect = { type: "statBoost", stat: abil.stat, multiplier: abil.multiplier };
+      }
+      break;
+    case "debuff":
+      if (context === "switchIn") {
+        effect = { type: "debuff", target: "opponent", stat: abil.stat, multiplier: abil.multiplier };
+        msg.push(`💪 ${abil.name}: ${abil.desc}`);
+      }
+      break;
+    case "contact":
+      if (context === "hit" && move?.cat === "physical") {
+        if (Math.random() < (abil.chance || 0.3)) {
+          effect = { type: "status", status: abil.effect };
+          msg.push(`⚡ ${abil.name}: ${abil.desc}`);
+        }
+      }
+      break;
+    case "immunity":
+      if (context === "hit" && move?.type === abil.immune) {
+        effect = { type: "immune" };
+        msg.push(`🛡️ ${abil.name}: Immune to ${abil.immune} moves!`);
+      }
+      break;
+    case "survive":
+      if (context === "takingDamage" && att.hp <= 0 && (!abil.condition || abil.condition === "fullHp")) {
+        att.hp = 1;
+        effect = { type: "survive" };
+        msg.push(`💪 ${abil.name}: Survived the hit!`);
+      }
+      break;
+    case "statUp":
+      if (context === "turnEnd") {
+        effect = { type: "statUp", stat: abil.stat, amount: abil.amount };
+        msg.push(`⚡ ${abil.name}: ${abil.stat} rose!`);
+      }
+      break;
+  }
+  
+  return { effect, messages: msg };
+}
+
+// ── Held Item Activation ───────────────────────────────────
+function applyHeldItem(itemName, context, holder, opponent, move) {
+  if (!itemName) return { effect: null, messages: [] };
+  const item = require("./pokemonAbilities").getHeldItem(itemName);
+  if (!item) return { effect: null, messages: [] };
+  
+  const msg = [];
+  let effect = null;
+  
+  switch (item.type) {
+    case "regen":
+      if (context === "turnEnd") {
+        const heal = Math.max(1, Math.floor(holder.maxHp * item.amount));
+        holder.hp = Math.min(holder.maxHp, holder.hp + heal);
+        effect = { type: "heal", amount: heal };
+        msg.push(`💚 ${item.name}: Restored ${heal} HP!`);
+      }
+      break;
+    case "boost":
+      if (context === "damageCalc" && move) {
+        if (item.stat === "damage") {
+          effect = { type: "damageBoost", multiplier: item.multiplier };
+          if (item.drawback === "recoil") {
+            const recoil = Math.max(1, Math.floor(holder.maxHp * 0.1));
+            holder.hp -= recoil;
+            msg.push(`💥 ${item.name}: Damage up! (-${recoil} HP recoil)`);
+          }
+        } else if (item.stat === move.type) {
+          effect = { type: "damageBoost", multiplier: item.multiplier };
+          msg.push(`🔥 ${item.name}: ${move.type} moves boosted!`);
+        } else if (["attack", "defense", "spAttack", "spDefense", "speed"].includes(item.stat)) {
+          effect = { type: "statBoost", stat: item.stat, multiplier: item.multiplier };
+        }
+      }
+      break;
+    case "survive":
+      if (context === "takingDamage" && holder.hp <= 0 && item.condition === "fullHp" && holder.hp >= holder.maxHp) {
+        holder.hp = 1;
+        effect = { type: "survive" };
+        msg.push(`🛡️ ${item.name}: Survived!`);
+      }
+      break;
+    case "contact":
+      if (context === "hit" && move?.cat === "physical") {
+        const dmg = Math.max(1, Math.floor(opponent.maxHp * item.damage));
+        opponent.hp -= dmg;
+        msg.push(`💥 ${item.name}: ${dmg} damage to attacker!`);
+      }
+      break;
+  }
+  
+  return { effect, messages: msg };
+}
 
 // Move types that can cause status
 const STATUS_MOVES = {
@@ -492,4 +714,6 @@ module.exports = {
   moveToPC, moveToTeam, swapTeam,
   evolve, healAll, useItem,
   createTrade, acceptTrade,
+  getQueue, joinQueue, leaveQueue, getQueueSize,
+  WEATHER_TYPES, applyAbility, applyHeldItem, applyWeatherBoosts, getWeatherDamage,
 };

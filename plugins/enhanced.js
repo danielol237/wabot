@@ -839,7 +839,7 @@ module.exports = {
 
     // ── VOICE ENHANCED ──────────────────────────────────────
     voices: async (sock, msg, args, ctx) => {
-      const { listVoices } = require("../src/tools/voiceEnhanced");
+      const { listVoices } = require("../src/tools/voice");
       const voices = await listVoices();
       if (voices.length === 0) return ctx.reply("No voices available. Set ELEVENLABS_API_KEY in .env");
       let t = "*🎙️ Available Voices*\n\n";
@@ -850,7 +850,7 @@ module.exports = {
       const text = args.join(" ");
       if (!text) return ctx.reply("Usage: *!say <text>* — ARIA speaks it");
       await ctx.react("🔊");
-      const { speakResponse } = require("../src/tools/voiceEnhanced");
+      const { textToSpeech: speakResponse } = require("../src/tools/voice");
       const audio = await speakResponse(text);
       if (!audio) return ctx.reply("TTS failed. Set ELEVENLABS_API_KEY in .env");
       await sock.sendMessage(msg.key.remoteJid, { audio: audio, mimetype: "audio/mp4" });
@@ -862,7 +862,7 @@ module.exports = {
       const text = args.join(" ");
       if (!text) return ctx.reply("Usage: *!say <text>*");
       await ctx.react("🔊");
-      const { speakResponse } = require("../src/tools/voiceEnhanced");
+      const { textToSpeech: speakResponse } = require("../src/tools/voice");
       const audio = await speakResponse(text);
       if (!audio) return ctx.reply("TTS failed. Add ELEVENLABS_API_KEY to .env");
       await sock.sendMessage(msg.key.remoteJid, { audio: audio, mimetype: "audio/mp4" });

@@ -34,8 +34,7 @@ const { runEvolveCheck: selfAwarenessCheck } = require("../tools/selfAwareness")
 const { createSticker } = require("../tools/sticker");
 const { translateText, convertCurrency, convertUnit, getWeather, weatherCodeToDescription } = require("../tools/utilities");
 const { getNewsDigest } = require("../tools/news");
-const { textToSpeech } = require("../tools/tts");
-const { transcribeVoice } = require("../tools/voice");
+const { transcribeVoice, textToSpeech } = require("../tools/voice");
 const { readFromLink, detectFileLink } = require("../tools/linkReader");
 const { sendFile, extractAllCodeBlocks } = require("../tools/fileSender");
 const { createBackup } = require("../tools/backupSystem");
@@ -709,9 +708,9 @@ async function handleTTS(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !say <text>");
   await react(sock, msg, "🔊");
-  const audio = await textToSpeech(args);
-  if (audio) {
-    await sock.sendMessage(ctx.chatId, { audio: audio, mimetype: "audio/mpeg" });
+  const result = await textToSpeech(args);
+  if (result && result.success && result.buffer) {
+    await sock.sendMessage(ctx.chatId, { audio: result.buffer, mimetype: "audio/mpeg" });
   } else {
     await reply(sock, msg, "❌ TTS failed.");
   }
@@ -973,9 +972,9 @@ const intentHandlers = {
     const ttsText = text.replace(/^(say this|speak this|read this out|say it out loud|voice note)/i, "").trim();
     if (!ttsText) return;
     await react(sock, msg, "🔊");
-    const audio = await textToSpeech(ttsText);
-    if (audio) {
-      await sock.sendMessage(ctx.chatId, { audio, mimetype: "audio/mpeg" });
+    const result = await textToSpeech(ttsText);
+    if (result && result.success && result.buffer) {
+      await sock.sendMessage(ctx.chatId, { audio: result.buffer, mimetype: "audio/mpeg" });
     }
   },
   translate: async (sock, msg, text, ctx) => {

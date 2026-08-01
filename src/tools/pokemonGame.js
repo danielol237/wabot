@@ -335,6 +335,7 @@ function acceptTrade(tradeId, uid) {
 }
 
 module.exports = {
+  state,
   getTrainer, addXP, xpForLevel, save,
   wildEncounter, attemptCatch,
   createBattle, battleAction,

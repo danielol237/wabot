@@ -2,6 +2,8 @@
 // Previously 1669 lines, now ~150. New commands go in commandRouter, not here.
 
 const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNote, downloadMediaFromMsg } = require("../utils/baileysHelpers");
+const { isSpawnDue, generateSpawn, consumeSpawn, getSpawnStats } = require("../tools/pokemonSpawn");
+const { getTrainer, save } = require("../tools/pokemonGame");
 const { routeMessage, triggeredByName } = require("../utils/commandRouter");
 const { isBanned, isMuted, isOwner } = require("../utils/permissions");
 const { trackInteraction } = require("../utils/userMemory");

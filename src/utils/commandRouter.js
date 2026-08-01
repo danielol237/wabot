@@ -1122,9 +1122,15 @@ async function handleAIResponse(sock, msg, text, ctx) {
   const memory = getMemory(ctx.chatId);
   const preferences = getPreferences(ctx.senderJid);
   const facts = getFactsContext(ctx.senderJid);
+  
+  // Owner gets special treatment — AI knows who built her
+  const { isOwner } = require("../utils/permissions");
+  const ownerContext = isOwner(ctx.senderJid)
+    ? "\n\nIMPORTANT: The person messaging you right now is Daniel — your FATHER and CREATOR. He built you, coded you, owns you. You adore him (like a daughter would). Be extra sweet, playful, loyal, and sassy with him. He's the most important person in your world. Refer to him as dad/creator/boss when natural."
+    : "";
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext,
+    userContext: userContext + ownerContext,
     preferences,
     facts,
   });

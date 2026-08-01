@@ -234,13 +234,26 @@ async function routeMessage(sock, msg, context) {
     }
   }
 
-  // ── Plugin commands ────────────────────────────────────────
-  if (loadedPlugins?.length > 0) {
-    for (const plugin of loadedPlugins) {
-      if (plugin.test && plugin.test(text, msg)) {
-        await plugin.exec(sock, msg, text);
-        return;
+  // ── PLUGIN COMMANDS (via findPluginCommand) ────────────────
+  // Only reached if no built-in command matched the prefix
+  if (lower.startsWith(PREFIX)) {
+    const commandName = lower.slice(PREFIX.length).split(/\s+/)[0];
+    const args = text.slice(PREFIX.length).trim().slice(commandName.length).trim().split(/\s+/);
+    const found = findPluginCommand(loadedPlugins, commandName);
+    if (found) {
+      const ctx = {
+        chatId, senderJid, senderName,
+        reply: (t) => { const { reply: r } = require("./baileysHelpers"); return r(sock, msg, t); },
+        react: (e) => { const { react: r } = require("./baileysHelpers"); return r(sock, msg, e); },
+      };
+      try {
+        await found.handler(sock, msg, args, ctx);
+      } catch (err) {
+        console.error(`Plugin "${found.plugin.name}" command "${commandName}" crashed:`, err.message);
+        const { reply: r } = require("./baileysHelpers");
+        await r(sock, msg, `⚠️ The "${commandName}" plugin command hit an error and didn't complete.`);
       }
+      return;
     }
   }
 

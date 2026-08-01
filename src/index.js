@@ -14,6 +14,7 @@ const {
 
 const { handleMessage } = require("./handlers/messageHandler");
 const { loadPlugins } = require("./utils/pluginLoader");
+const { log, error, warn } = require("./utils/logger");
 const { startTaskPoller } = require("./tools/taskPoller");
 
 const TEMP_DIR = path.join(__dirname, "../temp");
@@ -326,7 +327,6 @@ app.listen(PORT, () => log(`🚀 Server on port ${PORT}`));
 
 // Flush memory to disk on shutdown so nothing's lost on a clean restart/deploy
 const { flushNow } = require("./utils/memory");
-const { log, error, warn } = require("./utils/logger");
 process.on("SIGINT", () => { flushNow(); process.exit(0); });
 process.on("SIGTERM", () => { flushNow(); process.exit(0); });
 

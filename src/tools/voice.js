@@ -114,4 +114,49 @@ async function listVoices() {
   }
 }
 
-module.exports = { transcribeVoice, textToSpeech, listVoices };
+// ── Voice Conversation (transcribe → think → speak) ─────────
+// Full voice-to-voice: user sends voice note, gets voice response back
+
+async function voiceConversation(audioBuffer, senderName, chatId, isOwner) {
+  // Step 1: Transcribe
+  const transcription = await transcribeVoice(audioBuffer);
+  if (!transcription.success) return { error: transcription.error };
+  
+  // Step 2: Get AI response using the transcribed text
+  try {
+    const { getAIResponse } = require("./ai");
+    const { getFactsContext } = require("../utils/learnedFacts");
+    const { getPreferences } = require("../utils/userPreferences");
+    
+    const preferences = getPreferences(chatId);
+    const facts = getFactsContext(chatId);
+    const ownerContext = isOwner
+      ? "\n\nIMPORTANT: The person talking to you via voice right now is Daniel — your FATHER and CREATOR. Be extra sweet and playful."
+      : "";
+    
+    const aiResponse = await getAIResponse(
+      transcription.text,
+      senderName,
+      [],
+      null,
+      ownerContext + "\n\n(This is a voice conversation — keep your reply conversational and speakable, not too long. Use natural pauses.)",
+      { preferences, facts }
+    );
+    
+    if (!aiResponse) return { error: "AI response failed" };
+    
+    // Step 3: Convert response to speech
+    const audio = await textToSpeech(aiResponse);
+    if (!audio || !audio.success) {
+      // Return text as fallback
+      return { text: aiResponse, transcription: transcription.text };
+    }
+    
+    return { audio: audio.buffer, text: aiResponse, transcription: transcription.text };
+  } catch (err) {
+    console.error("Voice conversation error:", err.message);
+    return { error: err.message, transcription: transcription.text };
+  }
+}
+
+module.exports = { transcribeVoice, textToSpeech, listVoices, voiceConversation };

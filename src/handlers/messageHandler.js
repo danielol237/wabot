@@ -5,7 +5,7 @@ const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNo
 const { isSpawnDue, generateSpawn, consumeSpawn, getSpawnStats } = require("../tools/pokemonSpawn");
 const { getTrainer, save } = require("../tools/pokemonGame");
 const { routeMessage, triggeredByName } = require("../utils/commandRouter");
-const { isBanned, isMuted, isOwner } = require("../utils/permissions");
+const { isBanned, isMuted, isOwner: checkOwner } = require("../utils/permissions");
 const { trackInteraction } = require("../utils/userMemory");
 const { getMemory, saveMemory } = require("../utils/memory");
 const { startSession, endSession, isSessionActive, touchSession } = require("../utils/chatSessions");
@@ -29,7 +29,7 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
 
   // ── BAN / MUTE check ───────────────────────────────────────
   if (isBanned(senderJid)) return;
-  if (isMuted(chatId) && !isOwner(senderJid)) return;
+  if (isMuted(chatId) && !checkOwner(senderJid)) return;
 
   // ── Ignore bot's own messages ──────────────────────────────
   if (msg.key.fromMe) return;
@@ -63,15 +63,31 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     }
   }
 
-  // ── VOICE NOTE auto-transcription ──────────────────────────
+  // ── VOICE NOTE → VOICE CONVERSATION ──────────────────────
   if (hasVoiceNote(msg)) {
     await react(sock, msg, "🎤");
     const media = await downloadMediaFromMsg(sock, msg);
     if (media) {
-      const transcription = await transcribeVoice(media.buffer);
-      if (transcription) {
-        return reply(sock, msg, `📝 *Transcription:*\n${transcription}`);
+      const { voiceConversation } = require("../tools/voice");
+      const result = await voiceConversation(media.buffer, senderName, chatId, checkOwner(senderJid));
+      
+      if (result.error) {
+        if (result.transcription) {
+          await reply(sock, msg, `📝 *Transcribed:* ${result.transcription}\n\n❌ Reply failed: ${result.error}`);
+        } else {
+          await reply(sock, msg, `❌ Voice processing error: ${result.error}`);
+        }
+      } else if (result.audio) {
+        // Send voice response
+        await sock.sendMessage(chatId, { audio: result.audio, mimetype: "audio/mpeg", ptt: true });
+        // Also send the transcriptions so the user can see what was said
+        await reply(sock, msg, `🎤 *You said:* ${result.transcription}\n\n🤖 *ARIA replied:* ${result.text}`);
+      } else if (result.text) {
+        // TTS failed, send text response with transcription
+        await react(sock, msg, "💬");
+        await reply(sock, msg, `🎤 *You said:* ${result.transcription}\n\n${result.text}`);
       }
+      return;
     }
   }
 

@@ -30,6 +30,10 @@ log(`🧩 ${loadedPlugins.length} plugin(s) loaded.`);
 const app = express();
 app.use(express.json());
 
+// Mount web dashboard
+const dashboardRouter = require("./dashboard");
+app.use("/dashboard", dashboardRouter);
+
 let latestQrDataUrl = null;
 let qrGeneratedAt = null;
 let pairingCode = null;

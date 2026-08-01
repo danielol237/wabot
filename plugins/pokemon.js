@@ -210,6 +210,22 @@ module.exports = {
     },
 
     // ── DUEL (PvP Battle) ───────────────────────────────────
+battlequeue: async (sock, msg, args, ctx) => {
+      const uid = msg.key.participant || msg.key.remoteJid;
+      const { joinQueue, leaveQueue, getQueueSize } = require("../src/tools/pokemonGame");
+      if (args[0] === "leave") {
+        leaveQueue(uid);
+        return ctx.reply("✅ Left the battle queue.");
+      }
+      const result = joinQueue(uid);
+      if (result.error) return ctx.reply("❌ " + result.error);
+      if (result.opponent) {
+        ctx.reply(`⚔️ *Match found!*\n\nBattle ID: ${result.battleId}\nOpponent matched! Use !strike ${result.battleId} 1 to attack.`);
+      } else {
+        ctx.reply(`🔍 Queued for battle! Position: #${result.position}. Use !battlequeue leave to cancel.\nQueue size: ${getQueueSize()}`);
+      }
+    },
+    qbattle: "battlequeue",
     duel: async (sock, msg, args, ctx) => {
       const uid = msg.key.participant || msg.key.remoteJid;
       const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;

@@ -168,6 +168,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "voicemode", aliases: ["voice", "vm"], category: "dev", description: "Toggle voice replies", handler: handleVoiceMode, ownerOnly: false });
   registerCommand({ name: "memories", aliases: ["remembered", "mymemory"], category: "dev", description: "See what I remember about you", handler: handleMemories, ownerOnly: false });
   registerCommand({ name: "mission", aliases: ["missions", "msn"], category: "dev", description: "Create/resume durable background missions", handler: handleMission, ownerOnly: true });
+  registerCommand({ name: "world", aliases: ["worldmodel", "model"], category: "dev", description: "View ARIA's world model", handler: handleWorld, ownerOnly: true });
   registerCommand({ name: "learn", aliases: ["teach"], category: "dev", description: "Teach a fact", handler: handleLearn, ownerOnly: false });
   registerCommand({ name: "facts", aliases: ["memory", "whatiknow"], category: "dev", description: "View learned facts", handler: handleFacts, ownerOnly: false });
   registerCommand({ name: "forget", aliases: [], category: "dev", description: "Forget a fact", handler: handleForget, ownerOnly: false });
@@ -1009,6 +1010,30 @@ async function handleVoiceMode(sock, msg, args, ctx) {
   }
 }
 
+async function handleWorld(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { getUserModel, getActiveGoals } = require("../utils/worldModel");
+  const model = getUserModel(ctx.senderJid);
+  const entities = Object.values(model.entities || {});
+  const rels = model.relations || [];
+  const goals = getActiveGoals(ctx.senderJid);
+  let out = "🌐 *ARIA's World Model*\n";
+  out += "\n*Entities:*";
+  if (entities.length === 0) out += "\n(none yet — tell me about your projects, people, goals)";
+  for (const e of entities.slice(-15)) out += `\n• ${e.type}: ${e.name}`;
+  out += "\n\n*Relations:*";
+  if (rels.length === 0) out += "\n(none)";
+  for (const r of rels.slice(-15)) {
+    const from = model.entities[r.from]?.name || r.from;
+    const to = model.entities[r.to]?.name || r.to;
+    out += `\n• ${from} → ${r.type} → ${to}`;
+  }
+  out += "\n\n*Active goals:*";
+  if (goals.length === 0) out += "\n(none)";
+  for (const g of goals) out += `\n• ${g.text}`;
+  await reply(sock, msg, out);
+}
+
 async function handleMission(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   const { createMission, executeMission, getMission, getMissions, cancelMission, formatMissionList, decideApproval } = require("../tools/durableMissions");
@@ -1241,10 +1266,13 @@ async function handleAIResponse(sock, msg, text, ctx) {
   // Semantic long-term memory: pull relevant memories + learned profile
   const { getRelevantContext, getProfileContext, autoExtractMemory, learnCommunicationStyle } = require("../utils/semanticMemory");
   const semanticContext = getRelevantContext(ctx.senderJid, text) + getProfileContext(ctx.senderJid);
+  // World Model: inject the structured entity-relationship context
+  const { getWorldContext, extractFromMessage } = require("../utils/worldModel");
+  const worldContext = getWorldContext(ctx.senderJid);
   const personalizationContext = "\n\n[Personalization] Learn their name if they give it, match their communication style naturally, and remember important things they share.\n";
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: userContext + ownerContext + moodContext + personaContext + toneContext + semanticContext + personalizationContext,
+    userContext: userContext + ownerContext + moodContext + personaContext + toneContext + semanticContext + worldContext + personalizationContext,
     preferences,
     facts,
   });
@@ -1258,6 +1286,7 @@ async function handleAIResponse(sock, msg, text, ctx) {
     try {
       autoExtractMemory(ctx.senderJid, ctx.senderName, text);
       learnCommunicationStyle(ctx.senderJid, ctx.senderName, text);
+      extractFromMessage(ctx.senderJid, ctx.senderName, text);
     } catch (_) {}
 
     // Humanized send (reactions, splitting, typos, occasional delay)

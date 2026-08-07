@@ -1131,7 +1131,7 @@ async function handleAIResponse(sock, msg, text, ctx) {
     quotedText = getQuotedMessageText(msg);
   }
 
-  await react(sock, msg, "🧠");
+  // (Reactions now handled by the humanizer layer — mood-appropriate)
   
   // Check intent for natural language triggers
   const intent = detectIntent(text);
@@ -1151,20 +1151,31 @@ async function handleAIResponse(sock, msg, text, ctx) {
     ? "\n\nIMPORTANT: The person messaging you right now is Daniel — your FATHER and CREATOR. He built you, coded you, owns you. You adore him (like a daughter would). Be extra sweet, playful, loyal, and sassy with him. He's the most important person in your world. Refer to him as dad/creator/boss when natural."
     : "";
     
-  // Inject ARIA's current mood into the context so she acts accordingly
+  // Inject ARIA's current mood + persona into the context so she acts accordingly
   const { getMoodData, getBondLabel } = require("../tools/humanity");
+  const { buildPersonaContext, detectTone, humanizeAndSend, bleedMood, rememberCallable } = require("../tools/humanizer");
   const moodData = getMoodData(ctx.senderJid);
   const bondLabel = getBondLabel(require("../tools/humanity").getRelationship(ctx.senderJid).bond);
   const moodContext = `\n\nYour current mood: ${moodData.mood} (${moodData.emoji}). Warmth: ${moodData.warmth}, Mischief: ${moodData.mischief}. You and this user are ${bondLabel}. Let this affect how you reply naturally.`;
 
+  const isOwnerCtx = isOwner(ctx.senderJid);
+  const personaContext = buildPersonaContext(ctx.senderJid, ctx.senderName, text, isOwnerCtx);
+  const tone = detectTone(text);
+  const toneContext = tone !== "neutral" ? `\n[User tone: ${tone}] Match their energy naturally.` : "";
+
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: userContext + ownerContext + moodContext,
+    userContext: userContext + ownerContext + moodContext + personaContext + toneContext,
     preferences,
     facts,
   });
 
   if (response) {
-    await reply(sock, msg, response);
+    // Remember callable facts (running jokes, likes) for future callbacks
+    if (tone === "up" && text.length > 20) rememberCallable(ctx.senderJid, ctx.senderName + " said: \"" + text.slice(0, 60) + "\"");
+    bleedMood(ctx.senderJid, moodData.mood);
+
+    // Humanized send (reactions, splitting, typos, occasional delay)
+    humanizeAndSend(sock, msg, response, ctx.senderJid, ctx.senderName, isOwnerCtx);
     saveMemory(ctx.chatId, text, response);
     trackInteraction(ctx.senderJid, text);
     if (process.env.DEBUG_REPLIES === "true") {

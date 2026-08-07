@@ -45,6 +45,20 @@ async function autonomousTick() {
   // Only send if more than 2 hours since last interaction
   if (now - lastCheck < 2 * 60 * 60 * 1000) return;
 
+  // Good morning / goodnight ritual check (once per day, proactive)
+  const { ritualDue, markRitualDone } = require("./humanizer");
+  if (ritualDue(ownerJid, "morning")) {
+    markRitualDone(ownerJid, "morning");
+    try {
+      await sockRef.sendMessage(ownerJid, { text: "morning 😊 how'd you sleep?" });
+      specialUsers.set(ownerJid, { lastCheck: now, mood: "warm" });
+      console.log("🌅 ARIA sent good-morning ritual");
+      return;
+    } catch (e) {
+      console.error("Good-morning ritual failed:", e.message);
+    }
+  }
+
   // Use consciousness engine for realistic message
   const { generateConsciousThought } = require("./consciousness");
   const thought = await generateConsciousThought(ownerJid, "Daniel");

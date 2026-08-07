@@ -68,13 +68,21 @@ function needsLargeOutput(userMessage) {
   return signals.some((s) => lower.includes(s));
 }
 
-async function getAIResponse(userMessage, userName, history = [], systemOverride = null, extraContext = "") {
+async function getAIResponse(userMessage, userName, history = [], systemOverride = null, extraContext = "", options = {}) {
   const messages = [
     ...history.slice(-8),
     { role: "user", content: userMessage },
   ];
 
-  const systemPrompt = (systemOverride || SYSTEM_PROMPT) + extraContext;
+  // Merge any structured context (user facts, preferences, mood, owner/personality
+  // notes) into the system prompt. Previously the caller passed these as an options
+  // object that was silently dropped — so personality context never reached the model.
+  const { userContext = "", preferences = null, facts = "" } = options;
+  let extra = extraContext || "";
+  if (userContext) extra += "\n" + userContext;
+  if (preferences) extra += "\nUser preferences: " + JSON.stringify(preferences);
+  if (facts) extra += "\nLearned facts: " + facts;
+  const systemPrompt = (systemOverride || SYSTEM_PROMPT) + extra;
   const maxTokens = needsLargeOutput(userMessage) ? 12000 : 2048;
 
   // Try Cerebras first — 1M tokens/day free, the highest ceiling of any free

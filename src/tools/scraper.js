@@ -10,15 +10,9 @@ async function scrapeUrl(url) {
     return formatResult(axiosResult, url);
   }
 
-  // Stage 2: Puppeteer for JS-heavy sites
-  console.log("Axios gave thin content, switching to Puppeteer...");
-  const puppeteerResult = await tryPuppeteer(url);
-  if (puppeteerResult.success) {
-    return formatResult(puppeteerResult, url);
-  }
-
-  // Stage 3: Try a reader-mode proxy as last resort
-  console.log("Puppeteer failed, trying reader proxy...");
+  // Stage 2: Try a reader-mode proxy for JS-heavy sites (puppeteer fallback removed
+  // — puppeteer isn't a dependency, so that path always failed silently)
+  console.log("Axios gave thin content, trying reader proxy...");
   const readerResult = await tryReaderProxy(url);
   if (readerResult.success) {
     return formatResult(readerResult, url);
@@ -69,72 +63,6 @@ async function tryAxios(url) {
     return { success: !!content, title, metaDesc, content };
   } catch (err) {
     return { success: false, error: err.message };
-  }
-}
-
-async function tryPuppeteer(url) {
-  let browser;
-  try {
-    const puppeteer = require("puppeteer");
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--no-first-run",
-      ],
-    });
-
-    const page = await browser.newPage();
-
-    // Block images/fonts/media to speed up load
-    await page.setRequestInterception(true);
-    page.on("request", (req) => {
-      const type = req.resourceType();
-      if (["image", "font", "media", "stylesheet"].includes(type)) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36");
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-
-    // Wait a bit for JS to render
-    await page.waitForTimeout(2000);
-
-    const data = await page.evaluate(() => {
-      // Remove noise
-      document.querySelectorAll("script, style, nav, footer, header, iframe, noscript").forEach(el => el.remove());
-
-      const title = document.title || "";
-      const metaDesc = document.querySelector('meta[name="description"]')?.content || "";
-
-      let content = "";
-      document.querySelectorAll("h1, h2, h3, h4, p, li, td, th, pre, code, blockquote").forEach(el => {
-        const tag = el.tagName.toLowerCase();
-        const t = el.innerText?.replace(/\s+/g, " ").trim();
-        if (!t || t.length < 20) return;
-
-        if (tag === "h1" || tag === "h2") content += `\n*${t}*\n`;
-        else if (tag === "h3" || tag === "h4") content += `\n_${t}_\n`;
-        else if (tag === "li") content += `• ${t}\n`;
-        else if (tag === "pre" || tag === "code") content += `\`${t.slice(0, 200)}\`\n`;
-        else content += `${t}\n`;
-      });
-
-      return { title, metaDesc, content: content.slice(0, 4000) };
-    });
-
-    return { success: !!data.content, ...data };
-  } catch (err) {
-    console.error("Puppeteer scrape error:", err.message);
-    return { success: false, error: err.message };
-  } finally {
-    if (browser) await browser.close();
   }
 }
 

@@ -110,8 +110,8 @@ function registerBuiltinCommands() {
 
   // Utility
   registerCommand({ name: "search", aliases: ["web", "google"], category: "utility", description: "Search the web", handler: handleSearch, ownerOnly: false });
-  registerCommand({ name: "download", aliases: ["dl"], category: "utility", description: "Download media from URL", handler: handleDownload, ownerOnly: false });
-  registerCommand({ name: "run", aliases: ["exec", "code"], category: "utility", description: "Execute code", handler: handleCode, ownerOnly: false });
+  registerCommand({ name: "download", aliases: ["dl"], category: "utility", description: "Download media from URL", handler: handleDownload, ownerOnly: true });
+  registerCommand({ name: "run", aliases: ["exec", "code"], category: "utility", description: "Execute code", handler: handleCode, ownerOnly: true });
   registerCommand({ name: "weather", aliases: [], category: "utility", description: "Get weather", handler: handleWeather, ownerOnly: false });
   registerCommand({ name: "translate", aliases: ["tr"], category: "utility", description: "Translate text", handler: handleTranslate, ownerOnly: false });
   registerCommand({ name: "news", aliases: [], category: "utility", description: "Get news summary", handler: handleNews, ownerOnly: false });
@@ -154,23 +154,23 @@ function registerBuiltinCommands() {
   registerCommand({ name: "airing", aliases: ["airinganime"], category: "anime", description: "Airing anime", handler: handleAiring, ownerOnly: false });
 
   // Dev / Advanced
-  registerCommand({ name: "build", aliases: ["agent"], category: "dev", description: "AI app builder", handler: handleBuild, ownerOnly: false });
-  registerCommand({ name: "continue", aliases: ["resume"], category: "dev", description: "Continue a project", handler: handleContinue, ownerOnly: false });
+  registerCommand({ name: "build", aliases: ["agent"], category: "dev", description: "AI app builder", handler: handleBuild, ownerOnly: true });
+  registerCommand({ name: "continue", aliases: ["resume"], category: "dev", description: "Continue a project", handler: handleContinue, ownerOnly: true });
   registerCommand({ name: "status", aliases: ["project"], category: "dev", description: "Project status", handler: handleProjectStatus, ownerOnly: false });
   registerCommand({ name: "projects", aliases: ["mylist"], category: "dev", description: "List projects", handler: handleProjectList, ownerOnly: false });
-  registerCommand({ name: "cancelbuild", aliases: ["cancel"], category: "dev", description: "Cancel a project", handler: handleProjectCancel, ownerOnly: false });
-  registerCommand({ name: "edit", aliases: [], category: "dev", description: "Edit a project file", handler: handleEditFile, ownerOnly: false });
-  registerCommand({ name: "think", aliases: [], category: "dev", description: "Think about a project", handler: handleThink, ownerOnly: false });
-  registerCommand({ name: "fix", aliases: ["debug"], category: "dev", description: "Debug code", handler: handleDebugCode, ownerOnly: false });
+  registerCommand({ name: "cancelbuild", aliases: ["cancel"], category: "dev", description: "Cancel a project", handler: handleProjectCancel, ownerOnly: true });
+  registerCommand({ name: "edit", aliases: [], category: "dev", description: "Edit a project file", handler: handleEditFile, ownerOnly: true });
+  registerCommand({ name: "think", aliases: [], category: "dev", description: "Think about a project", handler: handleThink, ownerOnly: true });
+  registerCommand({ name: "fix", aliases: ["debug"], category: "dev", description: "Debug code", handler: handleDebugCode, ownerOnly: true });
   registerCommand({ name: "remember", aliases: [], category: "dev", description: "Remember a preference", handler: handleRemember, ownerOnly: false });
   registerCommand({ name: "preferences", aliases: ["myprefs"], category: "dev", description: "View preferences", handler: handlePreferences, ownerOnly: false });
   registerCommand({ name: "clearprefs", aliases: ["resetprefs"], category: "dev", description: "Clear preferences", handler: handleClearPrefs, ownerOnly: false });
   registerCommand({ name: "learn", aliases: ["teach"], category: "dev", description: "Teach a fact", handler: handleLearn, ownerOnly: false });
   registerCommand({ name: "facts", aliases: ["memory", "whatiknow"], category: "dev", description: "View learned facts", handler: handleFacts, ownerOnly: false });
   registerCommand({ name: "forget", aliases: [], category: "dev", description: "Forget a fact", handler: handleForget, ownerOnly: false });
-  registerCommand({ name: "evolve", aliases: ["selfimprove"], category: "dev", description: "Run self-improvement", handler: handleSelfCheck, ownerOnly: false });
-  registerCommand({ name: "selfcheck", aliases: ["health"], category: "dev", description: "Run self health check", handler: handleSelfCheck, ownerOnly: false });
-  registerCommand({ name: "agent", aliases: ["aiagent"], category: "dev", description: "Run AI agent task", handler: handleAgent, ownerOnly: false });
+  registerCommand({ name: "evolve", aliases: ["selfimprove"], category: "dev", description: "Run self-improvement", handler: handleSelfCheck, ownerOnly: true });
+  registerCommand({ name: "selfcheck", aliases: ["health"], category: "dev", description: "Run self health check", handler: handleSelfCheck, ownerOnly: true });
+  registerCommand({ name: "agent", aliases: ["aiagent"], category: "dev", description: "Run AI agent task", handler: handleAgent, ownerOnly: true });
   registerCommand({ name: "clear", aliases: ["reset"], category: "dev", description: "Clear chat session", handler: handleClear, ownerOnly: false });
   registerCommand({ name: "mute", aliases: [], category: "admin", description: "Mute a chat", handler: handleMute, ownerOnly: true });
   registerCommand({ name: "unmute", aliases: [], category: "admin", description: "Unmute a chat", handler: handleUnmute, ownerOnly: true });

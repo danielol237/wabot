@@ -100,7 +100,7 @@ function generateShadowsocks(host, port) {
   const config = {
     server: host,
     server_port: port,
-    password: process.env.VPN_SS_PASSWORD || "aria-ss-2026",
+    password: process.env.VPN_SS_PASSWORD || "change-me", // set VPN_SS_PASSWORD in .env
     method: "chacha20-ietf-poly1305",
     local_address: "127.0.0.1",
     local_port: 1080,

@@ -136,7 +136,7 @@ async function generateSpawn() {
   const species = await fetchSpecies(speciesId);
   if (!species || !species.name) return null;
 
-  const mon = createMonster(speciesId, level);
+  const mon = await createMonster(speciesId, level);
   await recalc(mon);
 
   // Shiny

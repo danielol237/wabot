@@ -40,6 +40,27 @@ async function executeJob(id) {
   const job = jobs[id];
   if (!job) return;
 
+  try {
+    await runJobSteps(job);
+  } catch (err) {
+    // Never leave a job stuck in "running" — mark it failed so the user gets
+    // an answer instead of a silent hang.
+    job.status = "failed";
+    job.result = "Job failed: " + (err?.message || "unknown error");
+    job.progress = "Failed";
+    job.updatedAt = Date.now();
+    save();
+    if (sockRef) {
+      try {
+        await sockRef.sendMessage(job.chatId, {
+          text: "❌ *Job Failed: " + job.task.slice(0, 50) + "...*\n\n" + job.result
+        });
+      } catch (_) {}
+    }
+  }
+}
+
+async function runJobSteps(job) {
   // Plan the work
   const plan = await getAIResponse(
     `Break this task into max 6 concrete steps: "${job.task}"

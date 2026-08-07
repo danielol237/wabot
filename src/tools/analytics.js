@@ -40,14 +40,14 @@ function getStats() {
   const today = new Date().toISOString().slice(0, 10);
   const todayMsgs = data.dailyMessages[today] || 0;
 
-  let text = "*📊 ARIA Analytics*\\n\\n";
-  text += "⏱️ Uptime: " + hours + "h " + minutes + "m\\n";
-  text += "💬 Messages: " + data.messages + " (today: " + todayMsgs + ")\\n";
-  text += "💾 Memory: " + memMB + " MB\\n";
-  text += "❌ Errors: " + data.errors + "\\n";
-  text += "📦 Plugins: " + (require("fs").readdirSync(path.join(__dirname, "../../plugins")).filter(f => f.endsWith(".js")).length) + "\\n";
-  text += "\\n*Top Commands:*\\n";
-  sorted.forEach(([cmd, count], i) => { text += (i + 1) + ". " + cmd + " — " + count + "x\\n"; });
+  let text = "*📊 ARIA Analytics*\n\n";
+  text += "⏱️ Uptime: " + hours + "h " + minutes + "m\n";
+  text += "💬 Messages: " + data.messages + " (today: " + todayMsgs + ")\n";
+  text += "💾 Memory: " + memMB + " MB\n";
+  text += "❌ Errors: " + data.errors + "\n";
+  text += "📦 Plugins: " + (require("fs").readdirSync(path.join(__dirname, "../../plugins")).filter(f => f.endsWith(".js")).length) + "\n";
+  text += "\n*Top Commands:*\n";
+  sorted.forEach(([cmd, count], i) => { text += (i + 1) + ". " + cmd + " — " + count + "x\n"; });
 
   return text;
 }

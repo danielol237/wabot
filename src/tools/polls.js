@@ -68,17 +68,17 @@ function formatPoll(pollId) {
   if (!poll) return null;
 
   const totalVotes = Object.values(poll.votes).reduce((s, v) => s + v.length, 0);
-  let text = `*📊 ${poll.question}*\\n\\n`;
+  let text = `*📊 ${poll.question}*\n\n`;
   
   poll.options.forEach((opt, i) => {
     const count = poll.votes[i].length;
     const bar = count > 0 ? "▓".repeat(Math.max(1, Math.round((count / Math.max(totalVotes, 1)) * 10))) : "░".repeat(10);
-    text += `${i + 1}. ${opt}\\n   ${bar} ${count} vote${count !== 1 ? "s" : ""}\\n`;
+    text += `${i + 1}. ${opt}\n   ${bar} ${count} vote${count !== 1 ? "s" : ""}\n`;
   });
 
-  text += `\\nTotal: ${totalVotes} vote${totalVotes !== 1 ? "s" : ""}`;
+  text += `\nTotal: ${totalVotes} vote${totalVotes !== 1 ? "s" : ""}`;
   if (poll.active) text += `\n_Vote by replying with \`!vote ${pollId.slice(-6)} <number>\`_`;
-  else text += `\\n_(Closed)_`;
+  else text += `\n_(Closed)_`;
 
   return text;
 }

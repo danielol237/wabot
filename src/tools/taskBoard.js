@@ -18,7 +18,8 @@ function getTasks(userId) {
 
 function addTask(userId, text) {
   const t = getTasks(userId);
-  t.push({ id: t.length + 1, text, done: false, createdAt: Date.now() });
+  const nextId = t.reduce((max, x) => Math.max(max, x.id || 0), 0) + 1;
+  t.push({ id: nextId, text, done: false, createdAt: Date.now() });
   save();
   return t[t.length - 1];
 }
@@ -46,15 +47,15 @@ function formatTasks(userId) {
   const t = getTasks(userId);
   const pending = t.filter(x => !x.done);
   const done = t.filter(x => x.done);
-  let text = "*📋 Task Board*\\n\\n";
+  let text = "*📋 Task Board*\n\n";
   if (pending.length === 0 && done.length === 0) return "No tasks. Add one with *!todo add <task>*";
   if (pending.length > 0) {
-    text += "*Pending:*\\n";
-    pending.forEach(x => { text += (x.id) + ". " + x.text + "\\n"; });
+    text += "*Pending:*\n";
+    pending.forEach(x => { text += (x.id) + ". " + x.text + "\n"; });
   }
   if (done.length > 0) {
-    text += "\\n*Completed:*\\n";
-    done.slice(-5).forEach(x => { text += "✅ " + x.text + "\\n"; });
+    text += "\n*Completed:*\n";
+    done.slice(-5).forEach(x => { text += "✅ " + x.text + "\n"; });
   }
   return text;
 }

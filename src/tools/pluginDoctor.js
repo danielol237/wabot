@@ -60,12 +60,12 @@ function scanAll() {
 }
 
 function formatResults(results) {
-  let text = "*🔍 Plugin Health Check*\\n\\n";
+  let text = "*🔍 Plugin Health Check*\n\n";
   results.forEach(r => {
     const icon = r.status === "healthy" ? "✅" : r.status === "warning" ? "⚠️" : "❌";
-    text += icon + " *" + r.name + "* (" + r.size + ")\\n";
-    r.issues.forEach(i => { text += "   └ " + i + "\\n"; });
-    text += "\\n";
+    text += icon + " *" + r.name + "* (" + r.size + ")\n";
+    r.issues.forEach(i => { text += "   └ " + i + "\n"; });
+    text += "\n";
   });
   text += "Total: " + results.length + " plugins | " + results.filter(r => r.status === "healthy").length + " healthy";
   return text;

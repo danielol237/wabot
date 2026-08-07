@@ -13,15 +13,24 @@ async function runAgent(task, senderName, onProgress) {
   // Step 1: Plan
   if (onProgress) onProgress("📋 Planning...");
   const plan = await getAIResponse(
-    `Break this task into steps (max ${MAX_STEPS}). Only use: SEARCH, SCRAPE, CODE, WRITE, THINK, DONE.\n\nTask: ${task}\n\nRespond with numbered steps like:\n1. SEARCH(query)\n2. SCRAPE(url)\n3. CODE(language)\\ncode\\nENDCODE\n4. THINK(note)\n5. DONE`,
+    `Break this task into steps (max ${MAX_STEPS}). Only use: SEARCH, SCRAPE, CODE, WRITE, THINK, DONE.\n\nTask: ${task}\n\nRespond with numbered steps like:\n1. SEARCH(query)\n2. SCRAPE(url)\n3. CODE(language) followed by the code on the next line then ENDCODE on its own line\n4. THINK(note)\n5. DONE`,
     senderName, [],
     null, "You are a task planner. Output ONLY a numbered plan. No extra text."
   );
 
-  const steps = plan.split("\n")
-    .map(l => l.trim())
-    .filter(l => /^\d+\.\s*(SEARCH|SCRAPE|CODE|THINK|DONE)/i.test(l))
-    .slice(0, MAX_STEPS);
+  // Split into steps but keep multi-line CODE blocks intact: lines that don't
+  // start a new numbered step get appended to the previous step so a
+  // `3. CODE(js)\n   <code>\n   ENDCODE` block survives as one step.
+  const rawLines = plan.split("\n").map((l) => l.trim()).filter(Boolean);
+  const steps = [];
+  for (const line of rawLines) {
+    if (/^\d+\.\s*(SEARCH|SCRAPE|CODE|THINK|DONE)/i.test(line)) {
+      steps.push(line);
+    } else if (steps.length > 0) {
+      steps[steps.length - 1] += "\n" + line;
+    }
+    if (steps.length >= MAX_STEPS) break;
+  }
 
   if (steps.length === 0) {
     // Direct answer

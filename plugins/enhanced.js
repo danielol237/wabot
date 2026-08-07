@@ -966,7 +966,10 @@ module.exports = {
       const sub = args[0]?.toLowerCase();
       const { createJob, executeJob, getJobs, getJob, cancelJob, formatJobList } = require("../src/tools/persistentJobs");
       const uid = msg.key.participant || msg.key.remoteJid;
+      // Only the owner can create jobs — they run AI code/agent steps on the server
+      const { isOwner } = require("../src/utils/permissions");
       if (sub === "create" && args.slice(1).join(" ")) {
+        if (!isOwner(uid)) return ctx.reply("❌ Only the bot owner can create jobs.");
         const task = args.slice(1).join(" ");
         const id = createJob(msg.key.remoteJid, uid, task);
         ctx.reply("Job *" + id + "* created. I will work on it in the background.");

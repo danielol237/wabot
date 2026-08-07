@@ -1,5 +1,5 @@
 const axios = require("axios");
-const { exec } = require("child_process");
+const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
@@ -185,9 +185,14 @@ async function downloadVideo(url) {
   const outputPath = path.join(TEMP_DIR, `${id}.%(ext)s`);
 
   return new Promise((resolve) => {
-    const cmd = `yt-dlp -f "best[filesize<500M]/best" --max-filesize 500M -o "${outputPath}" "${url}" 2>&1`;
+    const args = [
+      "-f", "best[filesize<500M]/best",
+      "--max-filesize", "500M",
+      "-o", outputPath,
+      url,
+    ];
 
-    exec(cmd, { timeout: 300000 }, (err, stdout, stderr) => {
+    execFile("yt-dlp", args, { timeout: 300000 }, (err, stdout, stderr) => {
       if (err) {
         console.error("Download stderr:", stderr?.slice(0, 500));
 

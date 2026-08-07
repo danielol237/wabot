@@ -1,8 +1,6 @@
 const { getAIResponse } = require("./ai");
 const { searchWeb } = require("./webSearch");
 const { scrapeUrl } = require("./scraper");
-const { generateImage } = require("./imageGen");
-
 // A lightweight multi-step agent: asks the AI to plan steps, executes simple
 // tool steps (search/scrape/image), then asks the AI to synthesize a final answer.
 // Kept intentionally simple — no infinite loops, max 4 steps, no recursive agent calls.

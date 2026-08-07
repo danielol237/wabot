@@ -61,11 +61,11 @@ async function checkMonitor(id, type, query, condition, chatId) {
 
   // Check condition
   if (condition === "cross_up" && prev !== null && currentValue > prev) {
-    await sockRef.sendMessage(chatId, { text: `📊 *Monitor Alert*\\n${query} changed: ${prev} → ${currentValue}` });
+    await sockRef.sendMessage(chatId, { text: `📊 *Monitor Alert*\n${query} changed: ${prev} → ${currentValue}` });
   }
 
   if (condition === "cross_down" && prev !== null && currentValue < prev) {
-    await sockRef.sendMessage(chatId, { text: `📊 *Monitor Alert*\\n${query} changed: ${prev} → ${currentValue}` });
+    await sockRef.sendMessage(chatId, { text: `📊 *Monitor Alert*\n${query} changed: ${prev} → ${currentValue}` });
   }
 }
 

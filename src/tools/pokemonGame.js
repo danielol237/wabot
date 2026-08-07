@@ -80,6 +80,14 @@ async function createMonster(speciesId, level) {
       spAttack: Math.floor(Math.random() * 32), spDefense: Math.floor(Math.random() * 32), speed: Math.floor(Math.random() * 32) },
     evs: { hp: 0, attack: 0, defense: 0, spAttack: 0, spDefense: 0, speed: 0 },
     moves: getMovesForTypes(s.types, level).slice(0, 4) };
+  // Wire up the ability/held-item battle systems (they were fully implemented but
+  // never assigned, so they had zero effect). Monsters gain them at higher levels
+  // to keep early-game encounters simple.
+  if (level >= 5) {
+    const { getRandomAbility, getRandomHeldItem } = require("./pokemonAbilities");
+    mon.ability = getRandomAbility().name;
+    if (level >= 10) mon.heldItem = getRandomHeldItem().name;
+  }
   return mon;
 }
 
@@ -97,7 +105,7 @@ async function wildEncounter(uid) {
   const id = randomId();
   const species = await fetchSpecies(id);
   const level = Math.floor(Math.random() * 15) + 1;
-  const mon = createMonster(id, level);
+  const mon = await createMonster(id, level);
   await recalc(mon);
   return { species, mon };
 }

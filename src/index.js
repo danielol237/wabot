@@ -187,6 +187,16 @@ async function startBot() {
         error("Recurring reminder rearm error:", e.message);
       }
 
+      // Recover any durable missions that were mid-execution when we last died,
+      // and give the mission engine the socket so it can report progress.
+      try {
+        const { recoverMissions, setSock: setMissionSock } = require("./tools/durableMissions");
+        setMissionSock(sock);
+        recoverMissions();
+      } catch (e) {
+        error("Mission recovery error:", e.message);
+      }
+
       // Heartbeat — ping WhatsApp every 30s to detect silent disconnects.
       // Baileys can drop the socket without emitting a "close" event on some network
       // conditions (NAT timeout, mobile data flips). A periodic ping forces an actual

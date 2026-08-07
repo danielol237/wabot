@@ -167,6 +167,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "clearprefs", aliases: ["resetprefs"], category: "dev", description: "Clear preferences", handler: handleClearPrefs, ownerOnly: false });
   registerCommand({ name: "voicemode", aliases: ["voice", "vm"], category: "dev", description: "Toggle voice replies", handler: handleVoiceMode, ownerOnly: false });
   registerCommand({ name: "memories", aliases: ["remembered", "mymemory"], category: "dev", description: "See what I remember about you", handler: handleMemories, ownerOnly: false });
+  registerCommand({ name: "mission", aliases: ["missions", "msn"], category: "dev", description: "Create/resume durable background missions", handler: handleMission, ownerOnly: true });
   registerCommand({ name: "learn", aliases: ["teach"], category: "dev", description: "Teach a fact", handler: handleLearn, ownerOnly: false });
   registerCommand({ name: "facts", aliases: ["memory", "whatiknow"], category: "dev", description: "View learned facts", handler: handleFacts, ownerOnly: false });
   registerCommand({ name: "forget", aliases: [], category: "dev", description: "Forget a fact", handler: handleForget, ownerOnly: false });
@@ -1006,6 +1007,46 @@ async function handleVoiceMode(sock, msg, args, ctx) {
     addPreference(ctx.senderJid, "voice-mode");
     await reply(sock, msg, "🎙️ Voice mode ON — I'll reply with voice notes too. Toggle with !voicemode.");
   }
+}
+
+async function handleMission(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { createMission, executeMission, getMission, getMissions, cancelMission, formatMissionList, decideApproval } = require("../tools/durableMissions");
+  const parts = (args || "").split(/\s+/);
+  const sub = parts[0]?.toLowerCase();
+
+  if (sub === "approve") {
+    const r = decideApproval(parts[1], "approve");
+    return reply(sock, msg, r.ok ? "✅ " + r.msg : "❌ " + r.msg);
+  }
+  if (sub === "reject") {
+    const r = decideApproval(parts[1], "reject");
+    return reply(sock, msg, r.ok ? "✅ " + r.msg : "❌ " + r.msg);
+  }
+  if (sub === "status") {
+    const m = getMission(parts[1]);
+    if (!m) return reply(sock, msg, "Mission not found.");
+    let out = `🎯 *Mission ${m.id}*\n${m.objective}\n\nStatus: *${m.status}*\nProgress: ${m.progress}`;
+    if (m.result) out += `\n\nResult: ${m.result.slice(0, 500)}`;
+    if (m.steps?.length) {
+      out += "\n\n*Steps:*";
+      m.steps.forEach((s, i) => { out += `\n${i + 1}. [${s.status}] ${s.type}: ${s.arg}`; });
+    }
+    return reply(sock, msg, out);
+  }
+  if (sub === "cancel") {
+    return reply(sock, msg, cancelMission(parts[1]) ? "⛔ Mission cancelled." : "Mission not found.");
+  }
+  if (sub === "list" || sub === undefined) {
+    return reply(sock, msg, formatMissionList(getMissions(ctx.chatId)));
+  }
+
+  // Default: create a mission
+  if (!args) return reply(sock, msg, "Usage: !mission <objective>\nSubcommands: status <id>, cancel <id>, list, approve <id>, reject <id>");
+  await react(sock, msg, "🎯");
+  const id = createMission(ctx.chatId, ctx.senderJid, args);
+  reply(sock, msg, `🎯 Mission *${id}* created. I'll work on it in the background and report back.\n\n_Missions survive restarts — I'll resume if I'm redeployed mid-task._`);
+  executeMission(id);
 }
 
 async function handleMemories(sock, msg, args, ctx) {

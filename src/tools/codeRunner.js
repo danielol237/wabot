@@ -1,50 +1,40 @@
-const { exec } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const { v4: uuidv4 } = require("uuid");
+const { runCode } = require("./codeSandbox");
+const { checkCapability } = require("../utils/capabilities");
 
-const TEMP_DIR = path.join(__dirname, "../../temp");
+// ── Sandboxed code execution entrypoint ───────────────────────
+// All code execution now flows through the capability layer → Docker sandbox.
+// If the capability isn't granted, we deny. If Docker is missing, we refuse
+// rather than silently running unsafe code (unless forceUnsafe is set for
+// owner-only dev).
 
-async function runCode(code, lang = "js") {
-  const id = uuidv4();
-  lang = lang.toLowerCase().trim();
+async function executeCode(userId, code, lang, context = {}) {
+  const { isOwner } = require("../utils/permissions");
+  const ownerBypass = isOwner(userId);
 
-  return new Promise((resolve) => {
-    let filePath, cmd;
-
-    try {
-      if (lang === "js" || lang === "javascript" || lang === "node") {
-        filePath = path.join(TEMP_DIR, `${id}.js`);
-        fs.writeFileSync(filePath, code);
-        cmd = `node "${filePath}"`;
-      } else if (lang === "py" || lang === "python" || lang === "python3") {
-        filePath = path.join(TEMP_DIR, `${id}.py`);
-        fs.writeFileSync(filePath, code);
-        cmd = `python3 "${filePath}"`;
-      } else if (lang === "sh" || lang === "bash") {
-        filePath = path.join(TEMP_DIR, `${id}.sh`);
-        fs.writeFileSync(filePath, code);
-        cmd = `bash "${filePath}"`;
-      } else {
-        return resolve(`❌ Language not supported: ${lang}\nSupported: js, python, bash`);
-      }
-
-      // 10 second timeout for safety
-      exec(cmd, { timeout: 10000, maxBuffer: 1024 * 100 }, (err, stdout, stderr) => {
-        // Cleanup
-        if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
-
-        if (err && !stdout) {
-          return resolve(`❌ Error:\n${stderr || err.message}`);
-        }
-
-        const output = stdout || stderr || "(no output)";
-        resolve(output.slice(0, 2000)); // cap at 2000 chars
-      });
-    } catch (e) {
-      resolve(`❌ Failed to run: ${e.message}`);
+  // Owner bypass: the creator always has code capability (still runs sandboxed
+  // for their own safety unless they force-opt out). Non-owners go through the
+  // capability gate which defaults to DENY.
+  let cap = { allowed: true, sandbox: { timeout: 15, memory: "128m" } };
+  if (!ownerBypass) {
+    cap = checkCapability(userId, "code", {
+      scope: context.scope || "*",
+      memory: context.memory,
+      timeout: context.timeout,
+    });
+    if (!cap.allowed) {
+      return { success: false, output: "❌ " + cap.reason };
     }
+  }
+
+  const result = await runCode(code, lang, {
+    timeout: cap.sandbox.timeout,
+    memory: cap.sandbox.memory,
   });
+
+  if (!result.sandboxed) {
+    return { success: false, output: "⚠️ Docker unavailable — sandbox disabled, code blocked.\n" + result.output };
+  }
+  return result;
 }
 
-module.exports = { runCode };
+module.exports = { executeCode, runCode };

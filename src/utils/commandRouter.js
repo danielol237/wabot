@@ -170,6 +170,9 @@ function registerBuiltinCommands() {
   registerCommand({ name: "mission", aliases: ["missions", "msn"], category: "dev", description: "Create/resume durable background missions", handler: handleMission, ownerOnly: true });
   registerCommand({ name: "world", aliases: ["worldmodel", "model"], category: "dev", description: "View ARIA's world model", handler: handleWorld, ownerOnly: true });
   registerCommand({ name: "delegate", aliases: ["orbit", "orchestrate"], category: "dev", description: "Run the agent-team mission orchestrator", handler: handleDelegate, ownerOnly: true });
+  registerCommand({ name: "grant", aliases: [], category: "admin", description: "Grant a capability to a user", handler: handleGrant, ownerOnly: true });
+  registerCommand({ name: "revoke", aliases: [], category: "admin", description: "Revoke a capability", handler: handleRevoke, ownerOnly: true });
+  registerCommand({ name: "caps", aliases: ["permissions"], category: "admin", description: "View granted capabilities", handler: handleCaps, ownerOnly: true });
   registerCommand({ name: "learn", aliases: ["teach"], category: "dev", description: "Teach a fact", handler: handleLearn, ownerOnly: false });
   registerCommand({ name: "facts", aliases: ["memory", "whatiknow"], category: "dev", description: "View learned facts", handler: handleFacts, ownerOnly: false });
   registerCommand({ name: "forget", aliases: [], category: "dev", description: "Forget a fact", handler: handleForget, ownerOnly: false });
@@ -690,9 +693,11 @@ async function handleCode(sock, msg, args, ctx) {
   const code = lines.slice(1).join("\n").trim() || lines.slice(1).join("\n");
   if (!code) return reply(sock, msg, `Usage: !run js\\nlog('hello')`);
   await react(sock, msg, "💻");
-  const { interpret } = require("../tools/codeInterpreter");
-  const result = await interpret(lang, code);
-  await reply(sock, msg, result);
+  // Route through the capability layer → Docker sandbox
+  const { executeCode } = require("../tools/codeRunner");
+  const result = await executeCode(ctx.senderJid, code, lang, { scope: "*" });
+  const output = typeof result.output === "string" ? result.output : JSON.stringify(result.output);
+  await reply(sock, msg, (result.sandboxed === false ? "⚠️ *Unsandboxed*\n" : "🛡️ *Sandboxed*\n") + output);
 }
 
 async function handleWeather(sock, msg, args, ctx) {
@@ -1018,6 +1023,41 @@ async function handleDelegate(sock, msg, args, ctx) {
   await react(sock, msg, "🎯");
   await reply(sock, msg, "🎯 Delegating mission to my agent team — planner → researcher → builder → verifier → reflector. I'll report back.");
   orchestrate(ctx.chatId, ctx.senderJid, args);
+}
+
+async function handleGrant(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { grantPermission, revokePermission, getUserModel } = require("../utils/worldModel");
+  const parts = (args || "").split(/\s+/);
+  const capKey = parts[0]?.toLowerCase();
+  const scope = parts[1] || "*";
+  const VALID = ["execute_code", "write_files", "network_access", "shell_exec", "browser_access", "voice_tts", "image_generation"];
+  if (!capKey) return reply(sock, msg, "Usage: !grant <capability> [scope]\nCaps: " + VALID.join(", "));
+  if (!VALID.includes(capKey)) return reply(sock, msg, "Invalid capability. Valid: " + VALID.join(", "));
+  grantPermission(ctx.senderJid, capKey, scope);
+  await reply(sock, msg, `🔓 Granted *${capKey}*${scope !== "*" ? " on " + scope : " (all scopes)"}.`);
+}
+
+async function handleRevoke(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { revokePermission } = require("../utils/worldModel");
+  const parts = (args || "").split(/\s+/);
+  const capKey = parts[0]?.toLowerCase();
+  const scope = parts[1] || "*";
+  if (!capKey) return reply(sock, msg, "Usage: !revoke <capability> [scope]");
+  revokePermission(ctx.senderJid, capKey, scope);
+  await reply(sock, msg, `🔒 Revoked *${capKey}*${scope !== "*" ? " on " + scope : " (all scopes)"}.`);
+}
+
+async function handleCaps(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { getUserModel } = require("../utils/worldModel");
+  const model = getUserModel(ctx.senderJid);
+  const perms = model.permissions || [];
+  let out = "🔐 *My permissions:*";
+  if (perms.length === 0) out += "\n(none granted — capabilities are denied by default)";
+  for (const p of perms) out += `\n• ${p.action}${p.scope !== "*" ? " on " + p.scope : " (all)"} — ${p.granted ? "granted" : "revoked"}`;
+  await reply(sock, msg, out);
 }
 
 async function handleWorld(sock, msg, args, ctx) {

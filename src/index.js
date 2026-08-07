@@ -50,9 +50,10 @@ app.get("/", (req, res) => {
 });
 
 // Serve built projects for preview. Each project is stored in data/projects/{slug}/
-// and can be viewed at /preview/{slug}. Only serves static files for now —
-// dynamic previews (npm start) would need their own port.
-app.use("/preview", express.static(path.join(__dirname, "../data/projects")));
+// and can be viewed at /preview/{slug}. Auth-protected (same session as dashboard)
+// so built projects aren't publicly exposed.
+const { checkAuth } = require("./dashboard");
+app.use("/preview", checkAuth, express.static(path.join(__dirname, "../data/projects")));
 
 app.get("/preview", (req, res) => {
   const projectsDir = path.join(__dirname, "../data/projects");

@@ -1,8 +1,37 @@
 const cron = require("node-cron");
+const fs = require("fs");
+const path = require("path");
 
-// In-memory store of active recurring reminders per chat
-// Format: { id, chatId, message, cronExpression, task }
+const FILE = path.join(__dirname, "../../data/recurring_reminders.json");
+
+// Store of active recurring reminders per chat
+// Format: { id, chatId, message, cron, label, task }
 const activeRecurring = new Map();
+
+// Load persisted reminders so they survive restarts.
+function load() {
+  try {
+    if (!fs.existsSync(FILE)) return;
+    const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
+    for (const item of raw || []) {
+      if (!item?.id || !item?.cron) continue;
+      activeRecurring.set(item.id, { ...item, task: null });
+    }
+  } catch (err) {
+    console.error("Failed to load recurring reminders:", err.message);
+  }
+}
+
+function save() {
+  try {
+    const data = [...activeRecurring.values()].map(({ id, chatId, message, cron, label }) => ({
+      id, chatId, message, cron, label,
+    }));
+    fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error("Failed to save recurring reminders:", err.message);
+  }
+}
 
 // Parses simple recurring patterns like "every day at 8am", "every monday at 9pm"
 function parseRecurringPattern(text) {
@@ -60,7 +89,8 @@ function setRecurringReminder(sock, chatId, text) {
     }
   });
 
-  activeRecurring.set(id, { chatId, message, label: parsed.label, task });
+  activeRecurring.set(id, { chatId, message, cron: parsed.cron, label: parsed.label, task });
+  save();
 
   return { success: true, message: `✅ Recurring reminder set!\n📅 ${parsed.label}\n📝 _"${message}"_\n\nID: \`${id}\` (use this to cancel it)` };
 }
@@ -68,8 +98,9 @@ function setRecurringReminder(sock, chatId, text) {
 function cancelRecurringReminder(id) {
   const reminder = activeRecurring.get(id);
   if (!reminder) return false;
-  reminder.task.stop();
+  if (reminder.task?.stop) reminder.task.stop();
   activeRecurring.delete(id);
+  save();
   return true;
 }
 
@@ -81,4 +112,20 @@ function listRecurringReminders(chatId) {
   return list;
 }
 
-module.exports = { setRecurringReminder, cancelRecurringReminder, listRecurringReminders };
+// Re-arm persisted reminders after a restart.
+function rearmAll(sock) {
+  for (const reminder of activeRecurring.values()) {
+    if (reminder.task?.stop) reminder.task.stop();
+    reminder.task = cron.schedule(reminder.cron, async () => {
+      try {
+        await sock.sendMessage(reminder.chatId, { text: `🔁 *Recurring Reminder*\n\n${reminder.message}` });
+      } catch (err) {
+        console.error("Recurring reminder send error:", err.message);
+      }
+    });
+  }
+}
+
+load();
+
+module.exports = { setRecurringReminder, cancelRecurringReminder, listRecurringReminders, rearmAll };

@@ -3,11 +3,39 @@
 // Format: !schedule "message" at <date and time>
 
 const cron = require("node-cron");
+const fs = require("fs");
+const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 
-// { id, chatId, message, cronExpr, createdAt, creator }
+const FILE = path.join(__dirname, "../../data/schedules.json");
+// { id, chatId, message, timeStr, parsed, createdAt, creator }
 const scheduled = new Map();
 let sockRef = null;
+
+// Load persisted schedules from disk so scheduled messages survive restarts.
+function load() {
+  try {
+    if (!fs.existsSync(FILE)) return;
+    const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
+    for (const item of raw || []) {
+      if (!item?.id || !item?.parsed) continue;
+      scheduled.set(item.id, item);
+    }
+  } catch (err) {
+    console.error("Failed to load schedules:", err.message);
+  }
+}
+
+function save() {
+  try {
+    const data = [...scheduled.values()].map(({ id, chatId, message, timeStr, parsed, creator, createdAt }) => ({
+      id, chatId, message, timeStr, parsed, creator, createdAt,
+    }));
+    fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error("Failed to save schedules:", err.message);
+  }
+}
 
 function setSock(sock) {
   sockRef = sock;
@@ -115,6 +143,7 @@ function scheduleMessage(chatId, message, timeStr, creator) {
   }
 
   scheduled.set(id, { id, chatId, message, timeStr, parsed, task, creator, createdAt: Date.now() });
+  save();
 
   return { success: true, id, schedule: parsed };
 }
@@ -130,6 +159,7 @@ function cancelSchedule(id, userId) {
     if (item.task.stop) item.task.stop(); // cron task
   }
   scheduled.delete(id);
+  save();
   return { success: true };
 }
 
@@ -142,4 +172,43 @@ function formatSchedules(schedules) {
   return schedules.map((s) => `• \`${s.id}\` — "${s.message.slice(0, 40)}" — ${s.timeStr}`).join("\\n");
 }
 
-module.exports = { setSock, scheduleMessage, cancelSchedule, listSchedules, formatSchedules };
+// Re-arm any persisted cron/interval schedules after a restart. One-time
+// (absolute date) schedules are re-created if their target is still in the future.
+function rearmAll() {
+  for (const item of scheduled.values()) {
+    const { chatId, message } = item;
+    const parsed = item.parsed;
+    let task = null;
+
+    if (parsed?.type === "cron") {
+      if (!cron.validate(parsed.expr)) continue;
+      task = cron.schedule(parsed.expr, async () => {
+        try { if (sockRef) await sockRef.sendMessage(chatId, { text: `⏰ ${message}` }); }
+        catch (err) { console.error("Scheduled message error:", err.message); }
+      });
+    } else if (parsed?.type === "interval") {
+      task = { interval: setInterval(async () => {
+        try { if (sockRef) await sockRef.sendMessage(chatId, { text: `⏰ ${message}` }); }
+        catch (err) { console.error("Scheduled message error:", err.message); }
+      }, parsed.seconds * 1000) };
+    } else if (parsed?.type === "once") {
+      const now = new Date();
+      const target = new Date(now.getFullYear(), parsed.at.month - 1, parsed.at.day, parsed.at.hour, parsed.at.min, 0);
+      if (target <= now) continue; // already passed — drop it
+      const msUntil = target.getTime() - now.getTime();
+      const timeout = setTimeout(async () => {
+        try { if (sockRef) await sockRef.sendMessage(chatId, { text: `⏰ ${message}` }); }
+        catch (err) { console.error("Scheduled message error:", err.message); }
+        scheduled.delete(item.id);
+        save();
+      }, msUntil);
+      task = { timeout, date: target };
+    }
+
+    item.task = task;
+  }
+}
+
+load();
+
+module.exports = { setSock, scheduleMessage, cancelSchedule, listSchedules, formatSchedules, rearmAll };

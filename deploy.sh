@@ -27,10 +27,14 @@ fi
 # ── Install dependencies ───────────────────────────────────
 echo -e "${YELLOW}📦 Installing dependencies...${NC}"
 apt update -qq
-apt install -y -qq curl wget git nano nodejs npm 2>/dev/null || {
-  curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-  apt install -y nodejs
-}
+apt install -y -qq curl wget git nano 2>/dev/null || true
+
+# Install Node 20 (current LTS) — Node 18 is EOL
+if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 20 ]; then
+  echo -e "${YELLOW}📦 Installing Node 20 LTS...${NC}"
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt install -y -qq nodejs
+fi
 
 # ── Clone repo ─────────────────────────────────────────────
 echo -e "${YELLOW}📥 Cloning ARIA...${NC}"

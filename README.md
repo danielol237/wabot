@@ -61,12 +61,16 @@ Spawns happen automatically across all chats. Rarity tiers: Common → Uncommon 
 ### 🎮 Games
 `!joke`, `!truth`, `!dare`, `!roast`, `!ship`, `!ttt`, `!dice`, `!card`, `!flip`, `!balance`, `!inventory`, `!leaderboard`
 
-### 🛠️ Development Tools
+### 🛠️ Development Tools (Owner Only)
+These execute code or write files on the server, so they're restricted to `OWNER_NUMBER`:
 `!run js/py/sh <code>` — execute code
 `!build <app description>` — AI builds full apps
 `!edit <file> <instruction>` — edit project files
 `!agent <task>` — multi-step AI agent
-`!evolve` — self-improvement engine
+`!job create <task>` — background AI job
+`!evolve` / `!selfcheck` — self-improvement engine
+
+Other dev commands open to everyone: `!remember`, `!preferences`, `!learn`, `!facts`.
 
 ### 🌐 Web Dashboard
 When the bot is running, open `http://your-server-ip:3001/dashboard` in your browser.
@@ -97,6 +101,14 @@ npm run dev
 
 Use `termux-wake-lock` to prevent Android from killing the process.
 
+## One-Click VPS Deploy
+
+On any fresh Ubuntu/Debian VPS, run as root:
+```bash
+curl -sSL https://raw.githubusercontent.com/danielol237/wabot/main/deploy.sh | bash
+```
+Installs Node 20 LTS, clones the repo, installs deps, sets up PM2, and prints the QR/dashboard URL. Then edit `/opt/wabot/.env` and `pm2 restart aria`.
+
 ## Running on Server
 
 ```bash
@@ -115,3 +127,6 @@ pm2 start src/index.js --name aria
 pm2 save
 pm2 startup
 ```
+
+## Scheduled & Recurring Messages
+`!schedule`/`!remind` messages are persisted to `data/schedules.json` and re-armed automatically on restart, so they survive redeploys.

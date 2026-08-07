@@ -173,9 +173,19 @@ async function startBot() {
         });
       } // safe to call again on reconnect — it clears any previous interval first
 
-      // Pass socket to scheduler so scheduled messages can send
-      const { setSock } = require("./tools/scheduler");
+      // Pass socket to scheduler so scheduled messages can send, and re-arm
+      // any schedules persisted across a restart.
+      const { setSock, rearmAll } = require("./tools/scheduler");
       setSock(sock);
+      rearmAll();
+
+      // Re-arm persisted recurring reminders too.
+      try {
+        const { rearmAll: rearmReminders } = require("./tools/recurringReminders");
+        rearmReminders(sock);
+      } catch (e) {
+        error("Recurring reminder rearm error:", e.message);
+      }
 
       // Heartbeat — ping WhatsApp every 30s to detect silent disconnects.
       // Baileys can drop the socket without emitting a "close" event on some network

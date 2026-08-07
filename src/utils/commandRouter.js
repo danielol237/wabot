@@ -169,6 +169,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "memories", aliases: ["remembered", "mymemory"], category: "dev", description: "See what I remember about you", handler: handleMemories, ownerOnly: false });
   registerCommand({ name: "mission", aliases: ["missions", "msn"], category: "dev", description: "Create/resume durable background missions", handler: handleMission, ownerOnly: true });
   registerCommand({ name: "world", aliases: ["worldmodel", "model"], category: "dev", description: "View ARIA's world model", handler: handleWorld, ownerOnly: true });
+  registerCommand({ name: "delegate", aliases: ["orbit", "orchestrate"], category: "dev", description: "Run the agent-team mission orchestrator", handler: handleDelegate, ownerOnly: true });
   registerCommand({ name: "learn", aliases: ["teach"], category: "dev", description: "Teach a fact", handler: handleLearn, ownerOnly: false });
   registerCommand({ name: "facts", aliases: ["memory", "whatiknow"], category: "dev", description: "View learned facts", handler: handleFacts, ownerOnly: false });
   registerCommand({ name: "forget", aliases: [], category: "dev", description: "Forget a fact", handler: handleForget, ownerOnly: false });
@@ -1008,6 +1009,15 @@ async function handleVoiceMode(sock, msg, args, ctx) {
     addPreference(ctx.senderJid, "voice-mode");
     await reply(sock, msg, "🎙️ Voice mode ON — I'll reply with voice notes too. Toggle with !voicemode.");
   }
+}
+
+async function handleDelegate(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { orchestrate } = require("../tools/orchestrator");
+  if (!args) return reply(sock, msg, "Usage: !delegate <objective>\nRuns the full agent-team mission orchestrator.");
+  await react(sock, msg, "🎯");
+  await reply(sock, msg, "🎯 Delegating mission to my agent team — planner → researcher → builder → verifier → reflector. I'll report back.");
+  orchestrate(ctx.chatId, ctx.senderJid, args);
 }
 
 async function handleWorld(sock, msg, args, ctx) {

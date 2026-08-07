@@ -193,6 +193,9 @@ async function startBot() {
         const { recoverMissions, setSock: setMissionSock } = require("./tools/durableMissions");
         setMissionSock(sock);
         recoverMissions();
+        // Shared mission socket so the orchestrator can send updates too
+        const missionSock = require("./tools/missionSock");
+        missionSock.setSock(sock);
       } catch (e) {
         error("Mission recovery error:", e.message);
       }

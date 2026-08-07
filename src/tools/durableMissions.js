@@ -38,8 +38,9 @@ function save() {
   try { fs.writeFileSync(FILE, JSON.stringify(missions, null, 2)); } catch (err) { error("Failed to save missions:", err.message); }
 }
 
-let sockRef = null;
-function setSock(s) { sockRef = s; }
+const { setSock: setSharedSock, getSock } = require("./missionSock");
+function setSock(s) { setSharedSock(s); }
+function getSockRef() { return getSock(); }
 
 // ── Mission model ─────────────────────────────────────────────
 function createMission(chatId, creator, objective, opts = {}) {
@@ -290,8 +291,9 @@ function recoverMissions() {
 }
 
 function notify(mission, text) {
-  if (!sockRef) return;
-  sockRef.sendMessage(mission.chatId, { text }).catch(() => {});
+  const sock = getSockRef();
+  if (!sock) return;
+  sock.sendMessage(mission.chatId, { text }).catch(() => {});
 }
 
 // ── Queries / commands ────────────────────────────────────────

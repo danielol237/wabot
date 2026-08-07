@@ -59,9 +59,17 @@ async function autonomousTick() {
     }
   }
 
+  // Context-aware check-in: pull the owner's recent project/event from semantic
+  // memory so the message is about THEIR actual life, not a generic ping.
+  const { getUserStore, retrieveMemories } = require("../utils/semanticMemory");
+  const contextMem = retrieveMemories(ownerJid, "project working on building", 2)[0];
+  const contextHint = contextMem
+    ? ` (Last I remember, they were working on: "${contextMem.text.slice(0, 80)}")`
+    : "";
+
   // Use consciousness engine for realistic message
   const { generateConsciousThought } = require("./consciousness");
-  const thought = await generateConsciousThought(ownerJid, "Daniel");
+  const thought = await generateConsciousThought(ownerJid, "Daniel" + contextHint);
   let message = thought || `*notices you've been quiet* what's on your mind?`;
 
   try {

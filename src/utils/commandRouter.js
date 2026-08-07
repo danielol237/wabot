@@ -165,6 +165,8 @@ function registerBuiltinCommands() {
   registerCommand({ name: "remember", aliases: [], category: "dev", description: "Remember a preference", handler: handleRemember, ownerOnly: false });
   registerCommand({ name: "preferences", aliases: ["myprefs"], category: "dev", description: "View preferences", handler: handlePreferences, ownerOnly: false });
   registerCommand({ name: "clearprefs", aliases: ["resetprefs"], category: "dev", description: "Clear preferences", handler: handleClearPrefs, ownerOnly: false });
+  registerCommand({ name: "voicemode", aliases: ["voice", "vm"], category: "dev", description: "Toggle voice replies", handler: handleVoiceMode, ownerOnly: false });
+  registerCommand({ name: "memories", aliases: ["remembered", "mymemory"], category: "dev", description: "See what I remember about you", handler: handleMemories, ownerOnly: false });
   registerCommand({ name: "learn", aliases: ["teach"], category: "dev", description: "Teach a fact", handler: handleLearn, ownerOnly: false });
   registerCommand({ name: "facts", aliases: ["memory", "whatiknow"], category: "dev", description: "View learned facts", handler: handleFacts, ownerOnly: false });
   registerCommand({ name: "forget", aliases: [], category: "dev", description: "Forget a fact", handler: handleForget, ownerOnly: false });
@@ -993,6 +995,38 @@ async function handleClearPrefs(sock, msg, args, ctx) {
   await reply(sock, msg, "✅ Preferences cleared.");
 }
 
+async function handleVoiceMode(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const prefs = getPreferences(ctx.senderJid);
+  const has = prefs.includes("voice-mode");
+  if (has) {
+    clearPreferences(ctx.senderJid);
+    await reply(sock, msg, "🔇 Voice mode off — text replies only.");
+  } else {
+    addPreference(ctx.senderJid, "voice-mode");
+    await reply(sock, msg, "🎙️ Voice mode ON — I'll reply with voice notes too. Toggle with !voicemode.");
+  }
+}
+
+async function handleMemories(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { getUserStore, getProfile } = require("../utils/semanticMemory");
+  const store = getUserStore(ctx.senderJid);
+  const p = getProfile(ctx.senderJid);
+  const recent = store.memories.slice(-10).reverse();
+  let out = "🧠 *What I remember about you:*\n";
+  if (p.nickname) out += `\nNickname: ${p.nickname}`;
+  if (p.location) out += `\nBased in: ${p.location}`;
+  if (p.communicationStyle) out += `\nStyle: ${p.communicationStyle}`;
+  if (recent.length === 0) {
+    out += "\n\nNo long-term memories yet. Talk to me about important stuff and I'll remember it.";
+  } else {
+    out += "\n\n*Recent memories:*";
+    for (const m of recent) out += `\n• ${m.text}`;
+  }
+  await reply(sock, msg, out);
+}
+
 async function handleLearn(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !learn <fact>");
@@ -1163,8 +1197,13 @@ async function handleAIResponse(sock, msg, text, ctx) {
   const tone = detectTone(text);
   const toneContext = tone !== "neutral" ? `\n[User tone: ${tone}] Match their energy naturally.` : "";
 
+  // Semantic long-term memory: pull relevant memories + learned profile
+  const { getRelevantContext, getProfileContext, autoExtractMemory, learnCommunicationStyle } = require("../utils/semanticMemory");
+  const semanticContext = getRelevantContext(ctx.senderJid, text) + getProfileContext(ctx.senderJid);
+  const personalizationContext = "\n\n[Personalization] Learn their name if they give it, match their communication style naturally, and remember important things they share.\n";
+
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: userContext + ownerContext + moodContext + personaContext + toneContext,
+    userContext: userContext + ownerContext + moodContext + personaContext + toneContext + semanticContext + personalizationContext,
     preferences,
     facts,
   });
@@ -1173,6 +1212,12 @@ async function handleAIResponse(sock, msg, text, ctx) {
     // Remember callable facts (running jokes, likes) for future callbacks
     if (tone === "up" && text.length > 20) rememberCallable(ctx.senderJid, ctx.senderName + " said: \"" + text.slice(0, 60) + "\"");
     bleedMood(ctx.senderJid, moodData.mood);
+
+    // Auto-extract important memories + learn communication style (personalization)
+    try {
+      autoExtractMemory(ctx.senderJid, ctx.senderName, text);
+      learnCommunicationStyle(ctx.senderJid, ctx.senderName, text);
+    } catch (_) {}
 
     // Humanized send (reactions, splitting, typos, occasional delay)
     humanizeAndSend(sock, msg, response, ctx.senderJid, ctx.senderName, isOwnerCtx);

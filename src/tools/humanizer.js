@@ -246,6 +246,18 @@ async function doSend(sock, msg, response, senderJid, senderName, isOwner) {
       await reply(sock, msg, `*${correct}*`);
     } catch (_) {}
   }
+
+  // Voice-first: if the user has voice mode on, also send the reply as audio
+  try {
+    const prefs = require("../utils/userPreferences").getPreferences(senderJid);
+    if (prefs.includes("voice-mode")) {
+      const { textToSpeech } = require("./voice");
+      const audio = await textToSpeech(maybeTypoed.slice(0, 500));
+      if (audio?.success) {
+        await sock.sendMessage(msg.key.remoteJid, { audio: audio.buffer, mimetype: "audio/mpeg", ptt: true });
+      }
+    }
+  } catch (_) {}
 }
 
 module.exports = {

@@ -23,6 +23,14 @@ const SESSIONS_DIR = path.join(__dirname, "../sessions");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
+// Restore the WhatsApp session from git BEFORE starting the socket, so the
+// existing login survives Render's ephemeral-disk restarts (no re-scanning QR).
+const sessionPersistence = require("./utils/sessionPersistence");
+sessionPersistence.restoreSession().then((r) => {
+  if (r.ok) log("💾 Session restored — keeping existing WhatsApp link.");
+  else if (r.err) warn("Session restore:", r.err);
+}).catch((e) => warn("Session restore error:", e.message));
+
 // Load plugins once at startup. A broken plugin logs an error and gets
 // skipped — it never prevents the rest of the bot from starting.
 const loadedPlugins = loadPlugins();
@@ -152,6 +160,9 @@ async function startBot() {
       isReady = true;
       latestQrDataUrl = null;
       lastError = null;
+      // Keep the session backed up so restarts don't force a QR re-scan
+      sessionPersistence.startAutoSync();
+      sessionPersistence.backupSession().catch((e) => warn("Initial session backup:", e.message));
       startTaskPoller(sock);
 
       // Start autonomous mode — ARIA sends proactive messages
@@ -351,7 +362,13 @@ app.listen(PORT, () => log(`🚀 Server on port ${PORT}`));
 
 // Flush memory to disk on shutdown so nothing's lost on a clean restart/deploy
 const { flushNow } = require("./utils/memory");
-process.on("SIGINT", () => { flushNow(); process.exit(0); });
-process.on("SIGTERM", () => { flushNow(); process.exit(0); });
+const shutdown = async () => {
+  flushNow();
+  sessionPersistence.stopAutoSync();
+  await sessionPersistence.backupSession().catch(() => {});
+  process.exit(0);
+};
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 module.exports = { getSock: () => sock };

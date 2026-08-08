@@ -49,7 +49,14 @@ async function checkCryptoPriceTask(sock, task) {
 }
 
 // Call this once from index.js after the bot connects, passing the live sock
+// If ARIA_WARMUP=true, the poller is disabled — fresh numbers get flagged for
+// automated activity, and warmup mode keeps ARIA reply-only until the account
+// has aged enough to look human.
 function startTaskPoller(sock) {
+  if (process.env.ARIA_WARMUP === "true") {
+    console.log("🌱 Warmup mode: background task poller disabled.");
+    return;
+  }
   if (pollerInterval) clearInterval(pollerInterval);
   pollerInterval = setInterval(() => {
     checkAllTasks(sock).catch((err) => console.error("Task poller cycle failed:", err.message));

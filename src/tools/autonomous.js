@@ -13,6 +13,12 @@ const specialUsers = new Map(); // jid -> { name, lastCheck, mood }
 
 function init(sock) {
   sockRef = sock;
+  // Warmup mode: don't send any proactive messages on a fresh number — that's
+  // a ban magnet. Keep ARIA reply-only until ARIA_WARMUP is removed.
+  if (process.env.ARIA_WARMUP === "true") {
+    console.log("🌱 Warmup mode: autonomous check-ins disabled.");
+    return;
+  }
   startAutonomousLoop();
 }
 

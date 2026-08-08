@@ -247,7 +247,14 @@ async function routeMessage(sock, msg, context) {
             return;
           }
         }
-        await cmd.handler(sock, msg, args, context);
+        try {
+          await cmd.handler(sock, msg, args, context);
+        } catch (err) {
+          // Report the real error so we (and the user) can see exactly what failed
+          // instead of a silent failure or the generic "Something broke" message.
+          const { reply: _rp } = require("./baileysHelpers");
+          await _rp(sock, msg, `⚠️ Command "${cmd.name}" error: ${err.message}`).catch(() => {});
+        }
         return;
       }
     }

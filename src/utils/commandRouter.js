@@ -301,6 +301,24 @@ async function handleHelp(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "📋");
   
+  // Categorized with emoji headers so it's compact, readable, and stylish.
+  // Commands are sorted within each category. Owner-only commands are hidden
+  // from non-owners (but shown to the owner).
+  const catEmoji = {
+    meta: "🛠️",
+    admin: "👑",
+    group: "👥",
+    utility: "🔧",
+    fun: "🎲",
+    anime: "🎬",
+    pokemon: "⚡",
+    economy: "💰",
+    dev: "💻",
+    games: "🎮",
+    music: "🎵",
+    ai: "🤖",
+  };
+
   const categories = {};
   for (const cmd of commands) {
     if (cmd.ownerOnly && !isOwner(ctx.senderJid)) continue;
@@ -308,18 +326,26 @@ async function handleHelp(sock, msg, args, ctx) {
     categories[cmd.category].push(cmd);
   }
 
-  let helpText = `*ARIA Commands* 🤖\n\n`;
-  for (const [cat, cmds] of Object.entries(categories)) {
-    helpText += `*${cat.charAt(0).toUpperCase() + cat.slice(1)}*\n`;
+  // If a category is requested (e.g. !help anime), show just that one.
+  const want = args?.trim().toLowerCase();
+  const keys = want && categories[want] ? [want] : Object.keys(categories);
+
+  const parts = [`*✨ ARIA COMMANDS*`, `_A sassy WhatsApp girl — ${commands.length} commands total._`, ``];
+  for (const cat of keys) {
+    const cmds = categories[cat].slice().sort((a, b) => a.name.localeCompare(b.name));
+    const emoji = catEmoji[cat] || "📦";
+    parts.push(`*${emoji} ${cat.charAt(0).toUpperCase() + cat.slice(1)}*`);
     for (const cmd of cmds) {
-      const aliases = cmd.aliases.length > 0 ? ` (${cmd.aliases.join(", ")})` : "";
-      helpText += `  !${cmd.name}${aliases} — ${cmd.description}\n`;
+      const aliases = cmd.aliases.length > 0 ? ` _(alias: ${cmd.aliases[0]})_` : "";
+      parts.push(`• !${cmd.name}${aliases} — ${cmd.description}`);
     }
-    helpText += "\n";
+    parts.push(``);
   }
-  helpText += `Or just say my name and ask me normally! 💬`;
-  
-  await reply(sock, msg, helpText);
+  if (want && !categories[want]) {
+    return reply(sock, msg, `⚠️ No category "${want}". Try: ${Object.keys(categories).join(", ")}`);
+  }
+  parts.push(`_Or just say my name and ask me normally! 💬_`);
+  await reply(sock, msg, parts.join("\n"));
 }
 
 async function handleStats(sock, msg, args, ctx) {

@@ -186,6 +186,7 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
   // the prompt itself has any real size — so Groq gets its own safer, lower cap than
   // Gemini, which has much more headroom.
   const groqMaxTokens = Math.min(maxTokens, 6000);
+  let lastError = null;
 
   if (groq) {
     for (const model of GROQ_MODELS) {
@@ -235,6 +236,7 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
         return res.data.choices[0]?.message?.content || "No response.";
       } catch (err) {
         error(`OpenRouter error (${model}):`, err.response?.data?.error?.message || err.message);
+        lastError = (err.response?.data?.error?.message || err.message || "") + ` [${model}]`;
         // Only continue to the next model if this one doesn't exist / is invalid.
         const msg = err.response?.data?.error?.message || err.message || "";
         if (!msg.toLowerCase().includes("valid model") && !msg.toLowerCase().includes("not found")) break;
@@ -242,7 +244,9 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
     }
   }
 
-  return "❌ No AI keys configured. Add GEMINI_API_KEY or GROQ_API_KEY to your .env file.";
+  // If we get here, every provider failed. Report the last error so it's not a
+  // mystery — this message goes straight to WhatsApp and makes debugging instant.
+  return "❌ AI request failed on all providers. Last error: " + (lastError || "unknown") + " (Cerebras/Gemini/Groq/OpenRouter all tried)";
 }
 
 module.exports = { getAIResponse };

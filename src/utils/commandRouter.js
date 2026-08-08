@@ -40,6 +40,8 @@ const { sendFile, extractAllCodeBlocks } = require("../tools/fileSender");
 const { createBackup } = require("../tools/backupSystem");
 const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
+const { setReminder } = require("../tools/reminders");
+const { buildProject, continueProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 const PREFIX = process.env.BOT_PREFIX || "!";
@@ -523,7 +525,7 @@ async function handleWYR(sock, msg, args, ctx) {
 }
 
 async function handleRoast(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
+  const { reply, react, getSenderName } = require("./baileysHelpers");
   const target = args || getSenderName(msg);
   await react(sock, msg, "🔥");
   await reply(sock, msg, `@${target} ${getRoast()}`);

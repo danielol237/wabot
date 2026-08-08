@@ -40,7 +40,15 @@ function normalizeNumber(jidOrNumber) {
 function isOwner(senderJid) {
   const ownerNumber = process.env.OWNER_NUMBER;
   if (!ownerNumber) return false;
-  return normalizeNumber(senderJid) === ownerNumber;
+  // Compare both raw and normalized forms so country-code/format differences
+  // (e.g. 234907... vs 907...) don't break owner recognition.
+  const sender = normalizeNumber(senderJid);
+  const owner = String(ownerNumber).split("@")[0].split(":")[0];
+  if (sender === owner) return true;
+  // Strip leading country code (default Nigeria +234) if present on one side only
+  const strip234 = (n) => (n.startsWith("234") ? n.slice(3) : n);
+  if (strip234(sender) === strip234(owner)) return true;
+  return false;
 }
 
 // Admins are promoted by the owner at runtime, stored on disk

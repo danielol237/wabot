@@ -236,10 +236,16 @@ async function routeMessage(sock, msg, context) {
           return;
         }
         // Admin check
-        if (cmd.category === "group" && !isAdmin(senderJid, chatId) && !isOwner(senderJid)) {
-          const { reply: _rp } = require("./baileysHelpers");
-          await _rp(sock, msg, "❌ You need admin rights for that.");
-          return;
+        if (cmd.category === "group" && !isOwner(senderJid)) {
+          // Allow if the sender is in the bot's own admin list OR is a real
+          // WhatsApp group admin. The bot owner always passes via isOwner above.
+          const localAdmin = isAdmin(senderJid, chatId);
+          const groupAdmin = isSenderAdmin ? await isSenderAdmin(sock, chatId, senderJid).catch(() => false) : false;
+          if (!localAdmin && !groupAdmin) {
+            const { reply: _rp } = require("./baileysHelpers");
+            await _rp(sock, msg, "❌ You need admin rights for that.");
+            return;
+          }
         }
         await cmd.handler(sock, msg, args, context);
         return;

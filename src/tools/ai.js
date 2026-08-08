@@ -211,26 +211,34 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
     }
   }
 
-  // Fallback to OpenRouter
+  // Fallback to OpenRouter — the previous model ID (rouge-rose) was retired,
+  // so we use a verified working free model with a small fallback chain.
+  const OPENROUTER_MODELS = ["openai/gpt-oss-20b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3-super-120b-a12b:free"];
   if (process.env.OPENROUTER_API_KEY) {
-    try {
-      const res = await axios.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        {
-          model: "sophosympatheia/rouge-rose-0.1-7b:free",
-          messages: [{ role: "system", content: systemPrompt }, ...messages],
-          max_tokens: maxTokens,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-            "Content-Type": "application/json",
+    for (const model of OPENROUTER_MODELS) {
+      try {
+        const res = await axios.post(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            model,
+            messages: [{ role: "system", content: systemPrompt }, ...messages],
+            max_tokens: maxTokens,
+            temperature: 0.7,
           },
-        }
-      );
-      return res.data.choices[0]?.message?.content || "No response.";
-    } catch (err) {
-      error("OpenRouter error:", err.message);
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+        return res.data.choices[0]?.message?.content || "No response.";
+      } catch (err) {
+        error(`OpenRouter error (${model}):`, err.response?.data?.error?.message || err.message);
+        // Only continue to the next model if this one doesn't exist / is invalid.
+        const msg = err.response?.data?.error?.message || err.message || "";
+        if (!msg.toLowerCase().includes("valid model") && !msg.toLowerCase().includes("not found")) break;
+      }
     }
   }
 

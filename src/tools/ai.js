@@ -5,10 +5,11 @@ const { log, error, warn } = require("../utils/logger");
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 
 // Gemini's free tier: ~1,500 requests/day, 1M token context, no credit card.
-// Using Google's official OpenAI-compatible endpoint so we can reuse the same
-// request/response shape as Groq/OpenRouter instead of adding a separate SDK.
-const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"]; // fallback chain in case one gets deprecated/renamed
+// We call Google's NATIVE REST API (generateContent) because the newer
+// AQ.Ab8... OAuth-style API keys only work on the native endpoint, not the
+// OpenAI-compatible wrapper. The key is passed via the x-goog-api-key header.
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]; // fallback chain
 
 // Cerebras' free tier: 1M tokens/day, no credit card — genuinely the highest free
 // ceiling available right now, added after repeatedly hitting Gemini's daily 429s
@@ -129,35 +130,46 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
 
   // Try Gemini second — bigger context window (1M tokens) than Groq,
   // genuinely useful for the app builder which needs to track a lot of project context.
+  // Uses the NATIVE generateContent API so the newer AQ.Ab8... keys work.
   if (process.env.GEMINI_API_KEY) {
     for (const model of GEMINI_MODELS) {
       try {
+        // Build the native Gemini "contents" array from the OpenAI-style messages.
+        const contents = [
+          { role: "user", parts: [{ text: systemPrompt }] },
+          ...messages.map((m) => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }],
+          })),
+        ];
         const res = await axios.post(
-          GEMINI_BASE_URL,
+          `${GEMINI_BASE_URL}/${model}:generateContent`,
           {
-            model,
-            messages: [{ role: "system", content: systemPrompt }, ...messages],
-            max_tokens: maxTokens,
-            temperature: 0.7,
+            contents,
+            generationConfig: {
+              maxOutputTokens: maxTokens,
+              temperature: 0.7,
+            },
           },
           {
             headers: {
-              Authorization: `Bearer ${process.env.GEMINI_API_KEY}`,
+              "x-goog-api-key": process.env.GEMINI_API_KEY,
               "Content-Type": "application/json",
             },
-            timeout: 30000,
+            timeout: 40000,
           }
         );
-        const finishReason = res.data.choices[0]?.finish_reason;
-        let content = res.data.choices[0]?.message?.content || "I got nothing. Try again.";
-        if (finishReason === "length") {
+        const candidate = res.data.candidates && res.data.candidates[0];
+        let content = candidate?.content?.parts?.map((p) => p.text || "").join("") || "I got nothing. Try again.";
+        const finishReason = candidate?.finishReason;
+        if (finishReason === "MAX_TOKENS" || finishReason === "STOP") {
           content += "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
         }
         return content;
       } catch (err) {
         error(`Gemini error (${model}):`, err.response?.data?.error?.message || err.message);
         // If this specific model is gone, try the next one in the list.
-        // Any other error (rate limit, network) falls through to Groq instead.
+        // Any other error (rate limit, network, bad key) falls through to Groq instead.
         const errMsg = err.response?.data?.error?.message || err.message || "";
         if (!errMsg.toLowerCase().includes("not found") && !errMsg.toLowerCase().includes("deprecated")) break;
       }

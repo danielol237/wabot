@@ -304,7 +304,7 @@ async function startBot() {
         // send something back so it's clear what happened instead of going quiet.
         try {
           await sock.sendMessage(msg.key.remoteJid, {
-            text: "⚠️ Something broke on my end processing that — try again, or rephrase it.",
+            text: "⚠️ Something broke on my end: " + (err?.message || err || "unknown error"),
           }, { quoted: msg });
         } catch (_) {
           // If even this fails, there's genuinely nothing more we can do for this message

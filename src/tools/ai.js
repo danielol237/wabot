@@ -70,9 +70,17 @@ function needsLargeOutput(userMessage) {
 }
 
 async function getAIResponse(userMessage, userName, history = [], systemOverride = null, extraContext = "", options = {}) {
+  // History entries must be valid {role, content} objects. Some callers (or stored
+  // conversation history) pass plain strings or malformed entries, which breaks
+  // the providers (they reject non-object message entries). Sanitize everything:
+  const rawHistory = Array.isArray(history) ? history.slice(-8) : [];
+  const validHistory = rawHistory.filter((m) => m && typeof m === "object" && typeof m.content === "string").map((m) => ({
+    role: m.role === "assistant" || m.role === "model" ? "assistant" : "user",
+    content: m.content,
+  }));
   const messages = [
-    ...history.slice(-8),
-    { role: "user", content: userMessage },
+    ...validHistory,
+    { role: "user", content: String(userMessage) },
   ];
 
   // Merge any structured context (user facts, preferences, mood, owner/personality

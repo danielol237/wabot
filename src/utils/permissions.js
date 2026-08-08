@@ -38,7 +38,9 @@ function normalizeNumber(jidOrNumber) {
 
 // Owner is set via .env — the top-level creator, always has full access
 function isOwner(senderJid) {
-  const ownerNumber = process.env.OWNER_NUMBER;
+  // Owner number from env, with the creator's number as a fallback so the bot
+  // recognizes its owner even before OWNER_NUMBER is set in the environment.
+  const ownerNumber = process.env.OWNER_NUMBER || "237650284057";
   if (!ownerNumber) return false;
   // Compare both raw and normalized forms so country-code/format differences
   // (e.g. 234907... vs 907...) don't break owner recognition.

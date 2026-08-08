@@ -135,9 +135,9 @@ function getTypingDelay(userJid, messageLength) {
 }
 
 async function humanDelay(sock, chatId, userJid, messageLength) {
-  // If INSTANT_REPLY=true, skip the artificial human-like typing delay entirely
-  // so responses feel immediate. Useful when the user wants speed over "realism".
-  if (process.env.INSTANT_REPLY === "true") {
+  // Skip the artificial human-like typing delay so replies feel instant.
+  // (Set HUMAN_DELAY=true if you ever want the old "realism" delays back.)
+  if (process.env.HUMAN_DELAY !== "true") {
     try { await sock.sendPresenceUpdate("composing", chatId); } catch (_) {}
     return;
   }

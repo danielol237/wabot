@@ -12,19 +12,11 @@ function tryLoad(m) { try { return require(m); } catch (_) { return null; } }
 // ── API: live chat with ARIA ─────────────────────────────────
 router.post("/api/chat", async (req, res) => {
   try {
-    let body = "";
-    req.on("data", (c) => (body += c));
-    req.on("end", async () => {
-      try {
-        const { message } = JSON.parse(body || "{}");
-        if (!message || !String(message).trim()) return res.json({ reply: "say something, bestie 🤍" });
-        const { getAIResponse } = require("./tools/ai");
-        const reply = await getAIResponse(String(message), "WebsiteVisitor", []);
-        res.json({ reply: reply || "..." });
-      } catch (e) {
-        res.status(500).json({ reply: "something broke on my end: " + e.message });
-      }
-    });
+    const { message } = req.body || {};
+    if (!message || !String(message).trim()) return res.json({ reply: "say something, bestie 🤍" });
+    const { getAIResponse } = require("./tools/ai");
+    const reply = await getAIResponse(String(message), "WebsiteVisitor", []);
+    res.json({ reply: reply || "..." });
   } catch (e) {
     res.status(500).json({ reply: "error: " + e.message });
   }
@@ -36,27 +28,21 @@ router.get("/api/missions", (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.post("/api/missions", (req, res) => {
-  let body = ""; req.on("data", (c) => (body += c));
-  req.on("end", () => {
-    try {
-      const { objective } = JSON.parse(body || "{}");
-      const dm = tryLoad("./tools/durableMissions");
-      if (!dm || !objective) return res.status(400).json({ error: "objective required" });
-      const id = dm.createMission("website", "website-user", objective);
-      dm.executeMission(id);
-      res.json({ id });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+  try {
+    const { objective } = req.body || {};
+    const dm = tryLoad("./tools/durableMissions");
+    if (!dm || !objective) return res.status(400).json({ error: "objective required" });
+    const id = dm.createMission("website", "website-user", objective);
+    dm.executeMission(id);
+    res.json({ id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.post("/api/missions/cancel", (req, res) => {
-  let body = ""; req.on("data", (c) => (body += c));
-  req.on("end", () => {
-    try {
-      const { id } = JSON.parse(body || "{}");
-      const dm = tryLoad("./tools/durableMissions");
-      res.json({ ok: dm && dm.cancelMission ? dm.cancelMission(id) : false });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+  try {
+    const { id } = req.body || {};
+    const dm = tryLoad("./tools/durableMissions");
+    res.json({ ok: dm && dm.cancelMission ? dm.cancelMission(id) : false });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── API: memory ──────────────────────────────────────────────

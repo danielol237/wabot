@@ -9,6 +9,7 @@
     "dev": "nodemon src/index.js"
   },
   "dependencies": {
+    "@consumet/extensions": "^1.8.8",
     "@whiskeysockets/baileys": "^6.7.9",
     "axios": "^1.6.0",
     "cheerio": "^1.0.0",

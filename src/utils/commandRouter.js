@@ -995,24 +995,37 @@ async function handleAnimePlay(sock, msg, args, ctx) {
 
   await reply(sock, msg, `🔎 Looking up "${name}"...`);
   try {
-    // Resolve the anime id: try AnimePahe first (works when Jikan is down).
-    let id = null;
+    // Resolve the anime id across sources so a dead source doesn't block us.
     let results = [];
-    try { results = await searchAnimePahe(name); } catch (_) {}
+    let source = "";
+    // 1. Consumet (maintained provider) — returns the session id the downloader needs.
+    try {
+      const { consumetSearch } = require("./animeConsumet");
+      const c = await consumetSearch(name);
+      if (c.results.length) { results = c.results; source = c.source; }
+    } catch (_) {}
+    // 2. AnimePahe (MD5 id) — its search page still works.
+    if (!results.length) { try { results = await searchAnimePahe(name); if (results.length) source = "animepahe"; } catch (_) {} }
+    // 3. Jikan (MAL numeric id) — reliable metadata.
+    if (!results.length) { try { results = await searchAnime(name); if (results.length) source = "jikan"; } catch (_) {} }
+    // 4. OmniSave.
+    if (!results.length) { try { results = await searchOmniSave(name); if (results.length) source = "omnisave"; } catch (_) {} }
+    // 5. Gogoanime (slug id).
     if (!results.length) {
-      try { results = await searchAnime(name); } catch (_) {}
-    }
-    if (!results.length) {
-      try { results = await searchOmniSave(name); } catch (_) {}
+      try {
+        const { searchGogo } = require("./animeGogo");
+        const g = await searchGogo(name);
+        if (g.length) { results = g; source = "gogoanime"; }
+      } catch (_) {}
     }
     if (!results.length) {
       return reply(sock, msg, `❌ Couldn't find an anime named "${name}". Try a more exact title.`);
     }
-    id = results[0].id;
+    const id = results[0].id;
     const shown = results[0].title || name;
 
     await reply(sock, msg, `⏬ Downloading ep ${episode} of *${shown}*... this can take a bit.`);
-    const result = await downloadAnimeEpisode(id, episode);
+    const result = await downloadAnimeEpisode(id, episode, "", shown);
     if (!result || !result.success) {
       return reply(sock, msg, `❌ Download failed: ${result?.error || "couldn't resolve a source"}`);
     }

@@ -68,6 +68,9 @@ const INTENTS = {
   news: ["news about", "latest news", "news on", "what's happening with"],
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
   build: ["build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
+  github: ["on github", "look on github", "github search", "search github", "find it on github", "git hub"],
+  reddit: ["on reddit", "look on reddit", "reddit search", "search reddit", "find it on reddit"],
+  wikipedia: ["on wikipedia", "wikipedia search", "search wikipedia", "on wiki", "wikipedia about"],
 };
 
 // ── Command registry ─────────────────────────────────────────
@@ -157,6 +160,12 @@ function registerBuiltinCommands() {
   registerCommand({ name: "animedl", aliases: ["animeplay", "astream", "watch", "dlanime"], category: "anime", description: "Download anime episode and send video", handler: handleAnimePlay, ownerOnly: false });
   registerCommand({ name: "trending", aliases: ["trendinganime"], category: "anime", description: "Trending anime", handler: handleTrending, ownerOnly: false });
   registerCommand({ name: "airing", aliases: ["airinganime"], category: "anime", description: "Airing anime", handler: handleAiring, ownerOnly: false });
+
+  // Research (GitHub / Reddit / Wikipedia)
+  registerCommand({ name: "github", aliases: ["gh"], category: "research", description: "Search GitHub repos: !github <thing>", handler: handleGitHub, ownerOnly: false });
+  registerCommand({ name: "releases", aliases: ["ghrelease", "githubrelease"], category: "research", description: "Get latest GitHub release + download links: !releases owner/repo", handler: handleGitHubReleases, ownerOnly: false });
+  registerCommand({ name: "reddit", aliases: ["rdt"], category: "research", description: "Search Reddit: !reddit <thing> or !reddit r/sub <thing>", handler: handleReddit, ownerOnly: false });
+  registerCommand({ name: "wikipedia", aliases: ["wiki", "wp"], category: "research", description: "Search Wikipedia: !wikipedia <thing>", handler: handleWikipedia, ownerOnly: false });
 
   // Pokémon
   registerCommand({ name: "start", aliases: ["register", "trainer"], category: "pokemon", description: "Register as a trainer & get a starter", handler: handlePokeStart, ownerOnly: false });
@@ -342,7 +351,7 @@ async function handleHelp(sock, msg, args, ctx) {
   const catEmoji = {
     meta: "🛠️", admin: "👑", group: "👥", utility: "🔧", fun: "🎲",
     anime: "🎬", pokemon: "⚡", economy: "💰", dev: "💻",
-    games: "🎮", music: "🎵", ai: "🤖",
+    games: "🎮", music: "🎵", ai: "🤖", research: "🔍",
   };
 
   const categories = {};
@@ -1437,6 +1446,53 @@ async function handleAiring(sock, msg, args, ctx) {
   await reply(sock, msg, result);
 }
 
+// ── Research handlers (GitHub / Reddit / Wikipedia) ──────────
+function formatResearchResult(result) {
+  if (!result) return "❌ Nothing returned.";
+  if (result.error) return "❌ " + result.error;
+  return result.title + "\n\n" + result.body;
+}
+
+async function handleGitHub(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: !github <thing> — e.g. !github whatwg html\n\nTip: use !releases owner/repo to get download links.");
+  await react(sock, msg, "🐙");
+  const { research } = require("../tools/sourceResearch");
+  const result = await research({ source: "github", query: args });
+  await reply(sock, msg, formatResearchResult(result));
+}
+
+async function handleGitHubReleases(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: !releases owner/repo — e.g. !releases sharplab/yt-dlp");
+  await react(sock, msg, "📦");
+  const { research } = require("../tools/sourceResearch");
+  const result = await research({ source: "releases", query: args });
+  await reply(sock, msg, formatResearchResult(result));
+}
+
+async function handleReddit(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: !reddit <thing> — e.g. !reddit cool photography\n  or scope it: !reddit r/photography cameras");
+  await react(sock, msg, "🔴");
+  const { research } = require("../tools/sourceResearch");
+  // Support "r/sub <query>" syntax to scope the search.
+  const m = args.match(/^(r\/[a-zA-Z0-9_]+)\s+(.+)$/i);
+  const subreddit = m ? m[1] : null;
+  const query = m ? m[2] : args;
+  const result = await research({ source: "reddit", query, subreddit });
+  await reply(sock, msg, formatResearchResult(result));
+}
+
+async function handleWikipedia(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: !wikipedia <thing> — e.g. !wikipedia quantum computing");
+  await react(sock, msg, "📖");
+  const { research } = require("../tools/sourceResearch");
+  const result = await research({ source: "wikipedia", query: args });
+  await reply(sock, msg, formatResearchResult(result));
+}
+
 // Dev handlers
 // Format the modern buildProject result into a chat-friendly message.
 function formatBuildResult(result) {
@@ -1803,7 +1859,55 @@ const intentHandlers = {
     const result = await buildProject(text, ctx.senderName, ctx.chatId);
     await reply(sock, msg, formatBuildResult(result));
   },
+  github: async (sock, msg, text, ctx) => {
+    const { reply, react } = require("./baileysHelpers");
+    await react(sock, msg, "🐙");
+    const query = extractSourceQuery(text, /github|git hub/i);
+    if (!query) return reply(sock, msg, "What should I look up on GitHub? E.g. \"look up whatwg html on github\"");
+    const { research } = require("../tools/sourceResearch");
+    const result = await research({ source: "github", query });
+    await reply(sock, msg, formatResearchResult(result));
+  },
+  reddit: async (sock, msg, text, ctx) => {
+    const { reply, react } = require("./baileysHelpers");
+    await react(sock, msg, "🔴");
+    const query = extractSourceQuery(text, /reddit/i);
+    if (!query) return reply(sock, msg, "What should I look up on Reddit? E.g. \"look up cool photography on reddit\"");
+    const m = query.match(/^(r\/[a-zA-Z0-9_]+)\s+(.+)$/i);
+    const subreddit = m ? m[1] : null;
+    const q = m ? m[2] : query;
+    const { research } = require("../tools/sourceResearch");
+    const result = await research({ source: "reddit", query: q, subreddit });
+    await reply(sock, msg, formatResearchResult(result));
+  },
+  wikipedia: async (sock, msg, text, ctx) => {
+    const { reply, react } = require("./baileysHelpers");
+    await react(sock, msg, "📖");
+    const query = extractSourceQuery(text, /wikipedia|wiki/i);
+    if (!query) return reply(sock, msg, "What should I look up on Wikipedia? E.g. \"look up quantum computing on wikipedia\"");
+    const { research } = require("../tools/sourceResearch");
+    const result = await research({ source: "wikipedia", query });
+    await reply(sock, msg, formatResearchResult(result));
+  },
 };
+
+// Pull the actual search term out of "look up X on github" style phrasing.
+// Handles: "X on github", "look up X on github", "X on wikipedia", etc.
+function extractSourceQuery(text, sourceRe) {
+  let t = text.trim();
+  // Drop leading address + verb noise.
+  t = t.replace(/^(aria|hey aria|aria,)?\s*(please\s*)?(can you\s*)?(look up|look|search|find|check|google)\s*(it|up|for)?\s*/i, "");
+  // Wrap the source in a non-capturing group so an alternation like
+  // "github|git hub" doesn't leak `|` into the surrounding pattern.
+  const src = "(?:" + sourceRe.source + ")";
+  // If there's "<source> <query>" (source first), drop the source token.
+  t = t.replace(new RegExp("^(?:on|in)?\\s*" + src + "\\s+(?:about|for|on)?\\s*", "i"), "");
+  // If there's "<query> <source>" (source last), drop the trailing source clause.
+  t = t.replace(new RegExp("\\s+(?:on|in|at)\\s*" + src + "\\s*$", "i"), "");
+  // Clean leftover connector words.
+  t = t.replace(/^(about|for|on|in|about it|for it|on it|it)\s+/i, "").replace(/\s+(about|for|on|in)\s*$/i, "").trim();
+  return t;
+}
 
 // ── AI Response (catch-all) ──────────────────────────────────
 async function handleAIResponse(sock, msg, text, ctx) {

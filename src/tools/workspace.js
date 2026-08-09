@@ -18,7 +18,11 @@ function getWorkspace(userId) {
 
 function createProject(userId, name, desc) {
   const w = getWorkspace(userId);
-  w.projects.push({ id: w.projects.length + 1, name, desc, status: "active", createdAt: Date.now(), updatedAt: Date.now(), files: [], notes: [] });
+  if (w.projects.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
+    return { error: "A project with that name already exists." };
+  }
+  // Stable unique id (was w.projects.length+1, which shifted/collided on delete).
+  w.projects.push({ id: Date.now() + Math.random().toString(36).slice(2, 5), name, desc, status: "active", createdAt: Date.now(), updatedAt: Date.now(), files: [], notes: [] });
   w.current = name;
   save();
   return w.projects[w.projects.length - 1];

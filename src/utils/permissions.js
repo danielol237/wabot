@@ -38,18 +38,28 @@ function normalizeNumber(jidOrNumber) {
 
 // Owner is set via .env — the top-level creator, always has full access
 function isOwner(senderJid) {
-  // Owner number from env, with the creator's number as a fallback so the bot
-  // recognizes its owner even before OWNER_NUMBER is set in the environment.
-  const ownerNumber = process.env.OWNER_NUMBER || "237650284057";
-  if (!ownerNumber) return false;
-  // Compare both raw and normalized forms so country-code/format differences
-  // (e.g. 234907... vs 907...) don't break owner recognition.
+  if (!senderJid) return false;
   const sender = normalizeNumber(senderJid);
-  const owner = String(ownerNumber).split("@")[0].split(":")[0];
-  if (sender === owner) return true;
-  // Strip leading country code (default Nigeria +234) if present on one side only
-  const strip234 = (n) => (n.startsWith("234") ? n.slice(3) : n);
-  if (strip234(sender) === strip234(owner)) return true;
+  if (!sender) return false;
+
+  // Check against OWNER_NUMBER and OWNER_LID env vars, plus the creator's number
+  // as a fallback. WhatsApp's new LID system reports participants as
+  // <lid>@lid instead of <phone>@s.whatsapp.net, so we match both the phone
+  // number and the LID.
+  const candidates = [
+    process.env.OWNER_NUMBER,
+    process.env.OWNER_LID,
+    "237650284057",      // creator's phone (fallback)
+    "211643824869445",   // creator's LID (fallback, from the chat's participant id)
+  ].filter(Boolean);
+
+  for (const c of candidates) {
+    const cid = normalizeNumber(c);
+    if (sender === cid) return true;
+    // tolerate country-code differences
+    const strip234 = (n) => (n.startsWith("234") ? n.slice(3) : n);
+    if (strip234(sender) === strip234(cid)) return true;
+  }
   return false;
 }
 

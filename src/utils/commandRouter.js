@@ -464,7 +464,8 @@ async function handleKick(sock, msg, args, ctx) {
   if (!target) return reply(sock, msg, "Mention or quote the user.");
   const result = await kickUser(sock, ctx.chatId, target);
   await react(sock, msg, "👢");
-  await reply(sock, msg, result);
+  if (result?.success === false) await reply(sock, msg, `❌ Kick failed: ${result.error}`);
+  else await reply(sock, msg, "👢 User kicked.");
 }
 
 async function handlePromote(sock, msg, args, ctx) {
@@ -474,7 +475,8 @@ async function handlePromote(sock, msg, args, ctx) {
   if (!target) return reply(sock, msg, "Mention or quote the user.");
   const result = await promoteUser(sock, ctx.chatId, target);
   await react(sock, msg, "⭐");
-  await reply(sock, msg, result);
+  if (result?.success === false) await reply(sock, msg, `❌ Promote failed: ${result.error}`);
+  else await reply(sock, msg, "⭐ User promoted to admin.");
 }
 
 async function handleDemote(sock, msg, args, ctx) {
@@ -484,14 +486,16 @@ async function handleDemote(sock, msg, args, ctx) {
   if (!target) return reply(sock, msg, "Mention or quote the user.");
   const result = await demoteUser(sock, ctx.chatId, target);
   await react(sock, msg, "⬇️");
-  await reply(sock, msg, result);
+  if (result?.success === false) await reply(sock, msg, `❌ Demote failed: ${result.error}`);
+  else await reply(sock, msg, "⬇️ User demoted.");
 }
 
 async function handleTagAll(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
-  const result = await tagAll(sock, ctx.chatId, args || "📢 @everyone");
-  await reply(sock, msg, result);
+  const result = await tagAll(sock, msg, ctx.chatId, args || "📢 @everyone");
+  // tagAll already sends the tagged message to the group; only reply on error.
+  if (result?.success === false) await reply(sock, msg, `❌ ${result.error}`);
 }
 
 async function handleHideTag(sock, msg, args, ctx) {

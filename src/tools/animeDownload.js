@@ -232,6 +232,53 @@ async function search(query) {
   return { jikan, omniscrape };
 }
 
+// Download a single anime episode to a video file.
+// Uses OmniSave to resolve the direct stream URL, then yt-dlp to fetch it.
+// Returns { success, filePath, size } or { success:false, error }.
+async function downloadAnimeEpisode(subjectId, episode, detailPath = "") {
+  // If we have a subjectId from an OmniSave search, resolve a download URL.
+  try {
+    const omni = await searchOmniSaveById(subjectId);
+    if (omni && omni.detailPath) {
+      const dl = await getOmniSaveDownload(subjectId, omni.detailPath, 0, episode || 1);
+      const direct = dl?.downloads?.find((d) => d?.url)?.url || dl?.downloads?.[0]?.url;
+      if (direct) {
+        return await downloadVideo(direct);
+      }
+    }
+  } catch (err) {
+    console.error("OmniSave episode download failed:", err.message);
+  }
+  return { success: false, error: "Couldn't resolve a download URL for that episode." };
+}
+
+// Look up a single subject by id from OmniSave so we can get its detailPath.
+async function searchOmniSaveById(subjectId) {
+  const token = await getOmniscrapeToken();
+  if (!token) return null;
+  try {
+    const res = await axios.post(
+      "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/detail",
+      { subjectId },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "x-request-lang": "en",
+          "X-Site-Domain": "videodownloader.site",
+          Referer: "https://videodownloader.site/",
+          Origin: "https://videodownloader.site/",
+        },
+        timeout: 15000,
+      }
+    );
+    return res.data?.data || null;
+  } catch (err) {
+    console.error("OmniSave detail error:", err.message);
+    return null;
+  }
+}
+
 module.exports = {
   searchAnime,
   getAnimeDetails,
@@ -239,5 +286,7 @@ module.exports = {
   searchOmniSave,
   getOmniSaveDownload,
   downloadVideo,
+  downloadAnimeEpisode,
+  searchOmniSaveById,
   search,
 };

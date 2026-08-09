@@ -13,7 +13,7 @@ const { renderCodeImage } = require("../tools/carbon");
 const { extractText } = require("../tools/visionAI");
 const { getLyrics } = require("../tools/lyricsSearch");
 const { searchWallpaper } = require("../tools/wallpaperSearch");
-const { searchAnime, getAnimeEpisodes, getAnimeDetails, getOmniSaveDownload, downloadVideo } = require("../tools/animeDownload");
+const { searchAnime, getAnimeEpisodes, getAnimeDetails, searchOmniSave, getOmniSaveDownload, downloadVideo, downloadAnimeEpisode } = require("../tools/animeDownload");
 const { checkMessage, parseModArgs } = require("../tools/autoMod");
 const { trackInteraction, getUserContext } = require("../utils/userMemory");
 const { addPreference, getPreferences, clearPreferences } = require("../utils/userPreferences");
@@ -151,7 +151,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "anime", aliases: ["animesearch"], category: "anime", description: "Search anime", handler: handleAnimeSearch, ownerOnly: false });
   registerCommand({ name: "animeinfo", aliases: ["ainfo"], category: "anime", description: "Get anime details", handler: handleAnimeInfo, ownerOnly: false });
   registerCommand({ name: "episodes", aliases: ["eps", "animeeps"], category: "anime", description: "Get anime episodes", handler: handleAnimeEps, ownerOnly: false });
-  registerCommand({ name: "animeplay", aliases: ["astream", "watch"], category: "anime", description: "Stream anime episode", handler: handleAnimePlay, ownerOnly: false });
+  registerCommand({ name: "animedl", aliases: ["animeplay", "astream", "watch", "dlanime"], category: "anime", description: "Download anime episode and send video", handler: handleAnimePlay, ownerOnly: false });
   registerCommand({ name: "trending", aliases: ["trendinganime"], category: "anime", description: "Trending anime", handler: handleTrending, ownerOnly: false });
   registerCommand({ name: "airing", aliases: ["airinganime"], category: "anime", description: "Airing anime", handler: handleAiring, ownerOnly: false });
 
@@ -851,22 +851,38 @@ async function handleAnimeSearch(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !anime <name>");
   await react(sock, msg, "🔎");
-  const result = await searchAnime(args);
+  // Try Jikan first, fall back to OmniSave if Jikan is down or empty.
+  let result = [];
+  let source = "MyAnimeList";
+  try { result = await searchAnime(args); } catch (_) {}
   if (!Array.isArray(result) || result.length === 0) {
-    return reply(sock, msg, "❌ No anime found for that search.");
+    try { result = await searchOmniSave(args); source = "OmniSave"; } catch (_) {}
+  }
+  if (!Array.isArray(result) || result.length === 0) {
+    return reply(sock, msg, "❌ No anime found for that search. Try a different title.");
   }
   const text = result
     .slice(0, 8)
-    .map((a) => `*${a.title}*\n  ID: ${a.id} · ${a.type || "?"} · ${a.episodes || "?"} eps · ⭐${a.score || "?"}\n  ${a.synopsis || ""}`)
+    .map((a) => {
+      const hasId = a.id != null;
+      return `*${a.title || a.titleEnglish || "?"}*\n  ${hasId ? `ID: ${a.id} · ` : ""}${a.type || "?"} · ${a.episodes || "?"} eps · ⭐${a.score || "?"}\n  ${a.synopsis || "Use !animeinfo for details."}`;
+    })
     .join("\n\n");
-  await reply(sock, msg, `🎬 *Anime Search: "${args}"*\n\n${text}\n\n_Use !animeinfo <id> for details._`);
+  await reply(sock, msg, `🎬 *Anime Search: "${args}"* _(via ${source})_\n\n${text}\n\n_Use !animeinfo <id> for details, or !animedl <id> <episode> to download._`);
 }
 
 async function handleAnimeInfo(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !animeinfo <id or name>");
   await react(sock, msg, "📺");
-  const result = await getAnimeDetails(args);
+  let result = null;
+  try { result = await getAnimeDetails(args); } catch (_) {}
+  if (!result && !/^\d+$/.test(args)) {
+    try {
+      const found = await searchAnime(args);
+      if (found && found[0]) result = await getAnimeDetails(found[0].id);
+    } catch (_) {}
+  }
   if (!result || typeof result !== "object" || result.success === false) {
     return reply(sock, msg, "❌ Couldn't fetch anime details.");
   }
@@ -879,24 +895,45 @@ async function handleAnimeEps(sock, msg, args, ctx) {
   if (!args) return reply(sock, msg, "Usage: !episodes <anime id>");
   await react(sock, msg, "📋");
   const result = await getAnimeEpisodes(args);
-  await reply(sock, msg, result);
+  if (!Array.isArray(result) || result.length === 0) {
+    return reply(sock, msg, "❌ No episodes found for that anime id.");
+  }
+  const lines = result.slice(0, 30).map((e) => `Ep ${e.episode}: ${e.title || "—"}`).join("\n");
+  await reply(sock, msg, `📋 *Episodes*\n\n${lines}\n\n_Use !animedl <animeId> <ep#> to download._`);
 }
 
 async function handleAnimePlay(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   const parts = args.split(/\s+/);
-  if (parts.length < 2) return reply(sock, msg, "Usage: !animeplay <animeName> <episodeNum>");
-  await react(sock, msg, "▶️");
-  const result = await getOmniSaveDownload(parts[0], parseInt(parts[1]));
-  await reply(sock, msg, result);
+  if (parts.length < 2) return reply(sock, msg, "Usage: !animedl <animeId> <episodeNum>");
+  await react(sock, msg, "⏬");
+  const animeId = parts[0];
+  const episode = parseInt(parts[1]);
+  await reply(sock, msg, `⏬ Downloading episode ${episode} of anime ${animeId}... this can take a bit.`);
+  try {
+    const result = await downloadAnimeEpisode(animeId, episode);
+    if (!result || !result.success) {
+      return reply(sock, msg, `❌ Download failed: ${result?.error || "unknown error"}`);
+    }
+    const fs = require("fs");
+    const buffer = fs.readFileSync(result.filePath);
+    await sock.sendMessage(ctx.chatId, {
+      video: buffer,
+      mimetype: "video/mp4",
+      caption: `🎬 Episode ${episode}`,
+    }, { quoted: msg });
+    try { fs.unlinkSync(result.filePath); } catch (_) {}
+  } catch (err) {
+    await reply(sock, msg, `❌ Download error: ${err.message}`);
+  }
 }
 
 async function handleTrending(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "🔥");
-  const { getTrendingAnime } = require("../tools/animeExpanded");
-  const result = await getTrendingAnime();
-  await reply(sock, msg, result);
+  const { getTrending } = require("../tools/animeExpanded");
+  const result = await getTrending();
+  await reply(sock, msg, typeof result === "string" ? result : JSON.stringify(result));
 }
 
 async function handlePSpawn(sock, msg, args, ctx) {

@@ -167,35 +167,37 @@ async function searchOmniSave(query) {
   if (!token) return [];
 
   try {
-    const res = await axios.post(
-      "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/search",
-      { keyword: query, page: 1, perPage: 10, subjectType: 3 },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "x-request-lang": "en",
-          "X-Site-Domain": "videodownloader.site",
-          Referer: "https://videodownloader.site/",
-          Origin: "https://videodownloader.site/",
-        },
-        timeout: 15000,
-      }
-    );
-
-    // The API returns results under `items` (with a `pager`), not `list`.
-    // Keep a defensive fallback to `list` in case the shape ever shifts back.
-    const payload = res.data?.data || {};
-    const items = payload.items || payload.list || payload.records || [];
-    return items.map((item) => ({
-      subjectId: item.subjectId,
-      title: item.title || item.name || "",
-      year: item.releaseDate,
-      rating: item.imdbRatingValue,
-      image: item.cover?.url,
-      detailPath: item.detailPath,
-      hasResource: item.hasResource,
-    }));
+    const H = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "x-request-lang": "en",
+      "X-Site-Domain": "videodownloader.site",
+      Referer: "https://videodownloader.site/",
+      Origin: "https://videodownloader.site/",
+    };
+    // subjectType 3 = movies (returns nothing for anime). 2 = TV/anime, 0 = all.
+    for (const subjectType of [2, 0]) {
+      const res = await axios.post(
+        "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/search",
+        { keyword: query, page: 1, perPage: 10, subjectType },
+        { headers: H, timeout: 15000 }
+      );
+      const payload = res.data?.data || {};
+      const items = payload.items || payload.list || payload.records || [];
+      if (!items.length) continue;
+      return items.map((item) => ({
+        subjectId: item.subjectId,
+        title: item.title || item.name || "",
+        year: item.releaseDate,
+        rating: item.imdbRatingValue,
+        image: item.cover?.url,
+        detailPath: item.detailPath,
+        hasResource: item.hasResource,
+        subjectType,
+        source: "omnisave",
+      }));
+    }
+    return [];
   } catch (err) {
     console.error("OmniSave search error:", err.message);
     return [];
@@ -381,7 +383,22 @@ async function tryDownloadUrl(url) {
 async function downloadAnimeEpisode(subjectId, episode, detailPath = "", title = "") {
   const errors = [];
 
-  // 0. Consumet (maintained providers) — the reliable primary path.
+  // 0. OmniSave fast path — when the search already gave us a detailPath
+  //    (numeric subjectId + detailPath), this is self-contained and reliable.
+  if (detailPath) {
+    try {
+      const dl = await getOmniSaveDownload(subjectId, detailPath, 1, episode || 1);
+      const direct = dl?.downloads?.find((d) => d?.url)?.url || dl?.downloads?.[0]?.url;
+      if (direct) {
+        const got = await tryDownloadUrl(direct);
+        if (got) return got;
+      }
+      errors.push("OmniSave: no download URL");
+      return { success: false, error: errors.join(" | ") };
+    } catch (e) { errors.push("OmniSave: " + e.message); }
+  }
+
+  // 1. Consumet (maintained providers) — reliable when we have a provider id.
   try {
     const { consumetEpisodeStream } = require("./animeConsumet");
     const got = await consumetEpisodeStream(subjectId, episode);
@@ -392,7 +409,7 @@ async function downloadAnimeEpisode(subjectId, episode, detailPath = "", title =
     errors.push(got ? `${got.provider}: download failed` : "Consumet: no source");
   } catch (e) { errors.push("Consumet: " + e.message); }
 
-  // 1. AnimePahe (works only for ids found via AnimePahe search).
+  // 2. AnimePahe (works only for ids found via AnimePahe search).
   if (/^[a-f0-9]{32}$/i.test(String(subjectId))) {
     try {
       const pahe = await animepaheGetStreamUrl(subjectId, episode);
@@ -428,11 +445,16 @@ async function downloadAnimeEpisode(subjectId, episode, detailPath = "", title =
     } catch (e) { errors.push("Gogoanime: " + e.message); }
   }
 
-  // 3. OmniSave direct download.
+  // 3. OmniSave direct download. Season is 1-indexed (se=1 = season 1).
   try {
-    const omni = await searchOmniSaveById(subjectId);
+    let omni = null;
+    if (detailPath) {
+      omni = { detailPath };
+    } else {
+      omni = await searchOmniSaveById(subjectId);
+    }
     if (omni && omni.detailPath) {
-      const dl = await getOmniSaveDownload(subjectId, omni.detailPath, 0, episode || 1);
+      const dl = await getOmniSaveDownload(subjectId, omni.detailPath, 1, episode || 1);
       const direct = dl?.downloads?.find((d) => d?.url)?.url || dl?.downloads?.[0]?.url;
       if (direct) {
         const got = await tryDownloadUrl(direct);

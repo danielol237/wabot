@@ -998,18 +998,20 @@ async function handleAnimePlay(sock, msg, args, ctx) {
     // Resolve the anime id across sources so a dead source doesn't block us.
     let results = [];
     let source = "";
-    // 1. Consumet (maintained provider) — returns the session id the downloader needs.
-    try {
-      const { consumetSearch } = require("./animeConsumet");
-      const c = await consumetSearch(name);
-      if (c.results.length) { results = c.results; source = c.source; }
-    } catch (_) {}
-    // 2. AnimePahe (MD5 id) — its search page still works.
-    if (!results.length) { try { results = await searchAnimePahe(name); if (results.length) source = "animepahe"; } catch (_) {} }
-    // 3. Jikan (MAL numeric id) — reliable metadata.
-    if (!results.length) { try { results = await searchAnime(name); if (results.length) source = "jikan"; } catch (_) {} }
-    // 4. OmniSave.
+    // 1. OmniSave — self-contained direct-MP4 source, confirmed working.
     if (!results.length) { try { results = await searchOmniSave(name); if (results.length) source = "omnisave"; } catch (_) {} }
+    // 2. Consumet (maintained provider).
+    if (!results.length) {
+      try {
+        const { consumetSearch } = require("./animeConsumet");
+        const c = await consumetSearch(name);
+        if (c.results.length) { results = c.results; source = c.source; }
+      } catch (_) {}
+    }
+    // 3. AnimePahe (MD5 id) — its search page still works.
+    if (!results.length) { try { results = await searchAnimePahe(name); if (results.length) source = "animepahe"; } catch (_) {} }
+    // 4. Jikan (MAL numeric id) — reliable metadata.
+    if (!results.length) { try { results = await searchAnime(name); if (results.length) source = "jikan"; } catch (_) {} }
     // 5. Gogoanime (slug id).
     if (!results.length) {
       try {
@@ -1023,9 +1025,11 @@ async function handleAnimePlay(sock, msg, args, ctx) {
     }
     const id = results[0].id;
     const shown = results[0].title || name;
+    // OmniSave gives us a subjectId + detailPath that the downloader needs.
+    const detailPath = results[0].detailPath || "";
 
     await reply(sock, msg, `⏬ Downloading ep ${episode} of *${shown}*... this can take a bit.`);
-    const result = await downloadAnimeEpisode(id, episode, "", shown);
+    const result = await downloadAnimeEpisode(id, episode, detailPath, shown);
     if (!result || !result.success) {
       return reply(sock, msg, `❌ Download failed: ${result?.error || "couldn't resolve a source"}`);
     }

@@ -243,11 +243,12 @@ async function routeMessage(sock, msg, context) {
   if (isGroup) {
     const modResult = await checkMessage(text, senderJid, chatId);
     if (modResult) {
-      const { react: _r, reply: _rp } = require("./baileysHelpers");
-      await _r(sock, msg, modResult.reaction);
-      if (modResult.reply) {
-        await _rp(sock, msg, modResult.reply);
+      const { reply: _rp } = require("./baileysHelpers");
+      // Delete the offending message (best-effort; bot needs to be admin).
+      if (modResult.action === "delete") {
+        try { await sock.sendMessage(chatId, { delete: { remoteJid: chatId, id: msg.key.id, participant: msg.key.participant } }); } catch (_) {}
       }
+      await _rp(sock, msg, `🚫 ${modResult.reason || "This message was removed."}`);
       return;
     }
   }
@@ -1518,7 +1519,14 @@ async function handleVoiceMode(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   const prefs = getPreferences(ctx.senderJid);
   const has = prefs.includes("voice-mode");
-  if (has) {
+  const want = (args || "").trim().toLowerCase();
+  // Respect explicit on/off; default to toggle when no arg or arg isn't on/off.
+  let turnOn;
+  if (want === "on") turnOn = true;
+  else if (want === "off") turnOn = false;
+  else turnOn = !has; // toggle
+
+  if (!turnOn) {
     clearPreferences(ctx.senderJid);
     await reply(sock, msg, "🔇 Voice mode off — text replies only.");
   } else {

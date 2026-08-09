@@ -30,10 +30,19 @@ function getModSettings(chatId) {
 function checkMessage(text, senderName, chatId) {
   if (!text || !chatId) return null;
   const settings = getModSettings(chatId);
+  const gs = getGroupSettings(chatId);
   if (!settings.enabled) return null;
 
   const lower = text;
   const now = Date.now();
+
+  // 0. Anti-link — block links when the group has antilink enabled.
+  if (gs.antilink) {
+    const linkRe = /(https?:\/\/|www\.)[^\s]+/i;
+    if (linkRe.test(lower)) {
+      return { action: "delete", reason: "Links are disabled in this group." };
+    }
+  }
 
   // 1. Banned words
   if (settings.bannedWords.length > 0) {

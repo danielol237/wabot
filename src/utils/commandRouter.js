@@ -13,7 +13,7 @@ const { renderCodeImage } = require("../tools/carbon");
 const { extractText } = require("../tools/visionAI");
 const { getLyrics } = require("../tools/lyricsSearch");
 const { searchWallpaper } = require("../tools/wallpaperSearch");
-const { searchAnime, getAnimeEpisodes, getAnimeDetails, searchOmniSave, getOmniSaveDownload, downloadVideo, downloadAnimeEpisode } = require("../tools/animeDownload");
+const { searchAnime, searchAnimePahe, getAnimeEpisodes, getAnimeDetails, searchOmniSave, getOmniSaveDownload, downloadVideo, downloadAnimeEpisode } = require("../tools/animeDownload");
 const { checkMessage, parseModArgs } = require("../tools/autoMod");
 const { trackInteraction, getUserContext } = require("../utils/userMemory");
 const { addPreference, getPreferences, clearPreferences } = require("../utils/userPreferences");
@@ -191,7 +191,10 @@ function detectIntent(text) {
   const lower = text.toLowerCase().trim();
   for (const [intent, patterns] of Object.entries(INTENTS)) {
     for (const pattern of patterns) {
-      if (lower.startsWith(pattern) || lower.includes(pattern)) {
+      // Only match clear intent at the START of the message, never mid-sentence.
+      // Using startsWith prevents normal chat like "help me search stake..." from
+      // being hijacked by the help command.
+      if (lower === pattern || lower.startsWith(pattern + " ") || lower.startsWith(pattern + ",") || lower.startsWith(pattern + "?")) {
         return intent;
       }
     }
@@ -298,24 +301,12 @@ async function handleAlive(sock, msg, args, ctx) {
 
 async function handleHelp(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  await react(sock, msg, "📋");
-  
-  // Categorized with emoji headers so it's compact, readable, and stylish.
-  // Commands are sorted within each category. Owner-only commands are hidden
-  // from non-owners (but shown to the owner).
+  await react(sock, msg, "✨");
+
   const catEmoji = {
-    meta: "🛠️",
-    admin: "👑",
-    group: "👥",
-    utility: "🔧",
-    fun: "🎲",
-    anime: "🎬",
-    pokemon: "⚡",
-    economy: "💰",
-    dev: "💻",
-    games: "🎮",
-    music: "🎵",
-    ai: "🤖",
+    meta: "🛠️", admin: "👑", group: "👥", utility: "🔧", fun: "🎲",
+    anime: "🎬", pokemon: "⚡", economy: "💰", dev: "💻",
+    games: "🎮", music: "🎵", ai: "🤖",
   };
 
   const categories = {};
@@ -325,25 +316,32 @@ async function handleHelp(sock, msg, args, ctx) {
     categories[cmd.category].push(cmd);
   }
 
-  // If a category is requested (e.g. !help anime), show just that one.
   const want = args?.trim().toLowerCase();
   const keys = want && categories[want] ? [want] : Object.keys(categories);
 
-  const parts = [`*✨ ARIA COMMANDS*`, `_A sassy WhatsApp girl — ${commands.length} commands total._`, ``];
+  const total = commands.length;
+  const tag = isOwner(ctx.senderJid) ? "dad" : "bestie";
+
+  // Stylish, ARIA-flavored menu header + a call-to-action
+  const parts = [
+    `╭── ✨ *ARIA* ✨ ──╮`,
+    `_Hey ${tag}, I've got ${total} tricks up my sleeve._`, ``,
+  ];
   for (const cat of keys) {
     const cmds = categories[cat].slice().sort((a, b) => a.name.localeCompare(b.name));
     const emoji = catEmoji[cat] || "📦";
-    parts.push(`*${emoji} ${cat.charAt(0).toUpperCase() + cat.slice(1)}*`);
+    parts.push(`${emoji} *${cat.charAt(0).toUpperCase() + cat.slice(1)}*`);
     for (const cmd of cmds) {
-      const aliases = cmd.aliases.length > 0 ? ` _(alias: ${cmd.aliases[0]})_` : "";
-      parts.push(`• !${cmd.name}${aliases} — ${cmd.description}`);
+      const aliases = cmd.aliases.length > 0 ? ` _(${cmd.aliases[0]})_` : "";
+      parts.push(`  ▸ !${cmd.name}${aliases} — ${cmd.description}`);
     }
     parts.push(``);
   }
   if (want && !categories[want]) {
-    return reply(sock, msg, `⚠️ No category "${want}". Try: ${Object.keys(categories).join(", ")}`);
+    return reply(sock, msg, `🤨 *${want}?* Never heard of that category, ${tag}. Try one of these:\n${Object.keys(categories).map(c=>`▸ ${c}`).join("\n")}`);
   }
-  parts.push(`_Or just say my name and ask me normally! 💬_`);
+  parts.push(`╰────────────────╯`);
+  parts.push(`_Type !help <category> to see one section. Or just talk to me normally — I don't bite... much. 😌_`);
   await reply(sock, msg, parts.join("\n"));
 }
 
@@ -851,10 +849,13 @@ async function handleAnimeSearch(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !anime <name>");
   await react(sock, msg, "🔎");
-  // Try Jikan first, fall back to OmniSave if Jikan is down or empty.
+  // Try Jikan (MAL) first, fall back to AnimePahe, then OmniSave.
   let result = [];
   let source = "MyAnimeList";
   try { result = await searchAnime(args); } catch (_) {}
+  if (!Array.isArray(result) || result.length === 0) {
+    try { result = await searchAnimePahe(args); source = "AnimePahe"; } catch (_) {}
+  }
   if (!Array.isArray(result) || result.length === 0) {
     try { result = await searchOmniSave(args); source = "OmniSave"; } catch (_) {}
   }

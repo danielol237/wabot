@@ -34,6 +34,52 @@ async function searchAnime(query, page = 1) {
   }
 }
 
+// AnimePahe search — a reliable fallback that works even when Jikan (MAL) is down.
+// Scrapes animepahetv.to/search?q= and returns anime cards.
+async function searchAnimePahe(query) {
+  try {
+    const res = await axios.get(`https://animepahetv.to/search?q=${encodeURIComponent(query)}`, {
+      timeout: 15000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+    const html = res.data || "";
+    // Each result is an anime link with an MD5 id and a title/poster nearby.
+    const ids = [...new Set((html.match(/\/anime\/([a-f0-9]{32})/g) || []).map((u) => u.split("/").pop()))];
+    if (!ids.length) return [];
+
+    // Extract title + poster for each unique anime id.
+    const results = [];
+    for (const id of ids) {
+      const idx = html.indexOf(`/anime/${id}`);
+      const context = html.slice(idx, idx + 3000);
+      const titleM = context.match(/title="([^"]{2,120})"/);
+      const title = titleM ? titleM[1].replace(/&amp;/g, "&") : "Unknown";
+      const posterM = context.match(/src="([^"]*\.(?:jpg|jpeg|png|webp)[^"]*)"/);
+      const poster = posterM ? posterM[1] : "";
+      const epM = context.match(/(\d+)\s*Ep/);
+      results.push({
+        id,
+        title,
+        titleEnglish: title,
+        episodes: epM ? parseInt(epM[1]) : null,
+        type: "TV",
+        score: null,
+        image: poster,
+        synopsis: "",
+        source: "animepahe",
+      });
+    }
+    return results.slice(0, 8);
+  } catch (err) {
+    console.error("AnimePahe search error:", err.message);
+    return [];
+  }
+}
+
 async function getAnimeDetails(malId) {
   try {
     const res = await axios.get(
@@ -281,6 +327,7 @@ async function searchOmniSaveById(subjectId) {
 
 module.exports = {
   searchAnime,
+  searchAnimePahe,
   getAnimeDetails,
   getAnimeEpisodes,
   searchOmniSave,

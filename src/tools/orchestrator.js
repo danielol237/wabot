@@ -182,17 +182,27 @@ async function orchestrate(chatId, creator, objective) {
 }
 
 // ── Bridge to the durable engine's storage ────────────────────
-// durableMissions keeps missions private; we need write access to update
-// steps during orchestration. Use its FILE path directly for status updates.
-const fs = require("fs");
-const path = require("path");
-const MISSIONS_FILE = path.join(__dirname, "../../data/missions.json");
-
+// Previously the orchestrator read/wrote missions.json directly, which fought
+// durableMissions' own writes (split-brain: whichever wrote last won, losing
+// updates). Now the orchestrator goes through the durable engine's per-mission
+// atomic save + write lock, so there's a single source of truth.
 function saveMission(mission) {
+  const durable = require("./durableMissions");
   try {
-    const all = JSON.parse(fs.readFileSync(MISSIONS_FILE, "utf8"));
-    all[mission.id] = mission;
-    fs.writeFileSync(MISSIONS_FILE, JSON.stringify(all, null, 2));
+    const live = durable.getMission(mission.id);
+    if (!live) return;
+    // Copy the orchestrator's in-progress fields onto the live record, then let
+    // the engine persist it atomically under its per-mission write lock.
+    live.progress = mission.progress;
+    live.steps = mission.steps;
+    live.currentStepIndex = mission.currentStepIndex;
+    live.result = mission.result;
+    live.status = mission.status;
+    live.error = mission.error;
+    live.metadata = mission.metadata;
+    // durableMissions.saveMission isn't exported; route via the module's save()
+    // which serialises all records atomically.
+    durable.save();
   } catch (err) {
     error("Failed to save orchestrated mission:", err.message);
   }

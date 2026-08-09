@@ -76,18 +76,24 @@ async function gitHubReleases(query) {
       if (!releases.length) {
         return { error: `No releases found for "${ownerRepo}". (It may not be a repo — try "owner/repo".)` };
       }
-      const lines = releases.map((rel, i) => {
+      const lines = releases.slice(0, 3).map((rel, i) => {
         let out = `*${i + 1}. ${rel.tag_name}*`;
         if (rel.published_at) out += ` — ${new Date(rel.published_at).toISOString().slice(0, 10)}`;
-        if (rel.name) out += `\n  ${rel.name}`;
-        const assets = (rel.assets || []).slice(0, 5);
+        // Only show meaningful binaries; hide checksums/sigs/source zips (noise).
+        const assets = (rel.assets || []).filter((a) => {
+          const n = (a.name || "").toLowerCase();
+          if (/\.(sha256|sha512|md5|sig)$|sums|checksum/i.test(n)) return false;
+          if (/source|\.tar\.gz$|\.zip$/i.test(n)) return false;
+          return true;
+        }).slice(0, 3);
         if (assets.length) {
           out += "\n  📦 Files:";
           assets.forEach((a) => {
             out += `\n   • ${a.name} (${formatBytes(a.size)}) — ${a.browser_download_url}`;
           });
-        } else if (rel.zipball_url) {
-          out += `\n   • Source zip — ${rel.zipball_url}`;
+        } else {
+          // No real binaries: point to the latest release page + the asset list.
+          out += `\n  🔗 ${rel.html_url}`;
         }
         return out;
       });

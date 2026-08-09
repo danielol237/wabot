@@ -40,25 +40,18 @@ const WYR = [
 ];
 
 const ROASTS = [
-  "Bro you dey shout for nothing, calm down.",
-  "You talk too much. What you even done achieve sef?",
-  "Mouth dey work, but the hand no dey follow.",
-  "You carry yourself like big man but na small thing.",
-  "Shey na fight you want? Because you don find am.",
-  "You sabi talk, but the work no dey show.",
-  "Who teach you to dey talk like this? It no dey make sense.",
-  "You dey form big man but your pocket dey cry every night.",
-  "You too dey flex. Small thing wey you get, you dey carry am like gold.",
-  "Make you calm down before you talk. You no dey hear yourself.",
-  "You get mouth but nothing to back am up. Abeg.",
-  "Na so you dey carry on? E no fit take you anywhere.",
-  "If you were a coffin, even the grave digger would bury you face down.",
-  "I'd say rest in peace, but you never rested in life.",
-  "Some people bring joy when they leave. You bring peace.",
-  "Your bloodline is one bad decision away from a clean slate.",
-  "With a dick like a lil carrot, what you even gonna do with it?",
-  "You talk big but that tiny thing can't even reach the toilet properly.",
-  "That lil carrot of yours can't even scare a rabbit.",
+  "You're a waste of air, and everyone around you knows it.",
+  "Even your own mother looks at you and wonders where she went wrong.",
+  "Nobody's scared of you. Even the mirror rejects you.",
+  "You talk all that big man shit but your girl left because you can't satisfy her. Sad.",
+  "Fuck you? You couldn't even handle a woman with that lil carrot you call a dick. Sit down.",
+  "You're the reason your family stopped having reunions.",
+  "Your existence is a burden nobody asked for.",
+  "You'd be a disappointment even if you tried.",
+  "People tolerate you out of pity, not respect.",
+  "You couldn't even be a good example of a bad person.",
+  "Your face is the reason cameras get nervous.",
+  "You're so forgettable, even your own shadow leaves when you walk.",
 ];
 
 function randomFrom(arr) {

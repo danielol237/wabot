@@ -152,7 +152,7 @@ async function downloadMediaFromMsg(sock, msg) {
 }
 
 module.exports = {
-  getMessageText, getSenderName, getTargetJid,
+  getMessageText, getSenderName, getTargetJid, isBotMentioned,
   reply, react, splitMessage, sleep,
   isQuotingBotMessage, getQuotedMessageText,
   hasMedia, hasVoiceNote, downloadMediaFromMsg,

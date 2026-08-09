@@ -39,6 +39,10 @@ log(`🧩 ${loadedPlugins.length} plugin(s) loaded.`);
 const app = express();
 app.use(express.json());
 
+// ARIA's own website — her home on the web (dashboard is a section of it)
+const websiteRouter = require("./website");
+app.use("/", websiteRouter);
+
 // Mount web dashboard
 const dashboardRouter = require("./dashboard");
 app.use("/dashboard", dashboardRouter);
@@ -52,10 +56,6 @@ let lastError = null;
 let sock = null;
 
 const USE_PAIRING_CODE = !!process.env.PHONE_NUMBER;
-
-app.get("/", (req, res) => {
-  res.send(`ARIA Bot — status: ${isReady ? "✅ connected" : "⏳ waiting for link"}`);
-});
 
 // Serve built projects for preview. Each project is stored in data/projects/{slug}/
 // and can be viewed at /preview/{slug}. Auth-protected (same session as dashboard)

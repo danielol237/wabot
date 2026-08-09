@@ -82,7 +82,7 @@ function registerBuiltinCommands() {
   // Admin / Meta
   registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", description: "Check if bot is alive", handler: handleAlive, ownerOnly: false });
   registerCommand({ name: "help", aliases: ["menu", "commands", "h"], category: "meta", description: "Show help menu", handler: handleHelp, ownerOnly: false });
-  registerCommand({ name: "stats", aliases: ["botstats", "status"], category: "admin", description: "Show bot statistics", handler: handleStats, ownerOnly: true });
+  registerCommand({ name: "stats", aliases: ["botstats"], category: "admin", description: "Show bot statistics", handler: handleStats, ownerOnly: true });
   registerCommand({ name: "errors", aliases: ["errorlog", "debug"], category: "admin", description: "Show recent errors", handler: handleErrors, ownerOnly: true });
   registerCommand({ name: "broadcast", aliases: ["bc", "announce"], category: "admin", description: "Broadcast message to all chats", handler: handleBroadcast, ownerOnly: true });
   registerCommand({ name: "admin", aliases: ["setadmin"], category: "admin", description: "Add/remove bot admin", handler: handleAdmin, ownerOnly: true });
@@ -283,6 +283,11 @@ async function routeMessage(sock, msg, context) {
       }
       return;
     }
+    // A prefix command was typed but matched nothing — always reply so the user
+    // gets feedback instead of a silent fall-through to AI chat.
+    const { reply: _rp } = require("./baileysHelpers");
+    await _rp(sock, msg, `🤔 *!${commandName}* isn't a command I know. Try *!help* to see what I can do.`);
+    return;
   }
 
   // ── AI RESPONSE ────────────────────────────────────────────

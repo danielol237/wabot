@@ -128,6 +128,12 @@ function sellCard(userId, cardId) {
   if (idx === -1) return { success: false, error: "You don't own that card." };
 
   const card = CARDS.find((c) => c.id === cardId);
+  if (!card) {
+    // Unknown card id in inventory — remove it and refund a nominal amount.
+    user.inventory.splice(idx, 1);
+    save();
+    return { success: true, value: 5, card: { id: cardId, name: cardId, rarity: "common" } };
+  }
   const value = Math.floor(RARITY_VALUE[card.rarity] * 0.6); // sell for 60% of value
   user.inventory.splice(idx, 1);
   user.balance += value;

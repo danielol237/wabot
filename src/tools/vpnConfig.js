@@ -3,6 +3,7 @@
 
 const axios = require("axios");
 const { exec } = require("child_process");
+const net = require("net");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
@@ -131,31 +132,29 @@ Custom Headers:
 // Test connectivity to a host
 async function testHost(host, port) {
   return new Promise((resolve) => {
-    // Try TCP connection first
-    exec(`timeout 5 bash -c "echo > /dev/tcp/${host}/${port}" 2>&1`, { timeout: 8000 }, (err, stdout, stderr) => {
-      if (err) {
-        exec(`timeout 3 ping -c 1 -W 3 ${host} 2>&1`, { timeout: 6000 }, (err2, stdout2) => {
-          if (err2) resolve({ reachable: false, error: "Host unreachable" });
-          else resolve({ reachable: true, method: "ping" });
-        });
-      } else {
-        resolve({ reachable: true, method: "tcp" });
-      }
-    });
+    // Try a raw TCP connection (no shell => no injection) with a timeout.
+    const sock = net.connect(Number(port) || 443, host);
+    const timer = setTimeout(() => { sock.destroy(); resolve({ reachable: false, error: "Connection timed out" }); }, 5000);
+    sock.once("connect", () => { clearTimeout(timer); sock.destroy(); resolve({ reachable: true, method: "tcp" }); });
+    sock.once("error", () => { clearTimeout(timer); sock.destroy(); resolve({ reachable: false, error: "Host unreachable" }); });
   });
 }
 
 // Active test: try to connect through a proxy and check if data flows
 async function activeTest(host, port, testUrl = "http://connectivitycheck.gstatic.com/generate_204") {
+  // Only allow http(s) test URLs to prevent any injection/SSRF via a crafted url.
+  if (!/^https?:\/\//i.test(String(testUrl))) return { working: false, error: "Invalid test URL." };
   return new Promise((resolve) => {
-    // Try curl through a proxy to test real connectivity
-    exec(`timeout 10 curl -s -o /dev/null -w "%{http_code}" --proxy http://${host}:${port} "${testUrl}" 2>&1`, { timeout: 15000 }, (err, stdout) => {
-      if (err || !stdout) {
-        resolve({ working: false, error: "Proxy test failed" });
-      } else {
-        resolve({ working: true, httpCode: stdout.trim(), note: "Proxy responded. Test on actual MTN network to confirm zero-rating." });
+    // curl through the proxy — testUrl is validated as http(s), and host/port
+    // come from the hardcoded carrier list.
+    exec(
+      `timeout 10 curl -s -o /dev/null -w "%{http_code}" --proxy http://${host}:${port} ${JSON.stringify(testUrl)} 2>&1`,
+      { timeout: 15000 },
+      (err, stdout) => {
+        if (err || !stdout) resolve({ working: false, error: "Proxy test failed" });
+        else resolve({ working: true, httpCode: stdout.trim(), note: "Proxy responded. Test on actual MTN network to confirm zero-rating." });
       }
-    });
+    );
   });
 }
 

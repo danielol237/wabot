@@ -56,6 +56,9 @@ const ROASTS = [
   "I'd say rest in peace, but you never rested in life.",
   "Some people bring joy when they leave. You bring peace.",
   "Your bloodline is one bad decision away from a clean slate.",
+  "With a dick like a lil carrot, what you even gonna do with it?",
+  "You talk big but that tiny thing can't even reach the toilet properly.",
+  "That lil carrot of yours can't even scare a rabbit.",
 ];
 
 function randomFrom(arr) {

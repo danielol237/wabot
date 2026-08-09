@@ -40,18 +40,18 @@ const WYR = [
 ];
 
 const ROASTS = [
-  "You dey para like this but you no even get point. Abeg calm down.",
-  "Omo, you too dey talk. Wetin you don achieve sef?",
-  "Na only mouth dey work for you, the hand never follow.",
-  "You dey shout for person wey dey settle you since morning. No be so.",
-  "Shey na wahala you dey find? Because you don find am.",
-  "You sabi talk die, but e don reach time make you sabi do.",
-  "Make nobody fool you, na yan-yan you dey yan. Gerrout here.",
-  "You dey carry yourself like president, but na village chairman.",
-  "Wetin dey worry you? You no get anything wey fit back am.",
-  "You too get mouth like person wey never lose before. Try me.",
-  "Abeg, na who teach you to dey yan so? Cos e no dey make sense.",
+  "Bro you dey shout for nothing, calm down.",
+  "You talk too much. What you even done achieve sef?",
+  "Mouth dey work, but the hand no dey follow.",
+  "You carry yourself like big man but na small thing.",
+  "Shey na fight you want? Because you don find am.",
+  "You sabi talk, but the work no dey show.",
+  "Who teach you to dey talk like this? It no dey make sense.",
   "You dey form big man but your pocket dey cry every night.",
+  "You too dey flex. Small thing wey you get, you dey carry am like gold.",
+  "Make you calm down before you talk. You no dey hear yourself.",
+  "You get mouth but nothing to back am up. Abeg.",
+  "Na so you dey carry on? E no fit take you anywhere.",
 ];
 
 function randomFrom(arr) {

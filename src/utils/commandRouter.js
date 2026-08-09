@@ -1106,7 +1106,7 @@ function pokeTrainer(uid) {
 // Download and send a Pokémon artwork image, with an optional text fallback.
 async function sendPokeImage(sock, msg, speciesId, caption) {
   try {
-    const { getArtwork } = require("./pokemonData");
+    const { getArtwork } = require("../tools/pokemonData");
     const url = getArtwork(speciesId);
     const res = await axios.get(url, { timeout: 15000, responseType: "arraybuffer" });
     const buffer = Buffer.from(res.data);
@@ -1130,7 +1130,7 @@ async function handlePokeStart(sock, msg, args, ctx) {
   const name = args?.trim() || ctx.senderName || "Trainer";
   t.name = name;
   // Give a random starter (common species pool).
-  const { randomId } = require("./pokemonData");
+  const { randomId } = require("../tools/pokemonData");
   const starterId = randomId();
   const starter = await createMonster(starterId, 5);
   await recalc(starter);
@@ -1335,27 +1335,35 @@ async function handleAiring(sock, msg, args, ctx) {
 }
 
 // Dev handlers
+// Format the modern buildProject result into a chat-friendly message.
+function formatBuildResult(result) {
+  if (!result) return "❌ Build returned nothing.";
+  if (result.success === false) return "❌ " + (result.error || "Build failed.");
+  if (result.paused) return result.message || "⏸️ Build paused — reply !continue to keep going.";
+  if (result.success && result.downloadUrl) {
+    let t = "✅ *Project built!*\n";
+    if (result.fileCount) t += `📄 ${result.fileCount} file(s)\n`;
+    if (result.warnings?.length) t += `⚠️ ${result.warnings.length} file(s) with warnings\n`;
+    if (result.previewUrl) t += `🌐 Preview: ${result.previewUrl}\n`;
+    t += `📦 Download: ${result.downloadUrl}`;
+    return t;
+  }
+  return JSON.stringify(result).slice(0, 1500);
+}
+
 async function handleBuild(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !build <description of app>");
   await react(sock, msg, "🏗️");
-  const result = await buildProject(args, ctx.senderName);
-  await reply(sock, msg, result.text);
-  if (result.files) {
-    const { handleResponseWithFile } = require("./fileResponse");
-    await handleResponseWithFile(sock, msg, result);
-  }
+  const result = await buildProject(args, ctx.senderName, ctx.chatId);
+  await reply(sock, msg, formatBuildResult(result));
 }
 
 async function handleContinue(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "▶️");
-  const result = await continueProject(args || ctx.lastProjectId);
-  await reply(sock, msg, result.text);
-  if (result.files) {
-    const { handleResponseWithFile } = require("./fileResponse");
-    await handleResponseWithFile(sock, msg, result);
-  }
+  const result = await continueProject(ctx.chatId, ctx.senderName, null, args);
+  await reply(sock, msg, formatBuildResult(result));
 }
 
 async function handleProjectStatus(sock, msg, args, ctx) {
@@ -1667,12 +1675,8 @@ const intentHandlers = {
   build: async (sock, msg, text, ctx) => {
     const { reply, react } = require("./baileysHelpers");
     await react(sock, msg, "🏗️");
-    const result = await buildProject(text, ctx.senderName);
-    await reply(sock, msg, result.text);
-    if (result.files) {
-      const { handleResponseWithFile } = require("./fileResponse");
-      await handleResponseWithFile(sock, msg, result);
-    }
+    const result = await buildProject(text, ctx.senderName, ctx.chatId);
+    await reply(sock, msg, formatBuildResult(result));
   },
 };
 

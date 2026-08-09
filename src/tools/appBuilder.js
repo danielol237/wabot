@@ -127,6 +127,17 @@ const REVIEWER_SYSTEM_PROMPT = `You are a code reviewer. You're given multiple f
 - Inconsistent naming or API shape between files that are supposed to work together
 - A file that's referenced (e.g. in HTML <script src="...">) but wasn't actually generated
 
+For HTML/CSS/JS projects, ALSO hunt these exact "looks fine but is broken" bugs:
+- CSS classes used in HTML that have NO matching rule in the CSS (content unstyled)
+- A JS theme toggle that toggles a class on one element (e.g. <html> or body) while
+  the CSS only styles a DIFFERENT selector (e.g. body.dark-theme vs html.dark-theme)
+- Collapsible/accordion/tab sections: HTML uses class names (collapsible-section,
+  collapsible-content) that the JS targets with DIFFERENT names (collapsible) — so
+  sections never expand, or a hidden attribute is never removed
+- Image tags that reference placeholder files, or CSS that references an image file
+  which is actually a text placeholder, not real image data
+- CSS typo like ".body { }" or ".html { }" where an element selector is intended
+
 Respond ONLY with a JSON array of issues found, no other text. Each item: {"file": "path", "issue": "description", "severity": "high"|"low"}.
 If you genuinely find no cross-file issues, respond with an empty array: []`;
 
@@ -214,6 +225,100 @@ function verifyFile(filePath, content) {
   }
 
   return { valid: true }; // no specific check for this file type — assume fine
+}
+
+// ── Static cross-file frontend consistency check ──────────────
+// Deterministic scan (no AI) that catches the classic "generated site looks
+// broken" bugs: class names used in HTML that have no CSS rule, theme-toggle
+// selectors that don't line up (html vs body.dark-theme), collapsible sections
+// left permanently hidden, and fake image placeholders (text masquerading as
+// an image). Returns a list of { file, issue }.
+function checkFrontendConsistency(projectDir, files) {
+  const issues = [];
+  const read = (f) => {
+    try { return fs.readFileSync(path.join(projectDir, f), "utf8"); } catch (_) { return null; }
+  };
+
+  const htmlFile = files.find((f) => f.endsWith(".html"));
+  const cssFile = files.find((f) => f.endsWith(".css"));
+  const jsFile = files.find((f) => f.endsWith(".js"));
+  const html = htmlFile ? read(htmlFile) : null;
+  const css = cssFile ? read(cssFile) : null;
+  const js = jsFile ? read(jsFile) : null;
+
+  // 1. HTML classes used but never styled in CSS (excluding standard/utility).
+  if (html && css) {
+    const htmlClasses = [...new Set((html.match(/class=["']([^"']+)["']/g) || [])
+      .flatMap((m) => m.replace(/^class=["']/, "").replace(/["']$/, "").split(/\s+/))
+      .filter(Boolean))];
+    const styledSelectors = new Set(
+      (css.match(/\.[a-zA-Z][\w-]*/g) || []).map((s) => s.slice(1))
+    );
+    // classes that appear in HTML but have no CSS rule at all
+    const unstyled = htmlClasses.filter(
+      (c) => !styledSelectors.has(c) && !/^(btn|row|col|container|active|hidden|show|menu|nav|icon)$/i.test(c)
+    );
+    if (unstyled.length) {
+      issues.push({ file: cssFile, issue: `HTML classes with no matching CSS rule: ${unstyled.slice(0, 6).join(", ")}` });
+    }
+  }
+
+  // 2. Theme toggle: JS toggles a class on <html> or body, but CSS targets a different element.
+  if (js && css) {
+    const toggles = js.match(/classList\.(add|remove|toggle)\(\s*["']([^"']+)["']/g) || [];
+    const jsClasses = [...new Set(toggles.map((t) => t.match(/["']([^"']+)["']/)?.[1]).filter(Boolean))];
+    for (const c of jsClasses) {
+      const cssTargets = css.match(new RegExp(`[^{}]*\\.${c.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")}[^{}]*\\{`, "g")) || [];
+      if (cssTargets.length === 0) {
+        issues.push({ file: cssFile, issue: `JS toggles class "${c}" but CSS has no rule for it (theme toggle may do nothing).` });
+      }
+    }
+  }
+
+  // 3. Collapsible/section pattern: a `hidden` or `display:none` element is
+  //    never revealed by any JS, or a .collapsible* class mismatch.
+  if (html && js) {
+    // Every id/class with an onclick/button that hides a section needs JS to unhide.
+    const hiddenCount = (html.match(/\shidden\b|style="[^"]*display:\s*none/gi) || []).length;
+    if (hiddenCount > 0 && js && !/hidden|classList\.(remove|toggle)/.test(js)) {
+      issues.push({ file: htmlFile, issue: `${hiddenCount} element(s) are hidden (hidden attr / display:none) but no JS reveals them.` });
+    }
+    // class-name family mismatch: HTML uses collapsible-section/collapsible-content
+    // while JS selects collapsible — sections then never expand. Same for accordion/tab.
+    const famRe = /collaps|accord|tab/i;
+    const htmlRefs = [...new Set((html.match(/class=["']([^"']+)["']/g) || [])
+      .flatMap((m) => m.replace(/^class=["']/, "").replace(/["']$/, "").split(/\s+/))
+      .filter((c) => famRe.test(c)))];
+    const jsRefs = [...new Set((js.match(/["']([a-zA-Z][\w-]*)["']/g) || [])
+      .map((m) => m.replace(/["']/g, ""))
+      .filter((c) => famRe.test(c)))];
+    if (htmlRefs.length && jsRefs.length) {
+      // Every HTML collapsible-family class should be referenced by name in JS.
+      const uncovered = htmlRefs.filter((c) => !jsRefs.some((j) => j === c || j.includes(c) || c.includes(j)));
+      if (uncovered.length) {
+        issues.push({ file: jsFile, issue: `Collapsible/accordion class(es) ${uncovered.join(", ")} appear in HTML but JS targets ${jsRefs.join(", ")} — those sections may never expand.` });
+      }
+    }
+  }
+
+  // 4. Fake image placeholders: a referenced image file is actually text like "I'm sorry".
+  const imageFiles = files.filter((f) => /\.(png|jpe?g|gif|svg|webp)$/i.test(f));
+  for (const img of imageFiles) {
+    const content = read(img);
+    if (content && /I'm sorry|cannot|can't provide|placeholder|i'm just an ai/i.test(content.slice(0, 300))) {
+      issues.push({ file: img, issue: `Fake image — file contains text ("${content.slice(0, 40).trim()}") not real image data.` });
+    }
+  }
+
+  // 5. CSS class selector `.body`/`.html` that's clearly meant to be an element selector.
+  if (css) {
+    const bad = css.match(/\.(body|html|head)\s*\{/g) || [];
+    if (bad.length) {
+      issues.push({ file: cssFile, issue: 'Typo: ' + bad.join(', ') + ' uses a class selector (dot) but should be an element selector (e.g. just body).' });
+    }
+  }
+
+  return issues;
 }
 
 // ── Attempt to repair a file that failed verification ──────────
@@ -400,6 +505,17 @@ async function finalizeProject(project, projectDir, onProgress) {
   if (onProgress && crossFileIssues.length > 0) {
     const issueSummary = crossFileIssues.slice(0, 5).map((i) => `• ${i.file}: ${i.issue}`).join("\n");
     await onProgress(`🔍 *Reviewer:* Found ${crossFileIssues.length} cross-file issue(s):\n${issueSummary}`);
+  }
+
+  // Deterministic frontend consistency check — catches the "site looks broken"
+  // bugs (unmatched CSS classes, dead theme toggle, hidden sections never shown,
+  // fake images, `.body` typo) that the AI reviewer can miss or not run on.
+  const staticIssues = checkFrontendConsistency(projectDir, doneFiles.map((f) => f.path));
+  if (staticIssues.length > 0) {
+    if (onProgress) {
+      const s = staticIssues.slice(0, 5).map((i) => `• ${i.file}: ${i.issue}`).join("\n");
+      await onProgress(`⚠️ *Consistency check:* Found ${staticIssues.length} frontend issue(s):\n${s}`);
+    }
   }
 
   // Real build verification — only for npm-based projects (anything with package.json).

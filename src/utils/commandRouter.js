@@ -157,6 +157,20 @@ function registerBuiltinCommands() {
   registerCommand({ name: "trending", aliases: ["trendinganime"], category: "anime", description: "Trending anime", handler: handleTrending, ownerOnly: false });
   registerCommand({ name: "airing", aliases: ["airinganime"], category: "anime", description: "Airing anime", handler: handleAiring, ownerOnly: false });
 
+  // Pokémon
+  registerCommand({ name: "start", aliases: ["register", "trainer"], category: "pokemon", description: "Register as a trainer & get a starter", handler: handlePokeStart, ownerOnly: false });
+  registerCommand({ name: "team", aliases: ["myteam", "pokemon"], category: "pokemon", description: "View your team", handler: handlePokeTeam, ownerOnly: false });
+  registerCommand({ name: "pc", aliases: ["storage", "boxes"], category: "pokemon", description: "View your PC storage", handler: handlePokePC, ownerOnly: false });
+  registerCommand({ name: "encounter", aliases: ["wild", "search"], category: "pokemon", description: "Encounter a wild Pokémon", handler: handlePokeEncounter, ownerOnly: false });
+  registerCommand({ name: "catch", aliases: ["throw"], category: "pokemon", description: "Catch the wild Pokémon: !catch [ball]", handler: handlePokeCatch, ownerOnly: false });
+  registerCommand({ name: "battle", aliases: ["fight"], category: "pokemon", description: "Battle a trainer", handler: handlePokeBattle, ownerOnly: false });
+  registerCommand({ name: "attack", aliases: ["move"], category: "pokemon", description: "Use a move in battle", handler: handlePokeAttack, ownerOnly: false });
+  registerCommand({ name: "heal", aliases: ["healall"], category: "pokemon", description: "Heal your team", handler: handlePokeHeal, ownerOnly: false });
+  registerCommand({ name: "evolve", aliases: [], category: "pokemon", description: "Evolve a Pokémon: !evolve <teamIdx>", handler: handlePokeEvolve, ownerOnly: false });
+  registerCommand({ name: "useitem", aliases: ["item"], category: "pokemon", description: "Use an item on a Pokémon", handler: handlePokeUseItem, ownerOnly: false });
+  registerCommand({ name: "pokedex", aliases: ["dex"], category: "pokemon", description: "Your caught Pokémon", handler: handlePokeDex, ownerOnly: false });
+  registerCommand({ name: "coins", aliases: ["balance", "wallet"], category: "pokemon", description: "Your trainer coins", handler: handlePokeCoins, ownerOnly: false });
+
   // Dev / Advanced
   registerCommand({ name: "build", aliases: ["agent"], category: "dev", description: "AI app builder", handler: handleBuild, ownerOnly: true });
   registerCommand({ name: "continue", aliases: ["resume"], category: "dev", description: "Continue a project", handler: handleContinue, ownerOnly: true });
@@ -1072,6 +1086,178 @@ async function handlePSpawn(sock, msg, args, ctx) {
   }
 
   return reply(sock, msg, "Usage: !pspawn [set <N>|reset|disable|enable]");
+}
+
+// ── Pokémon handlers ──────────────────────────────────────────
+// The Pokémon game engine (pokemonGame.js) is fully built but was never wired
+// to commands. These handlers connect it. A per-user pending wild encounter is
+// kept in memory between !encounter and !catch.
+const pendingWild = new Map(); // uid -> { mon, species, expiresAt }
+const WILD_TIMEOUT_MS = 3 * 60 * 1000;
+
+function pokeTrainer(uid) {
+  const { getTrainer } = require("../tools/pokemonGame");
+  return getTrainer(uid);
+}
+
+async function handlePokeStart(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { getTrainer, createMonster, recalc, save } = require("../tools/pokemonGame");
+  const t = getTrainer(ctx.senderJid);
+  if (t.team.length > 0) {
+    return reply(sock, msg, `You're already a trainer, ${t.name || "champ"}! Use *!team* to see your party.`);
+  }
+  const name = args?.trim() || ctx.senderName || "Trainer";
+  t.name = name;
+  // Give a random starter (common species pool).
+  const { randomId } = require("./pokemonData");
+  const starterId = randomId();
+  const starter = await createMonster(starterId, 5);
+  await recalc(starter);
+  t.team.push(starter);
+  save();
+  await react(sock, msg, "🎉");
+  const shiny = starter.shiny ? " ✨ SHINY!" : "";
+  await reply(sock, msg, `🎉 Welcome, *${name}*! You're now a Pokémon trainer.\n\nYour starter: *${starter.nickname || starter.speciesId}* Lv ${starter.level}${shiny}\n\nUse *!encounter* to find wild Pokémon and *!catch* to catch them.`);
+}
+
+async function handlePokeTeam(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { getTrainer } = require("../tools/pokemonGame");
+  const t = getTrainer(ctx.senderJid);
+  if (!t.team.length) return reply(sock, msg, "You have no Pokémon yet. Start with *!start*.");
+  const lines = t.team.map((m, i) => {
+    const hp = m.hp ?? m.maxHp;
+    return `*${i + 1}.* ${m.nickname || m.speciesId} — Lv ${m.level} ${m.shiny ? "✨" : ""}\n   HP ${hp}/${m.maxHp} · ${m.moves?.map((mv) => mv.name || mv).join(", ") || "no moves"}`;
+  });
+  await reply(sock, msg, `⚔️ *${t.name || ctx.senderName}'s Team* (${t.team.length}/6)\n\n${lines.join("\n\n")}\n\n_!heal to restore, !pc to see storage_`);
+}
+
+async function handlePokePC(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { getTrainer } = require("../tools/pokemonGame");
+  const t = getTrainer(ctx.senderJid);
+  if (!t.pc.length) return reply(sock, msg, "Your PC storage is empty.");
+  const lines = t.pc.map((m, i) => `${i + 1}. ${m.nickname || m.speciesId} — Lv ${m.level} ${m.shiny ? "✨" : ""}`);
+  await reply(sock, msg, `🗄️ *PC Storage* (${t.pc.length})\n\n${lines.join("\n")}`);
+}
+
+async function handlePokeEncounter(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { wildEncounter } = require("../tools/pokemonGame");
+  await react(sock, msg, "🌿");
+  const uid = ctx.senderJid;
+  const { species, mon } = await wildEncounter(uid);
+  pendingWild.set(uid, { mon, species, expiresAt: Date.now() + WILD_TIMEOUT_MS });
+  await reply(sock, msg, `🌿 A wild *${species.name}* (Lv ${mon.level}) appeared!${mon.shiny ? " ✨ SHINY!" : ""}\n\n_Catch it with *!catch* (or *!catch greatball*). Expires in 3 min._`);
+}
+
+async function handlePokeCatch(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { attemptCatch } = require("../tools/pokemonGame");
+  const uid = ctx.senderJid;
+  const wild = pendingWild.get(uid);
+  if (!wild || Date.now() > wild.expiresAt) {
+    pendingWild.delete(uid);
+    return reply(sock, msg, "There's no wild Pokémon to catch right now. Use *!encounter* first.");
+  }
+  const ball = args?.trim().toLowerCase() || "pokeball";
+  const result = await attemptCatch(uid, wild.mon, ball);
+  if (result.success) {
+    pendingWild.delete(uid);
+    await react(sock, msg, "🏆");
+    const dest = wild.mon.uid && require("../tools/pokemonGame").state?.trainers?.[uid]?.team?.some((m) => m.uid === wild.mon.uid) ? "team" : "PC";
+    return reply(sock, msg, `🏆 You caught *${wild.species.name}*! It was sent to your ${dest}.`);
+  }
+  if (result.ranAway) { pendingWild.delete(uid); return reply(sock, msg, "💨 It fled! Use *!encounter* to find another."); }
+  await react(sock, msg, "😤");
+  return reply(sock, msg, `It broke free! ${result.error ? "(" + result.error + ")" : "Try a better ball or lower its HP."}`);
+}
+
+async function handlePokeBattle(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { joinQueue } = require("../tools/pokemonGame");
+  await react(sock, msg, "⚔️");
+  const result = joinQueue(ctx.senderJid);
+  if (result.battleId) return reply(sock, msg, `⚔️ Battle found! Battle ID: \`${result.battleId}\`\n\n_Use *!attack <move>* to fight._`);
+  if (result.error) return reply(sock, msg, `❌ ${result.error}`);
+  return reply(sock, msg, `You joined the battle queue (position ${result.position}). Waiting for an opponent...`);
+}
+
+async function handlePokeAttack(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { battleAction, getTrainer, state } = require("../tools/pokemonGame");
+  // Find the user's active battle
+  const battle = Object.values(state.battles || {}).find((b) => b.state === "active" && (b.uid1 === ctx.senderJid || b.uid2 === ctx.senderJid));
+  if (!battle) return reply(sock, msg, "You're not in an active battle. Use *!battle* to queue up.");
+  const moveName = args?.trim();
+  if (!moveName) return reply(sock, msg, "Usage: !attack <move name>");
+  const result = await battleAction(battle.id, ctx.senderJid, "attack", { move: moveName });
+  if (result.error) return reply(sock, msg, `❌ ${result.error}`);
+  await reply(sock, msg, formatBattleResult(result));
+}
+
+function formatBattleResult(result) {
+  let t = "";
+  if (result.attacker) t += `⚔️ *${result.attacker}* used *${result.move}*!\n`;
+  if (result.damage) t += `Dealt ${result.damage} damage.\n`;
+  if (result.effect) t += `🩸 ${result.effect}\n`;
+  if (result.defenderHp != null) t += `Defender HP: ${result.defenderHp}\n`;
+  if (result.status) t += `Status: ${result.status}\n`;
+  if (result.winner) t += `🏆 *${result.winner}* wins the battle!`;
+  if (result.turn) t += `It's ${result.turn}'s turn.`;
+  return t || JSON.stringify(result);
+}
+
+async function handlePokeHeal(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { healAll } = require("../tools/pokemonGame");
+  const res = healAll(ctx.senderJid);
+  await react(sock, msg, "💖");
+  await reply(sock, msg, typeof res === "string" ? res : "💖 Your team was healed!");
+}
+
+async function handlePokeEvolve(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { evolve } = require("../tools/pokemonGame");
+  const idx = parseInt(args?.trim(), 10) - 1;
+  if (isNaN(idx) || idx < 0) return reply(sock, msg, "Usage: !evolve <teamIndex>");
+  const res = await evolve(ctx.senderJid, idx);
+  if (res?.error) return reply(sock, msg, `❌ ${res.error}`);
+  if (res?.success) return reply(sock, msg, `✨ *${res.oldName}* evolved into *${res.newName}*!`);
+  await reply(sock, msg, "✨ Your Pokémon evolved!");
+}
+
+async function handlePokeUseItem(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { useItem } = require("../tools/pokemonGame");
+  const [itemName, idxStr] = args.trim().split(/\s+/);
+  const idx = parseInt(idxStr, 10) - 1;
+  if (!itemName) return reply(sock, msg, "Usage: !useitem <item> <teamIndex>");
+  const res = useItem(ctx.senderJid, itemName.toLowerCase(), isNaN(idx) ? 0 : idx);
+  if (res?.error) return reply(sock, msg, `❌ ${res.error}`);
+  await reply(sock, msg, res?.message || `Used ${itemName}!`);
+}
+
+async function handlePokeDex(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { getTrainer } = require("../tools/pokemonGame");
+  const t = getTrainer(ctx.senderJid);
+  const counts = {};
+  for (const m of [...(t.team || []), ...(t.pc || [])]) {
+    const id = m.speciesId || m.nickname;
+    counts[id] = (counts[id] || 0) + 1;
+  }
+  const entries = Object.entries(counts);
+  if (!entries.length) return reply(sock, msg, "You haven't caught anything yet.");
+  await reply(sock, msg, `📖 *Pokédex* (${entries.length} species)\n\n${entries.map(([id, n]) => `• ${id} ×${n}`).join("\n")}`);
+}
+
+async function handlePokeCoins(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const t = pokeTrainer(ctx.senderJid);
+  const items = t.items ? Object.entries(t.items).map(([k, v]) => `${k}: ${v}`).join(", ") : "none";
+  await reply(sock, msg, `💰 *${t.name || ctx.senderName}'s Wallet*\n\nCoins: ${t.coins}\nWins: ${t.wins} · Losses: ${t.losses}\n\nItems: ${items}`);
 }
 
 async function handleAiring(sock, msg, args, ctx) {

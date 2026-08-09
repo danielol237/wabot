@@ -40,12 +40,18 @@ const WYR = [
 ];
 
 const ROASTS = [
-  "You're not stupid; you just have bad luck thinking.",
-  "I'd explain it to you, but I left my crayons at home.",
-  "You bring everyone so much joy when you leave the room.",
-  "You're the reason the gene pool needs a lifeguard.",
-  "If laziness was a sport, you'd still find a way to lose.",
-  "You're proof that evolution can go in reverse.",
+  "You talk a lot for someone who's never been right in his life.",
+  "You're not stupid, you're just giving everyone else a head start.",
+  "Your confidence is a whole personality — shame your brain didn't get the invite.",
+  "If being loud counted as being right, you'd still be wrong. Just louder.",
+  "You've got that main-character energy in a background-character life.",
+  "I'd roast you but your ego already did that and called it 'motivation'.",
+  "You bring everyone so much joy when you finally stop talking.",
+  "You're proof that having an opinion doesn't require having a point.",
+  "I'd explain it, but you'd just tell me how to do it wrong.",
+  "You're the human version of a loading screen — all talk, nothing loading.",
+  "Your comeback game is as weak as your wifi signal, and that's saying something.",
+  "You came in swinging, but you forgot to pack a brain to aim with.",
 ];
 
 function randomFrom(arr) {

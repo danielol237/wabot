@@ -464,9 +464,8 @@ async function finalizeProject(project, projectDir, onProgress) {
     if (attempt < 2 && onProgress) await onProgress(`📦 *Uploader:* Attempt ${attempt + 1} failed, retrying...`);
   }
 
-  if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-
   if (!uploadResult.success) {
+    if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
     return { success: false, error: `Built successfully but upload failed after 3 attempts: ${uploadResult.error}` };
   }
 
@@ -479,6 +478,7 @@ async function finalizeProject(project, projectDir, onProgress) {
     previewUrl,
     crossFileIssues: highSeverityIssues,
     downloadUrl: uploadResult.downloadPage,
+    zipPath, // keep the local zip so the caller can send it directly as a document
   };
 }
 

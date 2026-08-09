@@ -16,6 +16,7 @@
 
 const { createMission, executeMission, getMission, setSock, formatMissionList } = require("./durableMissions");
 const { getAIResponse } = require("./ai");
+const fs = require("fs");
 const { getWorldContext } = require("../utils/worldModel");
 const { getRelevantContext } = require("../utils/semanticMemory");
 const { searchWeb } = require("./webSearch");
@@ -125,6 +126,25 @@ async function orchestrate(chatId, creator, objective) {
           buildLink = buildResult.downloadUrl;
           mission.steps[2].result = { built: true, downloadUrl: buildResult.downloadUrl, detail: buildResult.message || "" };
           mission.buildLink = buildResult.downloadUrl;
+          // Send the actual zip file directly to the chat so the user gets the
+          // bundled project (all files + assets) instead of just a link.
+          try {
+            if (buildResult.zipPath && fs.existsSync(buildResult.zipPath)) {
+              const sock = require("./missionSock").getSock();
+              if (sock) {
+                const buffer = fs.readFileSync(buildResult.zipPath);
+                await sock.sendMessage(mission.chatId, {
+                  document: buffer,
+                  fileName: (buildResult.files?.[0]?.split("/").pop() ? "aria-project.zip" : "aria-project.zip"),
+                  mimetype: "application/zip",
+                  caption: `📦 *Built: ${objective.slice(0, 40)}*\n${buildResult.fileCount || ""} files, all bundled. Unzip to run locally.\n\n☁️ Backup link: ${buildResult.downloadUrl}`,
+                });
+                fs.unlinkSync(buildResult.zipPath);
+              }
+            }
+          } catch (err) {
+            error("Failed to send project zip:", err.message);
+          }
         } else {
           built = "[BUILDER] " + (buildResult?.error || "Build did not complete (may need !continue).");
         }

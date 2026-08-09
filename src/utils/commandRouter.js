@@ -4,6 +4,7 @@
 
 // ── Imports ──────────────────────────────────────────────────
 const axios = require("axios");
+const fs = require("fs");
 const { getStats, getRecentErrors, logError, broadcastToAll } = require("../tools/botAdmin");
 const { isBotAdmin, isSenderAdmin, kickUser, promoteUser, demoteUser, tagAll, hideTag } = require("../tools/groupAdmin");
 const { getGroupSettings, setAntilink, setWelcome, setWelcomeMessage, setLeaveMessage, addWarning, resetWarnings, getWarnings } = require("../utils/groupSettings");
@@ -1455,10 +1456,37 @@ async function handleDeathBattle(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: `!deathbattle <charA> vs <charB>` — e.g. `!deathbattle goku vs saitama`");
   await react(sock, msg, "⚔️");
-  await reply(sock, msg, "⚔️ Loading the fighters into the arena... simulating now 🧠");
+
+  // Optional: "!deathbattle video goku vs saitama" -> also render a fight video.
+  const wantVideo = /^(video|vid|render)\b/i.test(args.trim());
+  const fightInput = wantVideo ? args.replace(/^(video|vid|render)\b/i, "").trim() : args;
+
+  await reply(sock, msg, wantVideo
+    ? "⚔️ Loading the fighters... simulating + rendering the fight video 🎬"
+    : "⚔️ Loading the fighters into the arena... simulating now 🧠");
+
   const { runDeathBattle } = require("../tools/deathBattle");
-  const result = await runDeathBattle(args);
+  const result = await runDeathBattle(fightInput);
+  if (result.error) return reply(sock, msg, result.text);
   await reply(sock, msg, result.text);
+
+  if (wantVideo) {
+    await react(sock, msg, "🎬");
+    await reply(sock, msg, "🎬 Rendering the fight as a motion-comic video... this can take a minute or two.");
+    const { parseFighters } = require("../tools/deathBattle");
+    const { createDeathBattleVideo } = require("../tools/deathBattleVideo");
+    const fighters = parseFighters(fightInput);
+    const winner = (result.text.match(/WINNER:\s*([^*\n]+)/i) || [])[1] || "";
+    if (fighters) {
+      const video = await createDeathBattleVideo(fighters.a, fighters.b, winner.trim());
+      if (video.success) {
+        await sock.sendMessage(ctx.chatId, { video: { url: video.filePath }, mimetype: "video/mp4", caption: `🎬 ${fighters.a} vs ${fighters.b} — WINNER: ${winner.trim()}` }, { quoted: msg });
+        try { fs.unlinkSync(video.filePath); } catch (_) {}
+        return;
+      }
+      await reply(sock, msg, "❌ Couldn't render the fight video this time (the free image generator was slow/unavailable). The verdict above still stands. Try again in a minute.");
+    }
+  }
 }
 
 // ── Research handlers (GitHub / Reddit / Wikipedia) ──────────

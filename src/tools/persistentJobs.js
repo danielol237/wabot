@@ -110,6 +110,9 @@ async function runJobSteps(job) {
     }
   }
 
+  // If cancelled mid-run, don't overwrite to "completed".
+  if (job.status === "cancelled") return;
+
   // Generate final result
   const finalPrompt = `Task: ${job.task}\n\nInformation gathered:\n${context.slice(0, 4000)}\n\nProvide a complete answer.`;
   const result = await getAIResponse(finalPrompt, "ARIA_JOB", []);

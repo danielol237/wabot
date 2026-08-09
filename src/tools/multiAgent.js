@@ -34,11 +34,15 @@ async function runTeamProject(request, senderName, onProgress) {
       }
     } else if (stage === "coder") {
       for (const file of projectFiles) {
-        if (onProgress) onProgress("Writing " + file.path);
-        const contextStr = projectFiles.map((f) => f.path + ": " + f.description).join("\n");
-        const prompt = "Project: " + request + "\n\nFile: " + file.path + "\nPurpose: " + file.description + "\n\nProject structure:\n" + contextStr + "\n\nWrite the COMPLETE file.";
-        const code = await getAIResponse(prompt, senderName, [], AGENT_PROMPTS.coder, "");
-        results["code_" + file.path] = { path: file.path, content: code };
+        try {
+          if (onProgress) onProgress("Writing " + file.path);
+          const contextStr = projectFiles.map((f) => (f.path || "?") + ": " + (f.description || "")).join("\n");
+          const prompt = "Project: " + request + "\n\nFile: " + file.path + "\nPurpose: " + file.description + "\n\nProject structure:\n" + contextStr + "\n\nWrite the COMPLETE file.";
+          const code = await getAIResponse(prompt, senderName, [], AGENT_PROMPTS.coder, "");
+          results["code_" + file.path] = { path: file.path, content: code };
+        } catch (err) {
+          results["code_" + file.path] = { path: file.path, content: "// Error generating this file: " + err.message, error: err.message };
+        }
       }
     } else if (stage === "reviewer") {
       const allCode = Object.entries(results)

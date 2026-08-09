@@ -170,7 +170,15 @@ a{color:inherit;text-decoration:none}
 .app{display:grid;grid-template-columns:240px 1fr;min-height:100vh}
 .sidebar{background:linear-gradient(180deg,var(--bg2),var(--bg));border-right:1px solid var(--border);padding:22px 16px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;z-index:20}
 .main{padding:26px 30px;max-width:1400px;width:100%}
-@media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{position:fixed;bottom:0;top:auto;width:100%;height:auto;flex-direction:row;justify-content:space-around;padding:8px 10px;border-top:1px solid var(--border);border-right:none;z-index:100}.sidebar .brand,.sidebar .presence-mini{display:none}.main{padding-bottom:70px}}
+@media(max-width:900px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:fixed;bottom:0;top:auto;width:100%;height:auto;flex-direction:row;justify-content:flex-start;align-items:center;padding:6px 4px;border-top:1px solid var(--border);border-right:none;z-index:100;overflow-x:auto;gap:2px;background:rgba(10,12,20,.96);backdrop-filter:blur(10px);-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .sidebar::-webkit-scrollbar{display:none}
+  .sidebar .brand,.sidebar .presence-mini,.sidebar .nav-item .count{display:none}
+  .nav-item{flex:0 0 auto;flex-direction:column;gap:2px;padding:6px 12px;min-width:56px;font-size:10px;justify-content:center;align-items:center;border-radius:10px}
+  .nav-item .ico{width:auto;font-size:18px}
+  .main{padding-bottom:64px;padding-left:14px;padding-right:14px}
+}
 
 /* ── Sidebar ── */
 .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;padding:6px 8px 20px}
@@ -284,7 +292,7 @@ pre.log{background:var(--bg);border:1px solid var(--border);border-radius:10px;p
     <nav class="side-nav" id="nav">
       <a class="nav-item active" data-pane="home"><span class="ico">◉</span> Home</a>
       <a class="nav-item" data-pane="missions"><span class="ico">◆</span> Missions <span class="count" id="missionCount">0</span></a>
-      <a class="nav-item" data-pane="memory"><span class="ico">✎</span> Memory</a>
+      <a class="nav-item" data-pane="memory"><span class="ico">🧠</span> Memory</a>
       <a class="nav-item" data-pane="media"><span class="ico">🖼</span> Media</a>
       <a class="nav-item" data-pane="household"><span class="ico">🏠</span> Household</a>
       <a class="nav-item" data-pane="spawns"><span class="ico">⚡</span> Spawns</a>

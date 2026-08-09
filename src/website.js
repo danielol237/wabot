@@ -92,7 +92,13 @@ router.get("/api/system", (req, res) => {
     const dm = tryLoad("./tools/durableMissions");
     const botAdmin = tryLoad("./tools/botAdmin");
     const errors = botAdmin && botAdmin.getRecentErrors ? botAdmin.getRecentErrors(5) : [];
+    let build = "unknown";
+    try {
+      const { execSync } = require("child_process");
+      build = execSync("git rev-parse --short HEAD 2>/dev/null || echo unknown", { timeout: 3000 }).toString().trim();
+    } catch (_) {}
     res.json({
+      build,
       uptime: Math.floor(process.uptime()),
       memMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
       node: process.version,

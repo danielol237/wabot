@@ -3,6 +3,7 @@ const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const { error, log } = require("../utils/logger");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 
@@ -153,18 +154,20 @@ async function getOmniscrapeToken() {
     if (header) {
       const parsed = JSON.parse(header);
       omniscrapeToken = parsed.token;
+      log("[anime] OmniSave token acquired");
       return parsed.token;
     }
+    error("[anime] OmniSave token: no x-user header in response");
     return null;
   } catch (err) {
-    console.error("OmniSave token error:", err.message);
+    error("[anime] OmniSave token error:", err.message);
     return null;
   }
 }
 
 async function searchOmniSave(query) {
   const token = await getOmniscrapeToken();
-  if (!token) return [];
+  if (!token) { error("[anime] OmniSave search skipped: no token"); return []; }
 
   try {
     const H = {
@@ -177,36 +180,41 @@ async function searchOmniSave(query) {
     };
     // subjectType 3 = movies (returns nothing for anime). 2 = TV/anime, 0 = all.
     for (const subjectType of [2, 0]) {
-      const res = await axios.post(
-        "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/search",
-        { keyword: query, page: 1, perPage: 10, subjectType },
-        { headers: H, timeout: 15000 }
-      );
-      const payload = res.data?.data || {};
-      const items = payload.items || payload.list || payload.records || [];
-      if (!items.length) continue;
-      return items.map((item) => ({
-        subjectId: item.subjectId,
-        title: item.title || item.name || "",
-        year: item.releaseDate,
-        rating: item.imdbRatingValue,
-        image: item.cover?.url,
-        detailPath: item.detailPath,
-        hasResource: item.hasResource,
-        subjectType,
-        source: "omnisave",
-      }));
+      try {
+        const res = await axios.post(
+          "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/search",
+          { keyword: query, page: 1, perPage: 10, subjectType },
+          { headers: H, timeout: 15000 }
+        );
+        const payload = res.data?.data || {};
+        const items = payload.items || payload.list || payload.records || [];
+        log(`[anime] OmniSave search type=${subjectType} for "${query}" -> ${items.length} results`);
+        if (!items.length) continue;
+        return items.map((item) => ({
+          subjectId: item.subjectId,
+          title: item.title || item.name || "",
+          year: item.releaseDate,
+          rating: item.imdbRatingValue,
+          image: item.cover?.url,
+          detailPath: item.detailPath,
+          hasResource: item.hasResource,
+          subjectType,
+          source: "omnisave",
+        }));
+      } catch (e) {
+        error(`[anime] OmniSave search type=${subjectType} error:`, e.response?.status || e.message);
+      }
     }
     return [];
   } catch (err) {
-    console.error("OmniSave search error:", err.message);
+    error("[anime] OmniSave search error:", err.message);
     return [];
   }
 }
 
 async function getOmniSaveDownload(subjectId, detailPath, season = 0, episode = 0) {
   const token = await getOmniscrapeToken();
-  if (!token) return null;
+  if (!token) { error("[anime] OmniSave download skipped: no token"); return null; }
 
   try {
     const res = await axios.get(
@@ -222,13 +230,14 @@ async function getOmniSaveDownload(subjectId, detailPath, season = 0, episode = 
         timeout: 15000,
       }
     );
-
+    const data = res.data?.data || {};
+    log(`[anime] OmniSave download se=${season} ep=${episode} subject=${subjectId} -> ${(data.downloads||[]).length} files, hasResource=${data.hasResource}, vip=${data.vipLocked}`);
     return {
-      downloads: res.data?.data?.downloads || [],
-      captions: res.data?.data?.captions || [],
+      downloads: data.downloads || [],
+      captions: data.captions || [],
     };
   } catch (err) {
-    console.error("OmniSave download error:", err.message);
+    error("[anime] OmniSave download error:", err.response?.status || err.message);
     return null;
   }
 }
@@ -368,10 +377,11 @@ async function animepaheGetStreamUrl(animeId, episodeNum) {
 // Attempt a download from a resolved stream URL via yt-dlp.
 async function tryDownloadUrl(url) {
   try {
+    log(`[anime] yt-dlp downloading: ${String(url).slice(0, 60)}`);
     const dl = await downloadVideo(url);
     if (dl.success) return dl;
     return null;
-  } catch (_) { return null; }
+  } catch (e) { error("[anime] yt-dlp download failed:", e.message); return null; }
 }
 
 // Download a single anime episode to a video file. Tries every available

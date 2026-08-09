@@ -235,10 +235,9 @@ async function routeMessage(sock, msg, context) {
           await _rp(sock, msg, "❌ This command is owner-only.");
           return;
         }
-        // Admin check — temporarily disabled so all commands are usable by
-        // everyone. (Set ADMIN_GATE=true in env to re-enforce admin-only group
-        // commands.)
-        if (process.env.ADMIN_GATE === "true" && cmd.category === "group" && !isOwner(senderJid)) {
+        // Admin check — group commands require the sender to be the owner, a
+        // bot admin, or a real WhatsApp group admin.
+        if (cmd.category === "group" && !isOwner(senderJid)) {
           const localAdmin = isAdmin(senderJid, chatId);
           const groupAdmin = isSenderAdmin ? await isSenderAdmin(sock, chatId, senderJid).catch(() => false) : false;
           if (!localAdmin && !groupAdmin) {

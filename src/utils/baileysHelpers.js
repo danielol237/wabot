@@ -25,6 +25,24 @@ function getTargetJid(msg) {
   return null;
 }
 
+// True if the bot's own JID appears in the message's @mention list, OR the
+// message is a reply to one of the bot's messages. Used to decide whether a
+// group message is actually addressing ARIA.
+function isBotMentioned(msg, botJid) {
+  try {
+    const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+    if (Array.isArray(mentioned) && botJid) {
+      const botNum = String(botJid).split(":")[0].split("@")[0];
+      if (mentioned.some((m) => String(m).split(":")[0].split("@")[0] === botNum)) return true;
+    }
+    // Reply-to-our-message detection via tracked sent message ids.
+    const { wasSentByBot } = require("./botMessages");
+    const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
+    if (quotedId && wasSentByBot(quotedId)) return true;
+  } catch (_) {}
+  return false;
+}
+
 async function reply(sock, msg, text, options = {}) {
   if (!text) return;
   const chatId = msg.key.remoteJid;
@@ -45,6 +63,10 @@ async function reply(sock, msg, text, options = {}) {
 }
 
 async function react(sock, msg, emoji) {
+  // Emoji reactions were reported as annoying (the bot reacted to nearly every
+  // message). They're disabled by default. Set EMOJI_REACTIONS=true in env to
+  // re-enable them.
+  if (process.env.EMOJI_REACTIONS !== "true") return;
   try {
     await sock.sendMessage(msg.key.remoteJid, {
       react: { text: emoji, key: msg.key },

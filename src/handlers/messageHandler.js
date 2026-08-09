@@ -1,7 +1,7 @@
 // Slimmed-down message handler — routes to commandRouter
 // Previously 1669 lines, now ~150. New commands go in commandRouter, not here.
 
-const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNote, downloadMediaFromMsg } = require("../utils/baileysHelpers");
+const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNote, downloadMediaFromMsg, isBotMentioned } = require("../utils/baileysHelpers");
 const { isSpawnDue, generateSpawn, consumeSpawn, getSpawnStats } = require("../tools/pokemonSpawn");
 const { getTrainer, save } = require("../tools/pokemonGame");
 const { routeMessage, triggeredByName } = require("../utils/commandRouter");
@@ -25,6 +25,7 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   const senderJid = msg.key.participant || msg.key.remoteJid;
   const senderName = getSenderName(msg);
   const isGroup = chatId?.includes("g.us");
+  const botJid = sock?.user?.id;
   const text = getMessageText(msg);
   const lower = text.toLowerCase().trim();
 
@@ -47,8 +48,7 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // Sleep check — late night? she'll be drowsy
   if (isSleeping()) {
     if (checkOwner(senderJid)) {
-      // The owner still gets a groggy reply during sleep hours.
-      await react(sock, msg, "😴");
+      // The owner still gets a groggy reply during sleep hours (no emoji).
       return reply(sock, msg, getStateMessage());
     }
     // Everyone else is silently ignored while she's asleep — she doesn't reply
@@ -78,7 +78,6 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   if (hasMedia(msg)) {
     const media = await downloadMediaFromMsg(sock, msg);
     if (media) {
-      await react(sock, msg, "📊");
       const question = text || "Analyze this file.";
       const result = await analyzeFile(media, question);
       return reply(sock, msg, result);
@@ -87,7 +86,6 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
 
   // ── VOICE NOTE → VOICE CONVERSATION ──────────────────────
   if (hasVoiceNote(msg)) {
-    await react(sock, msg, "🎤");
     const media = await downloadMediaFromMsg(sock, msg);
     if (media) {
       const { voiceConversation } = require("../tools/voice");
@@ -113,12 +111,24 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     }
   }
 
-  // ── NAME TRIGGER or PREFIX COMMAND or NON-TRIVIAL TEXT ─────
-  const hasNameTrigger = triggeredByName(text);
+  // ── DECIDE WHETHER TO REPLY ───────────────────────────────
   const isCommand = lower.startsWith(process.env.BOT_PREFIX || "!");
-  const isMeaningful = text.length >= 2;
+  const hasNameTrigger = triggeredByName(text);
+  const sessionActive = isSessionActive(chatId);
 
-  if (hasNameTrigger || isCommand || isMeaningful) {
+  if (!isGroup) {
+    // DMs always get a reply (the bot is the whole point of a 1:1 chat).
+    return routeMessage(sock, msg, context);
+  }
+
+  // In groups, only reply when ARIA is actually being addressed:
+  //  - @mentioned / replied-to directly
+  //  - her name is mentioned in text
+  //  - a command is used
+  //  - session mode is active
+  // Otherwise she stays quiet (no more replying to every group message).
+  const mentioned = isBotMentioned(msg, botJid);
+  if (hasNameTrigger || isCommand || mentioned || sessionActive) {
     return routeMessage(sock, msg, context);
   }
 }

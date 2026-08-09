@@ -216,35 +216,57 @@ async function searchReddit(query, subreddit) {
 }
 
 // ── Wikipedia ──────────────────────────────────────────────────
-// MediaWiki action API — returns article summaries + links.
+// MediaWiki action API — returns ONE clean info-card for the best match:
+//   { source, title, body, image, url } where body is a readable intro
+//   summary (not a list of search snippets). The caller can attach the image.
 async function searchWikipedia(query) {
   try {
-    const r = await axios.get("https://en.wikipedia.org/w/api.php", {
+    // 1. Find the best-matching article title.
+    const search = await axios.get("https://en.wikipedia.org/w/api.php", {
       params: {
         action: "query",
         list: "search",
         srsearch: query,
-        srlimit: 5,
+        srlimit: 3,
         format: "json",
         origin: "*",
       },
       headers: { "User-Agent": "ARIA-Bot/1.0" },
       timeout: 15000,
     });
-    const hits = r.data?.query?.search || [];
-    if (!hits.length) return { error: `No Wikipedia results for "${query}".` };
+    const hits = search.data?.query?.search || [];
+    if (!hits.length) return { error: `No Wikipedia article found for "${query}".` };
+    const title = hits[0].title;
 
-    const lines = [];
-    for (const hit of hits) {
-      const title = hit.title;
-      const snippet = (hit.snippet || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").slice(0, 180);
-      lines.push(`*${title}*\n  ${snippet}\n  🔗 https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`);
-    }
+    // 2. Fetch the intro extract + thumbnail for that single article.
+    const detail = await axios.get("https://en.wikipedia.org/w/api.php", {
+      params: {
+        action: "query",
+        prop: "extracts|pageimages",
+        titles: title,
+        exintro: 1,
+        explaintext: 1,
+        piprop: "thumbnail",
+        pithumbsize: 400,
+        format: "json",
+        origin: "*",
+      },
+      headers: { "User-Agent": "ARIA-Bot/1.0" },
+      timeout: 15000,
+    });
+    const page = Object.values(detail.data?.query?.pages || {})[0] || {};
+    const summary = (page.extract || "").replace(/\s+/g, " ").trim();
+
+    const body = summary
+      ? summary.slice(0, 420) + (summary.length > 420 ? "…" : "")
+      : (hits[0].snippet || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
 
     return {
       source: "Wikipedia",
-      title: `🔍 *Wikipedia: "${query}"*`,
-      body: lines.join("\n\n"),
+      title: `📚 *${title}*`,
+      body,
+      image: page.thumbnail?.source || null,
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
     };
   } catch (e) {
     return { error: `Wikipedia: ${e.response?.status || e.message}` };

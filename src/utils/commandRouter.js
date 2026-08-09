@@ -1486,11 +1486,21 @@ async function handleReddit(sock, msg, args, ctx) {
 
 async function handleWikipedia(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !wikipedia <thing> — e.g. !wikipedia quantum computing");
+  if (!args) return reply(sock, msg, "Usage: !wikipedia <thing> — e.g. !wikipedia Albert Einstein");
   await react(sock, msg, "📖");
   const { research } = require("../tools/sourceResearch");
   const result = await research({ source: "wikipedia", query: args });
-  await reply(sock, msg, formatResearchResult(result));
+  if (result.error) return reply(sock, msg, "❌ " + result.error);
+  // Clean info-card: photo (if available) + title + summary + link.
+  let text = `${result.title}\n\n${result.body}`;
+  if (result.url) text += `\n\n🔗 ${result.url}`;
+  if (result.image) {
+    try {
+      await sock.sendMessage(ctx.chatId, { image: { url: result.image }, caption: text }, { quoted: msg });
+      return;
+    } catch (_) { /* fall back to text-only if image fails */ }
+  }
+  await reply(sock, msg, text);
 }
 
 // Dev handlers
@@ -1887,7 +1897,13 @@ const intentHandlers = {
     if (!query) return reply(sock, msg, "What should I look up on Wikipedia? E.g. \"look up quantum computing on wikipedia\"");
     const { research } = require("../tools/sourceResearch");
     const result = await research({ source: "wikipedia", query });
-    await reply(sock, msg, formatResearchResult(result));
+    if (result.error) return reply(sock, msg, "❌ " + result.error);
+    let t = `${result.title}\n\n${result.body}`;
+    if (result.url) t += `\n\n🔗 ${result.url}`;
+    if (result.image) {
+      try { await sock.sendMessage(ctx.chatId, { image: { url: result.image }, caption: t }, { quoted: msg }); return; } catch (_) {}
+    }
+    await reply(sock, msg, t);
   },
 };
 

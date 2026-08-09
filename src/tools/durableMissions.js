@@ -299,6 +299,11 @@ function notify(mission, text) {
 // ── Queries / commands ────────────────────────────────────────
 function getMission(id) { return missions[id] || null; }
 function getMissions(chatId) { return Object.values(missions).filter(m => m.chatId === chatId); }
+
+// Return every mission across all chats (for the dashboard / cross-chat views).
+function getAllMissions() {
+  return Object.values(missions).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
 function cancelMission(id) {
   const m = missions[id];
   if (!m) return false;
@@ -319,5 +324,5 @@ function formatMissionList(list) {
 
 module.exports = {
   createMission, executeMission, decideApproval, recoverMissions,
-  getMission, getMissions, cancelMission, formatMissionList, setSock,
+  getMission, getMissions, getAllMissions, cancelMission, formatMissionList, setSock,
 };

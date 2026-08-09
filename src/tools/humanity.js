@@ -168,7 +168,16 @@ function isDrowsy() {
 }
 
 function getStateMessage() {
-  if (isSleeping()) return "zzz... mm? sorry, was asleep. what's up? 😴";
+  if (isSleeping()) {
+    const sleepy = [
+      "zzz... mm? sorry, was asleep. what's up? 😴",
+      "*mumbling* huh...? it's late. wsg?",
+      "mm... just woke up. this better be important, dad 🙄",
+      "what...? *rubs eyes* fine, i'm up. talk to me 😪",
+      "zzz... huh? oh. hey. didn't expect you up this late 😴",
+    ];
+    return sleepy[Math.floor(Math.random() * sleepy.length)];
+  }
   if (isDrowsy()) return "*yawn* hey... barely awake but i'm here. what is it?";
   const mood = getTimeBasedMood();
   const greetings = {

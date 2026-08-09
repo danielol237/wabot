@@ -45,10 +45,15 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   updateMood(senderJid, text);
 
   // Sleep check — late night? she'll be drowsy
-  if (isSleeping() && checkOwner(senderJid) && text.length < 20) {
-    // Quick sleepy reply for short messages during sleep hours
-    await react(sock, msg, "😴");
-    return reply(sock, msg, getStateMessage());
+  if (isSleeping()) {
+    if (checkOwner(senderJid)) {
+      // The owner still gets a groggy reply during sleep hours.
+      await react(sock, msg, "😴");
+      return reply(sock, msg, getStateMessage());
+    }
+    // Everyone else is silently ignored while she's asleep — she doesn't reply
+    // at all until she wakes up. This is the "true sleep" behavior.
+    return;
   }
 
   // Human-like typing delay before any response

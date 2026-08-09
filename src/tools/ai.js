@@ -222,7 +222,15 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
 
   // Fallback to OpenRouter — the previous model ID (rouge-rose) was retired,
   // so we use a verified working free model with a small fallback chain.
-  const OPENROUTER_MODELS = ["openai/gpt-oss-20b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3-super-120b-a12b:free"];
+  // Free OpenRouter models rate-limit hard (shared quota), so keep a longer
+  // chain so a rate-limited model falls through to the next one.
+  const OPENROUTER_MODELS = [
+    "openai/gpt-oss-20b:free",
+    "google/gemma-4-31b-it:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-nano-12b-v2-vl:free",
+    "openai/gpt-oss-20b:free",
+  ];
   if (process.env.OPENROUTER_API_KEY) {
     for (const model of OPENROUTER_MODELS) {
       try {

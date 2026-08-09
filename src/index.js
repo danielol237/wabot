@@ -173,6 +173,14 @@ async function startBot() {
         error("Autonomous init error:", e.message);
       }
 
+      // Start the 24/7 mission runner — resumes + reports on long-term goals
+      try {
+        const missionRunner = require("./tools/missionRunner");
+        missionRunner.init(sock);
+      } catch (e) {
+        error("Mission runner init error:", e.message);
+      }
+
       // Start proactive monitoring (errors, stalled missions, provider status)
       try {
         const { startMonitor } = require("./tools/proactiveMonitor");

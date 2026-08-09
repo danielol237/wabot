@@ -56,8 +56,12 @@ async function searchAnimePahe(query) {
     for (const id of ids) {
       const idx = html.indexOf(`/anime/${id}`);
       const context = html.slice(idx, idx + 3000);
+      // AnimePahe stores the title in the poster's alt attribute (and sometimes
+      // title=). Prefer the alt text since that's where the real title lives.
+      const altM = context.match(/alt="([^"]{2,120})"/);
       const titleM = context.match(/title="([^"]{2,120})"/);
-      const title = titleM ? titleM[1].replace(/&amp;/g, "&") : "Unknown";
+      const rawTitle = (altM && altM[1]) || (titleM && titleM[1]) || "";
+      const title = (rawTitle || "Unknown").replace(/&amp;/g, "&").replace(/&#039;/g, "'");
       const posterM = context.match(/src="([^"]*\.(?:jpg|jpeg|png|webp)[^"]*)"/);
       const poster = posterM ? posterM[1] : "";
       const epM = context.match(/(\d+)\s*Ep/);

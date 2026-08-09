@@ -71,6 +71,7 @@ const INTENTS = {
   github: ["on github", "look on github", "github search", "search github", "find it on github", "git hub"],
   reddit: ["on reddit", "look on reddit", "reddit search", "search reddit", "find it on reddit"],
   wikipedia: ["on wikipedia", "wikipedia search", "search wikipedia", "on wiki", "wikipedia about"],
+  deathBattle: ["who would win", "who wins", "death battle", "deathbattle", "would beat", "in a fight", "fight between"],
 };
 
 // ── Command registry ─────────────────────────────────────────
@@ -160,6 +161,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "animedl", aliases: ["animeplay", "astream", "watch", "dlanime"], category: "anime", description: "Download anime episode and send video", handler: handleAnimePlay, ownerOnly: false });
   registerCommand({ name: "trending", aliases: ["trendinganime"], category: "anime", description: "Trending anime", handler: handleTrending, ownerOnly: false });
   registerCommand({ name: "airing", aliases: ["airinganime"], category: "anime", description: "Airing anime", handler: handleAiring, ownerOnly: false });
+  registerCommand({ name: "deathbattle", aliases: ["db", "deathbatle", "fight", "whowins", "animebattle"], category: "anime", description: "Simulate an anime death battle: !deathbattle goku vs saitama", handler: handleDeathBattle, ownerOnly: false });
 
   // Research (GitHub / Reddit / Wikipedia)
   registerCommand({ name: "github", aliases: ["gh"], category: "research", description: "Search GitHub repos: !github <thing>", handler: handleGitHub, ownerOnly: false });
@@ -1446,6 +1448,16 @@ async function handleAiring(sock, msg, args, ctx) {
   await reply(sock, msg, result);
 }
 
+async function handleDeathBattle(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: `!deathbattle <charA> vs <charB>` — e.g. `!deathbattle goku vs saitama`");
+  await react(sock, msg, "⚔️");
+  await reply(sock, msg, "⚔️ Loading the fighters into the arena... simulating now 🧠");
+  const { runDeathBattle } = require("../tools/deathBattle");
+  const result = await runDeathBattle(args);
+  await reply(sock, msg, result.text);
+}
+
 // ── Research handlers (GitHub / Reddit / Wikipedia) ──────────
 function formatResearchResult(result) {
   if (!result) return "❌ Nothing returned.";
@@ -1904,6 +1916,29 @@ const intentHandlers = {
       try { await sock.sendMessage(ctx.chatId, { image: { url: result.image }, caption: t }, { quoted: msg }); return; } catch (_) {}
     }
     await reply(sock, msg, t);
+  },
+  deathBattle: async (sock, msg, text, ctx) => {
+    const { reply, react } = require("./baileysHelpers");
+    await react(sock, msg, "⚔️");
+    // Extract "A vs B" / "A or B" / "A and B" from the phrase.
+    let cleaned = text
+      .replace(/^(aria|hey aria|aria,)?\s*(who would win|who wins|would|beat|between|death battle|deathbattle)\s*/i, "")
+      .replace(/\b(in a fight|fight between|in a death battle)\b.*$/i, "")
+      .replace(/\b(would|will|who|win|wins)\b/gi, "")
+      .replace(/[\?\.!]+/g, "")
+      .replace(/\b(or|and|beat|v\.?s\.?|versus|vs)\b/gi, " vs ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!/vs/i.test(cleaned)) {
+      // Fallback: "goku or saitama" -> "goku vs saitama"
+      cleaned = cleaned.replace(/\b(?:or|and)\b/gi, " vs ");
+    }
+    if (!/ vs /i.test(cleaned)) {
+      return reply(sock, msg, "Tell me who's fighting, e.g. \"who would win: goku or saitama\"");
+    }
+    const { runDeathBattle } = require("../tools/deathBattle");
+    const result = await runDeathBattle(cleaned);
+    await reply(sock, msg, result.text);
   },
 };
 

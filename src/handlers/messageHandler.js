@@ -59,6 +59,15 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // Human-like typing delay before any response
   await humanDelay(sock, chatId, senderJid, text.length + 1);
 
+  // ── DECIDE WHETHER TO REPLY (checked for text AND media/voice) ──
+  const isCommand = lower.startsWith(process.env.BOT_PREFIX || "!");
+  const hasNameTrigger = triggeredByName(text);
+  const sessionActive = isSessionActive(chatId);
+  const mentioned = isBotMentioned(msg, botJid);
+  // In groups, only act when actually addressed. In DMs, always act.
+  const shouldReply = !isGroup || hasNameTrigger || isCommand || mentioned || sessionActive;
+  if (!shouldReply) return;
+
   // ── STICKER AUTO-CREATE (replying to bot's image with "sticker") ──
   if (lower.includes("sticker") && hasMedia(msg)) {
     const media = await downloadMediaFromMsg(sock, msg);
@@ -123,26 +132,8 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     }
   }
 
-  // ── DECIDE WHETHER TO REPLY ───────────────────────────────
-  const isCommand = lower.startsWith(process.env.BOT_PREFIX || "!");
-  const hasNameTrigger = triggeredByName(text);
-  const sessionActive = isSessionActive(chatId);
-
-  if (!isGroup) {
-    // DMs always get a reply (the bot is the whole point of a 1:1 chat).
-    return routeMessage(sock, msg, context);
-  }
-
-  // In groups, only reply when ARIA is actually being addressed:
-  //  - @mentioned / replied-to directly
-  //  - her name is mentioned in text
-  //  - a command is used
-  //  - session mode is active
-  // Otherwise she stays quiet (no more replying to every group message).
-  const mentioned = isBotMentioned(msg, botJid);
-  if (hasNameTrigger || isCommand || mentioned || sessionActive) {
-    return routeMessage(sock, msg, context);
-  }
+  // ── NAME TRIGGER or PREFIX COMMAND ────────────────────────
+  return routeMessage(sock, msg, context);
 }
 
 module.exports = { handleMessage };

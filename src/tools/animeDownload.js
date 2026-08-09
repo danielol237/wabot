@@ -385,6 +385,7 @@ async function downloadAnimeEpisode(subjectId, episode, detailPath = "", title =
 
   // 0. OmniSave fast path — when the search already gave us a detailPath
   //    (numeric subjectId + detailPath), this is self-contained and reliable.
+  //    On success we return; on failure we fall through to the other sources.
   if (detailPath) {
     try {
       const dl = await getOmniSaveDownload(subjectId, detailPath, 1, episode || 1);
@@ -394,7 +395,6 @@ async function downloadAnimeEpisode(subjectId, episode, detailPath = "", title =
         if (got) return got;
       }
       errors.push("OmniSave: no download URL");
-      return { success: false, error: errors.join(" | ") };
     } catch (e) { errors.push("OmniSave: " + e.message); }
   }
 

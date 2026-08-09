@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { exec } = require("child_process");
+const { log, error, warn } = require("../utils/logger");
 const { getAIResponse } = require("./ai");
 const { uploadToGofile } = require("./gofileUpload");
 const { loadTemplate, matchTemplate: tmplMatch, TEMPLATES } = require("../templates/loader");
@@ -337,7 +338,15 @@ async function processProjectBatch(projectId, senderName, onProgress) {
         verification = verifyFile(filePlan.path, content);
       }
 
-      const fullPath = path.join(projectDir, filePlan.path);
+      // Sanitize the AI-provided file path: strip absolute paths and any ".."
+      // traversal so a malicious/mistaken path can't escape the project dir.
+      const safeRel = String(filePlan.path || "")
+        .replace(/\\/g, "/")
+        .replace(/^\/+/, "")
+        .split("/")
+        .filter((seg) => seg && seg !== ".." && seg !== ".")
+        .join("/");
+      const fullPath = path.join(projectDir, safeRel);
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, content, "utf8");
 
@@ -430,7 +439,6 @@ async function finalizeProject(project, projectDir, onProgress) {
     if (onProgress) await onProgress("🌐 *Deployer:* Setting up a live preview...");
     try {
       const { deployToVercel } = require("./vercelDeploy");
-      const { log, error, warn } = require("../utils/logger");
       const deployResult = await deployToVercel(projectDir, project.goal);
       if (deployResult.success) previewUrl = deployResult.url;
     } catch (err) {

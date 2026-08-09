@@ -121,6 +121,8 @@ function registerBuiltinCommands() {
   registerCommand({ name: "lyrics", aliases: ["lyric"], category: "utility", description: "Search song lyrics", handler: handleLyrics, ownerOnly: false });
   registerCommand({ name: "say", aliases: ["tts", "speak"], category: "utility", description: "Text-to-speech", handler: handleTTS, ownerOnly: false });
   registerCommand({ name: "poll", aliases: [], category: "utility", description: "Create a poll", handler: handlePoll, ownerOnly: false });
+  registerCommand({ name: "vote", aliases: [], category: "utility", description: "Vote on a poll: !vote <pollId> <number>", handler: handleVote, ownerOnly: false });
+  registerCommand({ name: "pollclose", aliases: ["closepoll"], category: "utility", description: "Close a poll (creator/owner): !pollclose <pollId>", handler: handlePollClose, ownerOnly: false });
   registerCommand({ name: "remind", aliases: ["reminder", "alert"], category: "utility", description: "Set a reminder", handler: handleRemind, ownerOnly: false });
   registerCommand({ name: "recurring", aliases: ["cron", "schedule"], category: "utility", description: "Set recurring reminder", handler: handleRecurring, ownerOnly: false });
   registerCommand({ name: "crypto", aliases: ["price"], category: "utility", description: "Check crypto price", handler: handleCrypto, ownerOnly: false });
@@ -809,8 +811,37 @@ async function handlePoll(sock, msg, args, ctx) {
   if (!args) return reply(sock, msg, "Usage: !poll Question? | Option 1 | Option 2 | ...");
   const { createPoll } = require("../tools/polls");
   await react(sock, msg, "📊");
-  const result = await createPoll(sock, ctx.chatId, args);
-  await reply(sock, msg, result);
+  // Parse "Question? | Opt1 | Opt2 | ..." into question + options array.
+  const parts = args.split("|").map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return reply(sock, msg, "❌ Need a question and at least 1 option. Usage: !poll Question? | Opt 1 | Opt 2");
+  const question = parts[0];
+  const options = parts.slice(1);
+  const id = createPoll(question, options, ctx.senderJid, ctx.chatId);
+  const optsText = options.map((o, i) => `${i + 1}. ${o}`).join("\n");
+  await reply(sock, msg, `📊 *${question}*\n\n${optsText}\n\n_Vote by replying with the number._ Poll ID: \`${id}\``);
+}
+
+async function handleVote(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: !vote <pollId> <number>");
+  const [pollId, numStr] = args.trim().split(/\s+/);
+  const optionIndex = parseInt(numStr, 10) - 1;
+  const { vote, findPollByShortId } = require("../tools/polls");
+  const poll = findPollByShortId(pollId);
+  const id = poll ? poll.id : pollId;
+  const result = vote(id, optionIndex, ctx.senderJid);
+  await reply(sock, msg, result.success ? `🗳️ Voted for option ${parseInt(numStr, 10)}.` : `❌ ${result.error}`);
+}
+
+async function handlePollClose(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: !pollclose <pollId>");
+  const { closePoll, getPollResults, formatPoll } = require("../tools/polls");
+  const pollId = args.trim().split(/\s+/)[0];
+  const result = closePoll(pollId, ctx.senderJid);
+  if (result && result.success === false) return reply(sock, msg, `❌ ${result.error}`);
+  const display = formatPoll(pollId) || "Poll closed.";
+  await reply(sock, msg, `🔒 Poll closed.\n\n${display}`);
 }
 
 async function handleRemind(sock, msg, args, ctx) {

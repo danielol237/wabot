@@ -3,6 +3,7 @@
 // a matter of registering a command, not touching a 1600-line file.
 
 // ── Imports ──────────────────────────────────────────────────
+const axios = require("axios");
 const { getStats, getRecentErrors, logError, broadcastToAll } = require("../tools/botAdmin");
 const { isBotAdmin, isSenderAdmin, kickUser, promoteUser, demoteUser, tagAll, hideTag } = require("../tools/groupAdmin");
 const { getGroupSettings, setAntilink, setWelcome, setWelcomeMessage, setLeaveMessage, addWarning, resetWarnings, getWarnings } = require("../utils/groupSettings");
@@ -165,6 +166,8 @@ function registerBuiltinCommands() {
   registerCommand({ name: "catch", aliases: ["throw"], category: "pokemon", description: "Catch the wild Pokémon: !catch [ball]", handler: handlePokeCatch, ownerOnly: false });
   registerCommand({ name: "battle", aliases: ["fight"], category: "pokemon", description: "Battle a trainer", handler: handlePokeBattle, ownerOnly: false });
   registerCommand({ name: "attack", aliases: ["move"], category: "pokemon", description: "Use a move in battle", handler: handlePokeAttack, ownerOnly: false });
+  registerCommand({ name: "switch", aliases: ["swap"], category: "pokemon", description: "Switch active Pokémon in battle: !switch <idx>", handler: handlePokeSwitch, ownerOnly: false });
+  registerCommand({ name: "run", aliases: ["flee"], category: "pokemon", description: "Try to flee a battle", handler: handlePokeRun, ownerOnly: false });
   registerCommand({ name: "heal", aliases: ["healall"], category: "pokemon", description: "Heal your team", handler: handlePokeHeal, ownerOnly: false });
   registerCommand({ name: "evolve", aliases: [], category: "pokemon", description: "Evolve a Pokémon: !evolve <teamIdx>", handler: handlePokeEvolve, ownerOnly: false });
   registerCommand({ name: "useitem", aliases: ["item"], category: "pokemon", description: "Use an item on a Pokémon", handler: handlePokeUseItem, ownerOnly: false });
@@ -1100,6 +1103,23 @@ function pokeTrainer(uid) {
   return getTrainer(uid);
 }
 
+// Download and send a Pokémon artwork image, with an optional text fallback.
+async function sendPokeImage(sock, msg, speciesId, caption) {
+  try {
+    const { getArtwork } = require("./pokemonData");
+    const url = getArtwork(speciesId);
+    const res = await axios.get(url, { timeout: 15000, responseType: "arraybuffer" });
+    const buffer = Buffer.from(res.data);
+    await sock.sendMessage(msg.key.remoteJid, {
+      image: buffer,
+      caption,
+    }, { quoted: msg });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function handlePokeStart(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   const { getTrainer, createMonster, recalc, save } = require("../tools/pokemonGame");
@@ -1118,7 +1138,8 @@ async function handlePokeStart(sock, msg, args, ctx) {
   save();
   await react(sock, msg, "🎉");
   const shiny = starter.shiny ? " ✨ SHINY!" : "";
-  await reply(sock, msg, `🎉 Welcome, *${name}*! You're now a Pokémon trainer.\n\nYour starter: *${starter.nickname || starter.speciesId}* Lv ${starter.level}${shiny}\n\nUse *!encounter* to find wild Pokémon and *!catch* to catch them.`);
+  await reply(sock, msg, `🎉 Welcome, *${name}*! You're now a Pokémon trainer.\n\nYour starter: *${starter.speciesId}* Lv ${starter.level}${shiny}\n\nUse *!encounter* to find wild Pokémon and *!catch* to catch them.`);
+  await sendPokeImage(sock, msg, starter.speciesId, `✨ ${starter.speciesId} — your starter!`);
 }
 
 async function handlePokeTeam(sock, msg, args, ctx) {
@@ -1150,6 +1171,7 @@ async function handlePokeEncounter(sock, msg, args, ctx) {
   const { species, mon } = await wildEncounter(uid);
   pendingWild.set(uid, { mon, species, expiresAt: Date.now() + WILD_TIMEOUT_MS });
   await reply(sock, msg, `🌿 A wild *${species.name}* (Lv ${mon.level}) appeared!${mon.shiny ? " ✨ SHINY!" : ""}\n\n_Catch it with *!catch* (or *!catch greatball*). Expires in 3 min._`);
+  await sendPokeImage(sock, msg, mon.speciesId, `Wild ${species.name} — Lv ${mon.level}`);
 }
 
 async function handlePokeCatch(sock, msg, args, ctx) {
@@ -1166,8 +1188,15 @@ async function handlePokeCatch(sock, msg, args, ctx) {
   if (result.success) {
     pendingWild.delete(uid);
     await react(sock, msg, "🏆");
-    const dest = wild.mon.uid && require("../tools/pokemonGame").state?.trainers?.[uid]?.team?.some((m) => m.uid === wild.mon.uid) ? "team" : "PC";
-    return reply(sock, msg, `🏆 You caught *${wild.species.name}*! It was sent to your ${dest}.`);
+    // Grant XP for the catch.
+    const { addXP } = require("../tools/pokemonGame");
+    const xpGain = 15 + Math.floor(Math.random() * 20);
+    addXP(uid, xpGain);
+    const t = require("../tools/pokemonGame").getTrainer(uid);
+    const dest = t.team.some((m) => m.uid === wild.mon.uid) ? "team" : "PC";
+    await reply(sock, msg, `🏆 You caught *${wild.species.name}*! It was sent to your ${dest}. (+${xpGain} XP)`);
+    await sendPokeImage(sock, msg, wild.mon.speciesId, `🏆 ${wild.species.name} — caught!`);
+    return;
   }
   if (result.ranAway) { pendingWild.delete(uid); return reply(sock, msg, "💨 It fled! Use *!encounter* to find another."); }
   await react(sock, msg, "😤");
@@ -1194,7 +1223,44 @@ async function handlePokeAttack(sock, msg, args, ctx) {
   if (!moveName) return reply(sock, msg, "Usage: !attack <move name>");
   const result = await battleAction(battle.id, ctx.senderJid, "attack", { move: moveName });
   if (result.error) return reply(sock, msg, `❌ ${result.error}`);
-  await reply(sock, msg, formatBattleResult(result));
+  const r = result?.result || {};
+  // Show the attacker's description and send both sprites if available.
+  if (r.description) await reply(sock, msg, `⚔️ ${r.description}`);
+  else await reply(sock, msg, formatBattleResult(result));
+  if (r.attSprite) {
+    try {
+      const img = await axios.get(r.attSprite, { timeout: 10000, responseType: "arraybuffer" });
+      await sock.sendMessage(msg.key.remoteJid, { image: Buffer.from(img.data), caption: r.attName || "" }, { quoted: msg });
+    } catch (_) {}
+  }
+}
+
+function findActiveBattle(uid) {
+  const { state } = require("../tools/pokemonGame");
+  return Object.values(state.battles || {}).find((b) => b.state === "active" && (b.uid1 === uid || b.uid2 === uid));
+}
+
+async function handlePokeSwitch(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { battleAction } = require("../tools/pokemonGame");
+  const battle = findActiveBattle(ctx.senderJid);
+  if (!battle) return reply(sock, msg, "You're not in an active battle.");
+  const idx = parseInt(args?.trim(), 10) - 1;
+  if (isNaN(idx) || idx < 0) return reply(sock, msg, "Usage: !switch <teamIndex>");
+  const result = await battleAction(battle.id, ctx.senderJid, "switch", idx);
+  if (result?.error) return reply(sock, msg, `❌ ${result.error}`);
+  const r = result?.result || {};
+  await reply(sock, msg, r.success === false ? "Couldn't flee." : (r.name ? `🔄 Switched to *${r.name}*!` : "🔄 Switched Pokémon!"));
+}
+
+async function handlePokeRun(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { battleAction } = require("../tools/pokemonGame");
+  const battle = findActiveBattle(ctx.senderJid);
+  if (!battle) return reply(sock, msg, "You're not in an active battle.");
+  const result = await battleAction(battle.id, ctx.senderJid, "run", 0);
+  const r = result?.result || {};
+  await reply(sock, msg, r.success ? "💨 You fled the battle!" : "Couldn't escape! It's still your opponent's turn.");
 }
 
 function formatBattleResult(result) {

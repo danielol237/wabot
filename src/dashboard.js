@@ -124,10 +124,22 @@ function collectData() {
   let memories = [];
   try { const store = mem && mem.getUserStore ? mem.getUserStore("*") : null; memories = store?.memories || []; } catch (_) {}
 
+  // Media memory (images/voice ARIA has seen)
+  let mediaMem = [];
+  try { const mm = tryLoad("./tools/mediaMemory"); mediaMem = mm && mm.getAllMedia ? mm.getAllMedia("*", 10) : []; } catch (_) {}
+  const mediaStats = { total: mediaMem.length, images: mediaMem.filter((m) => m.kind === "image").length, voices: mediaMem.filter((m) => m.kind === "voice").length };
+
+  // Households
+  let households = [];
+  try { const hh = tryLoad("./tools/household"); households = hh && hh.listHouseholds ? hh.listHouseholds() : []; } catch (_) {}
+
+  // Mission execution traces
+  const tracedMissions = missions.filter((m) => m.trace && m.trace.length).map((m) => ({ id: m.id, status: m.status, traceCount: m.trace.length, last: m.trace[m.trace.length - 1] }));
+
   const aiKeys = ["OPENROUTER_API_KEY","GROQ_API_KEY","CEREBRAS_API_KEY","GEMINI_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"];
   const keysSet = aiKeys.filter((k) => process.env[k]).length;
 
-  return { uptime, hrs, mins, memMB, heapMB, os, stats, errors, spawnStats, missions, activeMissions, entities, goals, relations, memories, aiKeys, keysSet };
+  return { uptime, hrs, mins, memMB, heapMB, os, stats, errors, spawnStats, missions, activeMissions, entities, goals, relations, memories, mediaMem, mediaStats, households, tracedMissions, aiKeys, keysSet };
 }
 
 function renderPage(title, content, passwordNeeded = false, isLogin = false) {
@@ -273,6 +285,8 @@ pre.log{background:var(--bg);border:1px solid var(--border);border-radius:10px;p
       <a class="nav-item active" data-pane="home"><span class="ico">◉</span> Home</a>
       <a class="nav-item" data-pane="missions"><span class="ico">◆</span> Missions <span class="count" id="missionCount">0</span></a>
       <a class="nav-item" data-pane="memory"><span class="ico">✎</span> Memory</a>
+      <a class="nav-item" data-pane="media"><span class="ico">🖼</span> Media</a>
+      <a class="nav-item" data-pane="household"><span class="ico">🏠</span> Household</a>
       <a class="nav-item" data-pane="spawns"><span class="ico">⚡</span> Spawns</a>
       <a class="nav-item" data-pane="trainers"><span class="ico">🎮</span> Trainers</a>
       <a class="nav-item" data-pane="activity"><span class="ico">≋</span> Activity</a>
@@ -299,7 +313,7 @@ pre.log{background:var(--bg);border:1px solid var(--border);border-radius:10px;p
 <script>
 // Nav switching
 const navs=document.querySelectorAll('.nav-item');
-const titles={home:['ARIA Home','what\'s she up to right now'],missions:['Missions','what ARIA is building and tracking'],memory:['Memory','what ARIA remembers about you'],spawns:['Spawns','wild pokemon control'],trainers:['Trainers','all the players'],activity:['Activity','timeline of what ARIA did'],system:['System','health and ecosystem'],admin:['Admin','access control']};
+const titles={home:['ARIA Home','what\'s she up to right now'],missions:['Missions','what ARIA is building and tracking'],memory:['Memory','what ARIA remembers about you'],media:['Media','images & voice ARIA has seen/heard'],household:['Household','shared tasks & members'],spawns:['Spawns','wild pokemon control'],trainers:['Trainers','all the players'],activity:['Activity','timeline of what ARIA did'],system:['System','health and ecosystem'],admin:['Admin','access control']};
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
   document.querySelectorAll('.pane').forEach(x=>x.classList.remove('show'));
@@ -308,6 +322,9 @@ function showPane(p){
 }
 navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
 showPane('home');
+// Live auto-refresh: keep the dashboard current (missions, media, household,
+// activity) without manual reloads.
+setInterval(()=>{ location.reload(); }, 30000);
 </script>
 </body>
 </html>`;
@@ -374,6 +391,7 @@ router.get("/", checkAuth, (req, res) => {
             <div class="mission-name">${m.objective||m.goal||"Untitled"}</div>
             <div class="mission-desc">${(m.progress||"").slice(0,100)}</div>
             <div class="progress"><div class="progress-fill" style="width:${m.status==='completed'?100:m.status==='running'?55:20}%"></div></div>
+            ${m.trace && m.trace.length ? `<div class="feed" style="margin-top:10px">${m.trace.slice(-4).map(t=>`<div class="feed-item"><div class="feed-ico">🧾</div><div class="feed-body"><div class="s">${new Date(t.ts).toLocaleTimeString()}</div><div class="m">${t.detail}</div></div></div>`).join("")}</div>`:""}
           </div>
         `).join("") : `<div class="card"><div class="empty">No missions yet. Run <b>!delegate &lt;objective&gt;</b> in chat to start one.</div></div>`}
       </div>
@@ -393,6 +411,31 @@ router.get("/", checkAuth, (req, res) => {
           <div class="row"><span class="k">Active goals</span><span class="v">${d.goals.length}</span></div>
           ${d.entities.slice(-8).map(e=>`<div class="feed-item"><div class="feed-ico">◈</div><div class="feed-body"><div class="t">${e.name}</div><div class="s">${e.type||"entity"}</div></div></div>`).join("")}
         </div>
+      </div>
+    </section>
+
+    <!-- MEDIA MEMORY -->
+    <section class="pane" id="pane-media">
+      <div class="grid g4" style="margin-bottom:16px">
+        <div class="card"><div class="c-title">Media Memories</div><div class="stat-value">${d.mediaStats.total}</div><div class="stat-label">total remembered</div></div>
+        <div class="card"><div class="c-title">Images</div><div class="stat-value">${d.mediaStats.images}</div><div class="stat-label">seen</div></div>
+        <div class="card"><div class="c-title">Voice notes</div><div class="stat-value">${d.mediaStats.voices}</div><div class="stat-label">heard</div></div>
+        <div class="card"><div class="c-title">Retrieval</div><div class="stat-value">auto</div><div class="stat-label">injected into context</div></div>
+      </div>
+      <div class="card"><div class="c-title">Recent Media ARIA Remembers</div>
+        ${d.mediaMem.length ? `<div class="feed">${d.mediaMem.map(m=>`<div class="feed-item"><div class="feed-ico">${m.kind==='image'?'🖼':'🎤'}</div><div class="feed-body"><div class="t">${m.kind}</div><div class="m">${(m.summary||"").slice(0,120)}</div><div class="s">${new Date(m.ts).toLocaleString()}</div></div></div>`).join("")}</div>`:'<div class="empty">No media remembered yet. Send ARIA an image or voice note and she\'ll remember it.</div>'}
+      </div>
+    </section>
+
+    <!-- HOUSEHOLD -->
+    <section class="pane" id="pane-household">
+      <div class="grid g2">
+        ${d.households.length ? d.households.map(h=>`<div class="card"><div class="c-title">🏠 ${h.name}</div>
+          <div class="row"><span class="k">Members</span><span class="v">${h.members.length}</span></div>
+          <div class="row"><span class="k">Shared tasks</span><span class="v">${h.sharedTasks.length}</span></div>
+          <div class="row"><span class="k">Shared notes</span><span class="v">${h.sharedNotes.length}</span></div>
+          ${h.sharedTasks.length?`<div class="feed" style="margin-top:8px">${h.sharedTasks.slice(-5).map(t=>`<div class="feed-item"><div class="feed-ico">${t.done?'✅':'⬜'}</div><div class="feed-body"><div class="m">${t.text}</div></div></div>`).join("")}</div>`:""}
+        </div>`).join("") : `<div class="card"><div class="empty">No households yet. In a group chat: <b>!household create <name></b></div></div>`}
       </div>
     </section>
 

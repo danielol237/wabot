@@ -174,6 +174,15 @@ function registerBuiltinCommands() {
   registerCommand({ name: "pokedex", aliases: ["dex"], category: "pokemon", description: "Your caught Pokémon", handler: handlePokeDex, ownerOnly: false });
   registerCommand({ name: "coins", aliases: ["balance", "wallet"], category: "pokemon", description: "Your trainer coins", handler: handlePokeCoins, ownerOnly: false });
 
+  // Household / shared mode
+  registerCommand({ name: "household", aliases: ["hh", "family"], category: "utility", description: "Household: create/join/manage shared space", handler: handleHousehold, ownerOnly: false });
+  registerCommand({ name: "hhtask", aliases: ["hht"], category: "utility", description: "Add a shared household task", handler: handleHHTask, ownerOnly: false });
+  registerCommand({ name: "hhtasks", aliases: ["hhts"], category: "utility", description: "List shared household tasks", handler: handleHHTasks, ownerOnly: false });
+  registerCommand({ name: "hhdone", aliases: ["hhd"], category: "utility", description: "Mark a shared task done: !hhdone <id>", handler: handleHHDone, ownerOnly: false });
+
+  // Scenario simulator (risk dry-run before actions)
+  registerCommand({ name: "sim", aliases: ["rehearse", "risk"], category: "utility", description: "Dry-run an action and see risk: !sim <action>", handler: handleSim, ownerOnly: false });
+
   // Dev / Advanced
   registerCommand({ name: "build", aliases: ["agent"], category: "dev", description: "AI app builder", handler: handleBuild, ownerOnly: true });
   registerCommand({ name: "continue", aliases: ["resume"], category: "dev", description: "Continue a project", handler: handleContinue, ownerOnly: true });
@@ -1324,6 +1333,78 @@ async function handlePokeCoins(sock, msg, args, ctx) {
   const t = pokeTrainer(ctx.senderJid);
   const items = t.items ? Object.entries(t.items).map(([k, v]) => `${k}: ${v}`).join(", ") : "none";
   await reply(sock, msg, `💰 *${t.name || ctx.senderName}'s Wallet*\n\nCoins: ${t.coins}\nWins: ${t.wins} · Losses: ${t.losses}\n\nItems: ${items}`);
+}
+
+// ── Household handlers ────────────────────────────────────────
+async function handleHousehold(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const hh = require("../tools/household");
+  const [cmd, ...rest] = (args || "").split(/\s+/);
+  const id = ctx.chatId;
+
+  if (!cmd) {
+    const h = hh.getHousehold(id);
+    if (!h) return reply(sock, msg, "No household in this chat yet.\n• *!household create <name>* to start one\n• *!household join* to join");
+    const tasks = hh.listSharedTasks(id);
+    const notes = hh.listSharedNotes(id);
+    let t = `🏠 *${h.name}*\n👥 ${h.members.length} member(s)\n\n`;
+    t += `*Shared tasks:*\n${tasks.length ? tasks.map((x, i) => `${i + 1}. ${x.done ? "✅" : "⬜"} ${x.text}`).join("\n") : "  (none — use !hhtask <text>)"}\n\n`;
+    t += `*Shared notes:*\n${notes.length ? notes.slice(-5).map((n) => `• ${n.text}`).join("\n") : "  (none)"}`;
+    return reply(sock, msg, t);
+  }
+
+  if (cmd === "create") {
+    const name = rest.join(" ").trim() || "Household";
+    const r = hh.createHousehold(id, ctx.senderJid, name);
+    return reply(sock, msg, r.error ? `❌ ${r.error}` : `🏠 Household *${name}* created! Members can *!household join*.`);
+  }
+  if (cmd === "join") {
+    const h = hh.getHousehold(id);
+    if (!h) return reply(sock, msg, "No household here to join. *!household create <name>*");
+    hh.addMember(id, ctx.senderJid);
+    return reply(sock, msg, `✅ You joined *${h.name}*! Use *!hhtask <text>* to add shared tasks.`);
+  }
+  if (cmd === "leave") {
+    hh.removeMember(id, ctx.senderJid, ctx.senderJid);
+    return reply(sock, msg, "👋 You left the household.");
+  }
+  return reply(sock, msg, "Usage: !household [create <name>|join|leave]");
+}
+
+async function handleHHTask(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const hh = require("../tools/household");
+  if (!args) return reply(sock, msg, "Usage: !hhtask <task text>");
+  const r = hh.addSharedTask(ctx.chatId, ctx.senderJid, args.trim());
+  if (r.error) return reply(sock, msg, `❌ ${r.error}`);
+  await reply(sock, msg, `✅ Shared task added: \"${r.task.text}\" (id: \`${r.task.id}\`)`);
+}
+
+async function handleHHTasks(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const hh = require("../tools/household");
+  const tasks = hh.listSharedTasks(ctx.chatId);
+  if (!tasks.length) return reply(sock, msg, "No shared tasks yet. Add one with *!hhtask <text>*.");
+  await reply(sock, msg, "🏠 *Shared tasks:*\n" + tasks.map((x, i) => `${i + 1}. ${x.done ? "✅" : "⬜"} ${x.text} _(id: \`${x.id}\`)_`).join("\n"));
+}
+
+async function handleHHDone(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const hh = require("../tools/household");
+  const taskId = args?.trim();
+  if (!taskId) return reply(sock, msg, "Usage: !hhdone <taskId>");
+  const r = hh.toggleSharedTask(ctx.chatId, taskId);
+  if (r.error) return reply(sock, msg, `❌ ${r.error}`);
+  await reply(sock, msg, `${r.task.done ? "✅" : "⬜"} Task marked ${r.task.done ? "done" : "undone"}.`);
+}
+
+// ── Scenario simulator handler ────────────────────────────────
+async function handleSim(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { rehearse } = require("../tools/scenarioSimulator");
+  if (!args) return reply(sock, msg, "Usage: !sim <action to evaluate>\nExample: !sim deploy this update to production\n\nDry-runs the action and shows the risk before you commit.");
+  const result = await rehearse(args, "");
+  await reply(sock, msg, result);
 }
 
 async function handleAiring(sock, msg, args, ctx) {

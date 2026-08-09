@@ -169,9 +169,27 @@ async function reviewProjectFiles(projectDir, fileList, senderName) {
 }
 
 // ── Step 2: Generate code for one file ────────────────────────
-async function generateFileContent(filePlan, projectContext, senderName) {
+async function generateFileContent(filePlan, projectContext, senderName, projectDir, doneFiles) {
+  // CRITICAL: include the ACTUAL content of files already written in this
+  // project so the AI writes consistent class names / functions / imports
+  // instead of guessing. This is the real fix for "class in JS doesn't match
+  // HTML / theme toggle targets wrong selector" bugs — the old code only gave
+  // the AI the file DESCRIPTIONS, so it invented its own names per file.
+  let existingContext = "";
+  if (projectDir && Array.isArray(doneFiles) && doneFiles.length) {
+    const excerpts = [];
+    for (const f of doneFiles.slice(-4)) { // last few files, bounded tokens
+      try {
+        const content = fs.readFileSync(path.join(projectDir, f), "utf8");
+        excerpts.push(`=== ${f} ===\n${content.slice(0, 1800)}`);
+      } catch (_) {}
+    }
+    if (excerpts.length) existingContext = `\n\nAlready-written files in this project (REUSE their exact class names, ids, function names, and selector targets — do NOT invent new ones):\n${excerpts.join("\n\n")}`;
+  }
+
   const prompt = `You're building a small project. Here's the overall plan:
 ${projectContext}
+${existingContext}
 
 Now write the COMPLETE content for this specific file: *${filePlan.path}*
 Purpose: ${filePlan.description}
@@ -268,6 +286,8 @@ function checkFrontendConsistency(projectDir, files) {
     const toggles = js.match(/classList\.(add|remove|toggle)\(\s*["']([^"']+)["']/g) || [];
     const jsClasses = [...new Set(toggles.map((t) => t.match(/["']([^"']+)["']/)?.[1]).filter(Boolean))];
     for (const c of jsClasses) {
+      // Skip common utility classes that don't need their own rule.
+      if (/^(show|hidden|active|open|visible|hide|collapsed|expanded)$/i.test(c)) continue;
       const cssTargets = css.match(new RegExp(`[^{}]*\\.${c.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")}[^{}]*\\{`, "g")) || [];
       if (cssTargets.length === 0) {
         issues.push({ file: cssFile, issue: `JS toggles class "${c}" but CSS has no rule for it (theme toggle may do nothing).` });
@@ -315,6 +335,59 @@ function checkFrontendConsistency(projectDir, files) {
     const bad = css.match(/\.(body|html|head)\s*\{/g) || [];
     if (bad.length) {
       issues.push({ file: cssFile, issue: 'Typo: ' + bad.join(', ') + ' uses a class selector (dot) but should be an element selector (e.g. just body).' });
+    }
+  }
+
+  // 6. JS getElementById/querySelector refs that resolve to nothing in HTML.
+  //    (id="preview-frame" in HTML but script looks up 'preview' -> null crash.)
+  if (js && html) {
+    const htmlIds = new Set((html.match(/id=["']([^"']+)["']/g) || [])
+      .map((m) => m.replace(/^id=["']/, "").replace(/["']$/, "")));
+    const htmlClasses = new Set((html.match(/class=["']([^"']+)["']/g) || [])
+      .flatMap((m) => m.replace(/^class=["']/, "").replace(/["']$/, "").split(/\s+/)));
+    const lookupIds = [...new Set((js.match(/getElementById\(\s*["']([^"']+)["']/g) || [])
+      .map((m) => m.match(/["']([^"']+)["']/)?.[1]).filter(Boolean))];
+    const queryClasses = [...new Set((js.match(/querySelector(?:All)?\(\s*["']\.([a-zA-Z][\w-]*)["']/g) || [])
+      .map((m) => m.match(/\.([a-zA-Z][\w-]*)/)?.[1]).filter(Boolean))];
+
+    const missingIds = lookupIds.filter((id) => !htmlIds.has(id));
+    if (missingIds.length) {
+      issues.push({ file: jsFile, issue: `JS getElementById() targets ${missingIds.join(", ")} but no element with that id exists in the HTML — this crashes on load and kills every handler.` });
+    }
+    const missingQueryClasses = queryClasses.filter((c) => !htmlClasses.has(c));
+    if (missingQueryClasses.length) {
+      issues.push({ file: jsFile, issue: `JS querySelector() targets classes .${missingQueryClasses.join(", .")} but no HTML element has them — those features won't work.` });
+    }
+  }
+
+  // 7. CSS classes styled but never used in HTML (e.g. CSS has .grid/.sidebar
+  //    but the HTML has no such element — the styling never applies).
+  if (css && html) {
+    const htmlClasses = new Set((html.match(/class=["']([^"']+)["']/g) || [])
+      .flatMap((m) => m.replace(/^class=["']/, "").replace(/["']$/, "").split(/\s+/)));
+    // Collect class names that have a full CSS rule (selector followed by {).
+    const styled = [...new Set((css.match(/\.([a-zA-Z][\w-]*)\s*\{/g) || [])
+      .map((m) => m.match(/\.([a-zA-Z][\w-]*)/)?.[1]))];
+    const neverUsed = styled.filter((c) => !htmlClasses.has(c) && !/^(btn|row|col|container|active|hidden|show|menu|nav|icon|dark-theme)$/i.test(c));
+    if (neverUsed.length) {
+      issues.push({ file: cssFile, issue: `CSS styles classes .${neverUsed.slice(0, 6).join(", .")} but no HTML element uses them — that styling never applies.` });
+    }
+  }
+
+  // 8. Non-ASCII / corrupted identifiers in JS (e.g. Georgian script function name).
+  if (js) {
+    // Match any non-ASCII run (cjk, cyrillic, georgian, arabic...). Avoid \b
+    // because \b is ASCII-only and fails around non-ASCII letters.
+    const weird = [...new Set((js.match(/[^\u0000-\u007F]+/g) || []).map((s) => s.trim()).filter(Boolean))];
+    if (weird.length) {
+      issues.push({ file: jsFile, issue: `Non-ASCII identifier(s) found: ${weird.slice(0, 4).join(", ")}. This looks like generation corruption — non-English variable/function names.` });
+    }
+  }
+
+  // 9. HTML missing the viewport meta tag (breaks responsive layout on phones).
+  if (htmlFile && html) {
+    if (!/name=["']viewport["']/i.test(html)) {
+      issues.push({ file: htmlFile, issue: "Missing <meta name='viewport'> tag — responsive CSS won't work reliably on phones." });
     }
   }
 

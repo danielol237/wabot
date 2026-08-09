@@ -905,23 +905,49 @@ async function handleAnimeEps(sock, msg, args, ctx) {
 
 async function handleAnimePlay(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  const parts = args.split(/\s+/);
-  if (parts.length < 2) return reply(sock, msg, "Usage: !animedl <animeId> <episodeNum>");
+  if (!args) return reply(sock, msg, "Usage: !animedl <anime name> <episode> — e.g. !animedl solo leveling ep1");
   await react(sock, msg, "⏬");
-  const animeId = parts[0];
-  const episode = parseInt(parts[1]);
-  await reply(sock, msg, `⏬ Downloading episode ${episode} of anime ${animeId}... this can take a bit.`);
+
+  // Extract the episode number from ep1 / episode 1 / #1 / ' episode 1 '
+  const epMatch = args.match(/(?:ep|episode|ep\.)?\s*#?\s*(\d{1,4})\s*$/i);
+  const episode = epMatch ? parseInt(epMatch[1]) : NaN;
+  if (!episode || episode < 1) {
+    return reply(sock, msg, "🤨 Which episode? Try: !animedl solo leveling ep1");
+  }
+
+  // Strip the episode token from the name
+  let name = args.replace(/(?:ep|episode)\s*#?\s*\d{1,4}\s*$/i, "").replace(/\s+$/, "").trim();
+  if (!name) return reply(sock, msg, "🤨 What anime? Try: !animedl solo leveling ep1");
+
+  await reply(sock, msg, `🔎 Looking up "${name}"...`);
   try {
-    const result = await downloadAnimeEpisode(animeId, episode);
+    // Resolve the anime id: try AnimePahe first (works when Jikan is down).
+    let id = null;
+    let results = [];
+    try { results = await searchAnimePahe(name); } catch (_) {}
+    if (!results.length) {
+      try { results = await searchAnime(name); } catch (_) {}
+    }
+    if (!results.length) {
+      try { results = await searchOmniSave(name); } catch (_) {}
+    }
+    if (!results.length) {
+      return reply(sock, msg, `❌ Couldn't find an anime named "${name}". Try a more exact title.`);
+    }
+    id = results[0].id;
+    const shown = results[0].title || name;
+
+    await reply(sock, msg, `⏬ Downloading ep ${episode} of *${shown}*... this can take a bit.`);
+    const result = await downloadAnimeEpisode(id, episode);
     if (!result || !result.success) {
-      return reply(sock, msg, `❌ Download failed: ${result?.error || "unknown error"}`);
+      return reply(sock, msg, `❌ Download failed: ${result?.error || "couldn't resolve a source"}`);
     }
     const fs = require("fs");
     const buffer = fs.readFileSync(result.filePath);
     await sock.sendMessage(ctx.chatId, {
       video: buffer,
       mimetype: "video/mp4",
-      caption: `🎬 Episode ${episode}`,
+      caption: `🎬 ${shown} — Ep ${episode}`,
     }, { quoted: msg });
     try { fs.unlinkSync(result.filePath); } catch (_) {}
   } catch (err) {

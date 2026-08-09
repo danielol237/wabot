@@ -52,6 +52,10 @@ const ROASTS = [
   "Make you calm down before you talk. You no dey hear yourself.",
   "You get mouth but nothing to back am up. Abeg.",
   "Na so you dey carry on? E no fit take you anywhere.",
+  "If you were a coffin, even the grave digger would bury you face down.",
+  "I'd say rest in peace, but you never rested in life.",
+  "Some people bring joy when they leave. You bring peace.",
+  "Your bloodline is one bad decision away from a clean slate.",
 ];
 
 function randomFrom(arr) {

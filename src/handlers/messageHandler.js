@@ -78,6 +78,13 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   if (hasMedia(msg)) {
     const media = await downloadMediaFromMsg(sock, msg);
     if (media) {
+      // Remember image content for future context (media personality).
+      if (media.mimetype?.startsWith("image/")) {
+        try {
+          const { rememberImage } = require("../tools/mediaMemory");
+          rememberImage(senderJid, media.buffer.toString("base64"), media.mimetype, text).catch(() => {});
+        } catch (_) {}
+      }
       const question = text || "Analyze this file.";
       const result = await analyzeFile(media, question);
       return reply(sock, msg, result);
@@ -88,6 +95,11 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   if (hasVoiceNote(msg)) {
     const media = await downloadMediaFromMsg(sock, msg);
     if (media) {
+      // Remember voice content for future context (media personality).
+      try {
+        const { rememberVoice } = require("../tools/mediaMemory");
+        rememberVoice(senderJid, media.buffer, media.mimetype).catch(() => {});
+      } catch (_) {}
       const { voiceConversation } = require("../tools/voice");
       const result = await voiceConversation(media.buffer, senderName, chatId, checkOwner(senderJid));
       

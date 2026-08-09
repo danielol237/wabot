@@ -1738,13 +1738,22 @@ async function handleAIResponse(sock, msg, text, ctx) {
   // Semantic long-term memory: pull relevant memories + learned profile
   const { getRelevantContext, getProfileContext, autoExtractMemory, learnCommunicationStyle } = require("../utils/semanticMemory");
   const semanticContext = getRelevantContext(ctx.senderJid, text) + getProfileContext(ctx.senderJid);
+  // Media memory (images/voice ARIA has seen) — pulled into context for awareness.
+  let mediaContext = "";
+  try {
+    const { recallMedia } = require("../tools/mediaMemory");
+    const mediaMem = recallMedia(ctx.senderJid, text, 3);
+    if (mediaMem.length) {
+      mediaContext = "\n\n[Media I've seen/heard that's relevant:] " + mediaMem.map((m) => `(${m.kind}) ${m.summary}`).join(" | ");
+    }
+  } catch (_) {}
   // World Model: inject the structured entity-relationship context
   const { getWorldContext, extractFromMessage } = require("../utils/worldModel");
   const worldContext = getWorldContext(ctx.senderJid);
   const personalizationContext = "\n\n[Personalization] Learn their name if they give it, match their communication style naturally, and remember important things they share.\n";
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: userContext + ownerContext + moodContext + personaContext + toneContext + semanticContext + worldContext + personalizationContext,
+    userContext: userContext + ownerContext + moodContext + personaContext + toneContext + semanticContext + mediaContext + worldContext + personalizationContext,
     preferences,
     facts,
   });

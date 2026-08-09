@@ -41,6 +41,32 @@ function matchTemplate(request) {
   return tmplMatch(request);
 }
 
+// Ensure the file plan always includes the config/build files a real project
+// needs — the AI planner tends to omit these, which made generated projects
+// incomplete (e.g. a React app with no package.json or vite config). We detect
+// the stack from the request and force-include the essentials.
+function getMandatoryFiles(request, existingPaths) {
+  const lower = (request || "").toLowerCase();
+  const have = (p) => existingPaths.some((e) => e === p || e.endsWith("/" + p));
+  const out = [];
+
+  if (/(react|vite|npm|node|javascript|js|typescript|ts)/.test(lower) || /(react|vite|app|website|dashboard|landing|frontend)/.test(lower)) {
+    if (!have("package.json")) out.push({ path: "package.json", description: "Node project manifest: deps and scripts (required)" });
+    if (!have(".gitignore")) out.push({ path: ".gitignore", description: "Ignore node_modules and build artifacts" });
+    if (/(react|vite)/.test(lower) || /(app|website|dashboard|landing|frontend)/.test(lower)) {
+      if (!have("vite.config.js")) out.push({ path: "vite.config.js", description: "Vite build/dev configuration" });
+      if (!have("index.html")) out.push({ path: "index.html", description: "Entry HTML that mounts the app" });
+    }
+  } else if (/(python|flask|django|fastapi|pip)/.test(lower)) {
+    if (!have("requirements.txt")) out.push({ path: "requirements.txt", description: "Python dependencies" });
+    if (!have("README.md")) out.push({ path: "README.md", description: "Setup and run instructions" });
+  }
+
+  // Every project gets a README with run instructions if none is planned.
+  if (!have("README.md") && out.length) out.push({ path: "README.md", description: "Setup and run instructions" });
+  return out;
+}
+
 // Zip and return the template as a starting point
 async function scaffoldFromTemplate(request, templateKey) {
   const template = PROJECT_TEMPLATES[templateKey];
@@ -252,6 +278,15 @@ async function buildProject(request, senderName, chatId, onProgress, userId = nu
     const planResult = await planProject(request, senderName, userId);
     if (!planResult.success) return planResult;
     files = planResult.files;
+  }
+
+  // Always append the mandatory config/build files the planner tends to omit,
+  // so generated projects are complete and runnable (package.json, configs, etc).
+  const existing = files.map((f) => f.path);
+  const mandatory = getMandatoryFiles(request, existing);
+  if (mandatory.length) {
+    files = [...files, ...mandatory].slice(0, MAX_FILES);
+    if (onProgress) await onProgress(`📦 Ensuring required config files (${mandatory.map((m) => m.path).join(", ")})...`);
   }
 
   const project = createProject(chatId, request, files);

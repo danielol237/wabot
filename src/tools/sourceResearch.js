@@ -127,49 +127,74 @@ function formatBytes(bytes) {
 }
 
 // ── Reddit ─────────────────────────────────────────────────────
-// Reddit's public JSON API (append .json). Returns top matching posts.
+// Reddit blocks datacenter/cloud IPs from its public JSON API (403). The
+// reliable path is OAuth (free app: reddit.com/prefs/apps -> script).
+// Strategy: public JSON -> old.reddit -> OAuth (if keys set).
 async function searchReddit(query, subreddit) {
-  // Optionally scope to a subreddit: "!reddit r/dankmemes cats"
-  let target = subreddit
-    ? `https://www.reddit.com/r/${subreddit.replace(/^r\//i, "")}/search.json`
-    : `https://www.reddit.com/search.json`;
-  const params = { q: query, limit: 8, sort: "relevance", t: "year" };
-
+  const scope = subreddit ? `r/${subreddit.replace(/^r\//i, "")}/` : "";
   const results = [];
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const pushResults = (children) => {
+    for (const c of children) {
+      const d = c?.data || c;
+      if (!d || !d.title) continue;
+      results.push({
+        title: d.title,
+        subreddit: d.subreddit_name_prefixed || `r/${d.subreddit}`,
+        permalink: `https://www.reddit.com${d.permalink}`,
+        score: d.score,
+        comments: d.num_comments,
+        url: d.url,
+        selftext: (d.selftext || "").replace(/\s+/g, " ").slice(0, 150),
+      });
+    }
+  };
+
+  // Strategy 1 & 2: public + old.reddit JSON (may 403 from cloud IPs).
+  for (const host of ["www.reddit.com", "old.reddit.com"]) {
+    if (results.length) break;
     try {
-      const r = await axios.get(target, {
-        params,
+      const r = await axios.get(`https://${host}/${scope}search.json`, {
+        params: { q: query, limit: 8, sort: "relevance", t: "year" },
         headers: {
-          "User-Agent": "ARIA-Bot/1.0 (research command)",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 ARIA-Bot/1.0",
           Accept: "application/json",
+          "Accept-Language": "en-US,en;q=0.9",
         },
         timeout: 15000,
       });
-      const children = r.data?.data?.children || [];
-      for (const c of children) {
-        const d = c?.data;
-        if (!d) continue;
-        results.push({
-          title: d.title,
-          subreddit: d.subreddit_name_prefixed || `r/${d.subreddit}`,
-          permalink: `https://www.reddit.com${d.permalink}`,
-          score: d.score,
-          comments: d.num_comments,
-          url: d.url,
-          selftext: (d.selftext || "").replace(/\s+/g, " ").slice(0, 150),
-        });
-      }
-      if (results.length) break;
-      // Reddit can be finicky; retry once with a fresh request.
-      await new Promise((res) => setTimeout(res, 1500));
+      pushResults(r.data?.data?.children || []);
     } catch (e) {
-      // 403 often means bot-detection; fall back to the .json on old.reddit
-      if (e.response?.status === 403 && attempt === 0) {
-        target = target.replace("www.reddit.com", "old.reddit.com");
-        continue;
+      // keep trying next strategy
+    }
+  }
+
+  // Strategy 3: OAuth API (requires REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET).
+  if (!results.length && process.env.REDDIT_CLIENT_ID && process.env.REDDIT_CLIENT_SECRET) {
+    try {
+      const auth = Buffer.from(`${process.env.REDDIT_CLIENT_ID}:${process.env.REDDIT_CLIENT_SECRET}`).toString("base64");
+      const tok = await axios.post("https://www.reddit.com/api/v1/access_token", "grant_type=client_credentials", {
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "User-Agent": "ARIA-Bot/1.0 (research command)",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        timeout: 15000,
+      });
+      const token = tok.data?.access_token;
+      if (token) {
+        const path = scope ? `r/${scope.replace(/^r\//, "")}` : "";
+        const r = await axios.get(`https://oauth.reddit.com/${path}search`, {
+          params: { q: query, limit: 8, sort: "relevance", t: "year" },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "User-Agent": "ARIA-Bot/1.0 (research command)",
+          },
+          timeout: 15000,
+        });
+        pushResults(r.data?.data?.children || []);
       }
-      return { error: `Reddit: ${e.response?.status || e.message}` };
+    } catch (e) {
+      // fall through
     }
   }
 
@@ -239,7 +264,15 @@ async function research({ source, query, subreddit }) {
       const r = await searchReddit(q, subreddit);
       if (!r.error) return r;
       // Last resort: generic web search scoped to the source domain.
-      return genericFallback(`site:reddit.com ${subreddit ? subreddit + " " : ""}${q}`, "Reddit");
+      const fb = await genericFallback(`site:reddit.com ${subreddit ? subreddit + " " : ""}${q}`, "Reddit");
+      if (fb && !fb.error) return fb;
+      return {
+        error:
+          "Reddit blocks cloud/datacenter IPs (that's why direct search failed). " +
+          "Fix: get a free Reddit API key at reddit.com/prefs/apps (create a 'script' app) and set " +
+          "REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET in your Render env vars. Then I can search Reddit reliably. " +
+          "Until then, try !github or !wikipedia instead.",
+      };
     }
     case "wikipedia": {
       const w = await searchWikipedia(q);

@@ -1,7 +1,6 @@
-// ARIA Home — personal intelligence cockpit
+// ARIA Home — rebuilt from scratch, mobile-first control panel
 // Mounted on /dashboard in index.js
-// A living interface for a persistent intelligence, not a stats grid.
-// Auth: real login + signed cookie session, constant-time compare.
+// Clean, functional, polished. Real auth + session.
 
 const express = require("express");
 const crypto = require("crypto");
@@ -10,7 +9,6 @@ const router = express.Router();
 
 const SESSION_TTL = 12 * 60 * 60 * 1000;
 
-// ── Cookie parsing middleware ──
 router.use((req, res, next) => {
   const raw = req.headers.cookie || "";
   req.cookies = {};
@@ -58,12 +56,12 @@ function checkAuth(req, res, next) {
 }
 
 function loginForm() {
-  return `<div class="login-card">
-    <div class="logo"><span class="orb"></span> ARIA</div>
-    <p class="tagline">personal intelligence cockpit</p>
+  return `<div class="login">
+    <div class="login-logo">◢ ARIA</div>
+    <p>personal intelligence cockpit</p>
     <form method="POST" action="/dashboard/login">
       <input type="password" name="password" placeholder="access key" autofocus required />
-      <button type="submit" class="btn btn-primary btn-block">Enter</button>
+      <button class="btn btn-primary btn-block" type="submit">Enter</button>
     </form>
     ${process.env.DASHBOARD_PASSWORD ? "" : '<p class="hint">Set DASHBOARD_PASSWORD in env</p>'}
   </div>`;
@@ -94,52 +92,33 @@ router.post("/logout", (req, res) => {
 
 function tryLoad(mod) { try { return require(mod); } catch (_) { return null; } }
 
-// Collect live data for the cockpit
 function collectData() {
-  const os = tryLoad("os") || {};
+  const os = require("os");
   const uptime = Math.floor(process.uptime());
   const hrs = Math.floor(uptime / 3600), mins = Math.floor((uptime % 3600) / 60);
   const memMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
-  const heapMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
 
   const botAdmin = tryLoad("./tools/botAdmin");
   const stats = botAdmin ? botAdmin.getStats() : null;
-  const errors = botAdmin ? (botAdmin.getRecentErrors ? botAdmin.getRecentErrors(8) : []) : [];
-
+  const errors = botAdmin ? (botAdmin.getRecentErrors ? botAdmin.getRecentErrors(6) : []) : [];
   const spawn = tryLoad("./tools/pokemonSpawn");
   const spawnStats = spawn ? spawn.getSpawnStats() : null;
-
   const durable = tryLoad("./tools/durableMissions");
-  const missions = durable && durable.getAllMissions ? durable.getAllMissions() : (durable && durable.getMissions ? durable.getMissions("*") : []);
+  const missions = durable && durable.getAllMissions ? durable.getAllMissions() : [];
   const activeMissions = missions.filter((m) => m.status === "running" || m.status === "pending");
-
-  const world = tryLoad("./utils/worldModel");
-  let entities = [], goals = [], relations = [];
-  if (world) {
-    try { const m = world.getUserModel ? world.getUserModel("*") : null; entities = Object.values(m?.entities || {}); relations = m?.relations || []; } catch (_) {}
-    try { goals = world.getActiveGoals ? world.getActiveGoals("*") : []; } catch (_) {}
-  }
-
   const mem = tryLoad("./utils/semanticMemory");
   let memories = [];
   try { const store = mem && mem.getUserStore ? mem.getUserStore("*") : null; memories = store?.memories || []; } catch (_) {}
-
-  // Media memory (images/voice ARIA has seen)
   let mediaMem = [];
   try { const mm = tryLoad("./tools/mediaMemory"); mediaMem = mm && mm.getAllMedia ? mm.getAllMedia("*", 10) : []; } catch (_) {}
-  const mediaStats = { total: mediaMem.length, images: mediaMem.filter((m) => m.kind === "image").length, voices: mediaMem.filter((m) => m.kind === "voice").length };
-
-  // Households
   let households = [];
   try { const hh = tryLoad("./tools/household"); households = hh && hh.listHouseholds ? hh.listHouseholds() : []; } catch (_) {}
-
-  // Mission execution traces
-  const tracedMissions = missions.filter((m) => m.trace && m.trace.length).map((m) => ({ id: m.id, status: m.status, traceCount: m.trace.length, last: m.trace[m.trace.length - 1] }));
-
   const aiKeys = ["OPENROUTER_API_KEY","GROQ_API_KEY","CEREBRAS_API_KEY","GEMINI_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"];
   const keysSet = aiKeys.filter((k) => process.env[k]).length;
+  let trainers = [];
+  try { const pg = tryLoad("./tools/pokemonGame"); trainers = pg?.state?.trainers ? Object.entries(pg.state.trainers) : []; } catch (_) {}
 
-  return { uptime, hrs, mins, memMB, heapMB, os, stats, errors, spawnStats, missions, activeMissions, entities, goals, relations, memories, mediaMem, mediaStats, households, tracedMissions, aiKeys, keysSet };
+  return { os, hrs, mins, memMB, stats, errors, spawnStats, missions, activeMissions, memories, mediaMem, households, keysSet, aiKeys, trainers };
 }
 
 function renderPage(title, content, passwordNeeded = false, isLogin = false) {
@@ -147,379 +126,262 @@ function renderPage(title, content, passwordNeeded = false, isLogin = false) {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>${title} | ARIA</title>
 <style>
 :root{
-  --bg:#05060a; --bg2:#0a0c14; --panel:#0e111c; --panel2:#141827; --panel3:#1a2033;
-  --border:#1e2440; --border2:#2a3355; --text:#e9edf7; --muted:#8b93b8; --faint:#5a6288;
-  --violet:#8b7cf6; --cyan:#22d3ee; --teal:#2dd4bf; --green:#34d399; --amber:#fbbf24;
-  --red:#f87171; --pink:#f472b6; --glow:0 0 24px rgba(139,124,246,.25);
-  --r:16px; --sh:0 10px 40px rgba(0,0,0,.5);
+  --bg:#05070c; --panel:#0d1117; --panel2:#131926; --panel3:#1b2333; --line:#1f2937; --line2:#2b3a52;
+  --text:#e8edf7; --muted:#8b96b0; --faint:#5c6880;
+  --accent:#7c8cff; --cyan:#22d3ee; --green:#34d399; --amber:#fbbf24; --red:#f87171;
 }
-*{margin:0;padding:0;box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{font-family:'Inter','Segoe UI',system-ui,sans-serif;background:
-  radial-gradient(1100px 500px at 85% -10%, rgba(139,124,246,.14), transparent 60%),
-  radial-gradient(900px 500px at -10% 110%, rgba(34,211,238,.10), transparent 55%),
-  var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
-a{color:inherit;text-decoration:none}
-.mono{font-family:ui-monospace,'JetBrains Mono',Consolas,monospace}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.mono{font-family:ui-monospace,Consolas,monospace}
 
-/* ── Layout shell ── */
-.app{display:grid;grid-template-columns:240px 1fr;min-height:100vh}
-.sidebar{background:linear-gradient(180deg,var(--bg2),var(--bg));border-right:1px solid var(--border);padding:22px 16px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;z-index:20}
-.main{padding:26px 30px;max-width:1400px;width:100%}
-@media(max-width:900px){
-  .app{grid-template-columns:1fr}
-  .sidebar{position:fixed;bottom:0;top:auto;width:100%;height:auto;flex-direction:row;justify-content:flex-start;align-items:center;padding:6px 4px;border-top:1px solid var(--border);border-right:none;z-index:100;overflow-x:auto;gap:2px;background:rgba(10,12,20,.96);backdrop-filter:blur(10px);-webkit-overflow-scrolling:touch;scrollbar-width:none}
-  .sidebar::-webkit-scrollbar{display:none}
-  .sidebar .brand,.sidebar .presence-mini,.sidebar .nav-item .count{display:none}
-  .nav-item{flex:0 0 auto;flex-direction:column;gap:2px;padding:6px 12px;min-width:56px;font-size:10px;justify-content:center;align-items:center;border-radius:10px}
-  .nav-item .ico{width:auto;font-size:18px}
-  .main{padding-bottom:64px;padding-left:14px;padding-right:14px}
-}
+/* Header */
+.topbar{position:sticky;top:0;z-index:30;background:rgba(5,7,12,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;align-items:center;justify-content:space-between}
+.topbar .brand{font-size:19px;font-weight:800;letter-spacing:.5px}
+.topbar .brand span{color:var(--accent)}
+.topbar .right{display:flex;align-items:center;gap:10px}
+.pill{background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-size:12px;color:var(--muted)}
+.pill.on{color:var(--green);border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.08)}
+.logout{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
+.logout:hover{color:var(--text)}
 
-/* ── Sidebar ── */
-.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;padding:6px 8px 20px}
-.brand .logo{font-size:24px}
-.side-nav{display:flex;flex-direction:column;gap:4px;flex:1}
-.nav-item{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;color:var(--muted);font-size:14px;font-weight:500;transition:.18s;cursor:pointer;border:1px solid transparent}
-.nav-item:hover{color:var(--text);background:var(--panel2)}
-.nav-item.active{color:#fff;background:linear-gradient(90deg,rgba(139,124,246,.18),rgba(34,211,238,.08));border-color:var(--border2)}
-.nav-item .ico{width:18px;text-align:center}
-.nav-item .count{margin-left:auto;font-size:11px;background:var(--panel3);padding:1px 7px;border-radius:99px;color:var(--cyan)}
-.presence-mini{margin-top:14px;padding:12px;background:var(--panel);border:1px solid var(--border);border-radius:12px}
-.presence-mini .prow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+/* Content */
+.main{max-width:760px;margin:0 auto;padding:18px 18px 90px}
+.page-title{font-size:20px;font-weight:800;margin-bottom:4px}
+.page-sub{color:var(--muted);font-size:13px;margin-bottom:18px}
 
-/* ── Header ── */
-.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;gap:14px;flex-wrap:wrap}
-.topbar h1{font-size:22px;font-weight:800}
-.topbar .sub{color:var(--muted);font-size:13px;margin-top:3px}
-.search{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:9px 14px;display:flex;align-items:center;gap:9px;min-width:220px;color:var(--faint);font-size:13px}
-.search input{background:none;border:none;color:var(--text);outline:none;width:100%;font-size:13px}
-.action-row{display:flex;gap:8px}
+/* Hero */
+.hero{background:linear-gradient(135deg,rgba(124,140,255,.14),rgba(34,211,238,.07));border:1px solid var(--line2);border-radius:16px;padding:18px;margin-bottom:16px}
+.hero .hrow{display:flex;align-items:center;gap:12px}
+.hero .avatar{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--cyan));display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
+.hero h2{font-size:17px;font-weight:800;display:flex;align-items:center;gap:8px}
+.hero .sub{color:var(--muted);font-size:12px;margin-top:2px}
 
-/* ── Cards & grids ── */
-.grid{display:grid;gap:16px}
-.g4{grid-template-columns:repeat(4,1fr)}
-.g3{grid-template-columns:repeat(3,1fr)}
-.g2{grid-template-columns:repeat(2,1fr)}
-.g-hero{grid-template-columns:1.4fr 1fr}
-@media(max-width:1000px){.g4{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr}.g2{grid-template-columns:1fr}.g-hero{grid-template-columns:1fr}}
-@media(max-width:560px){.g4{grid-template-columns:1fr}}
-.card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--border);border-radius:var(--r);padding:18px;transition:.2s;position:relative;overflow:hidden}
-.card:hover{border-color:var(--border2)}
-.card .c-title{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);font-weight:700;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
-.card .c-title .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
-.stat-value{font-size:30px;font-weight:800;letter-spacing:-.5px}
-.stat-label{color:var(--muted);font-size:12px;margin-top:3px}
-.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700}
-.b-green{background:rgba(52,211,153,.14);color:var(--green)}.b-red{background:rgba(248,113,113,.14);color:var(--red)}.b-amber{background:rgba(251,191,36,.14);color:var(--amber)}.b-violet{background:rgba(139,124,246,.16);color:var(--violet)}.b-cyan{background:rgba(34,211,238,.14);color:var(--cyan)}.b-muted{background:var(--panel3);color:var(--muted)}
-.row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);gap:8px}
+/* Stat grid */
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.stat .n{font-size:24px;font-weight:800}
+.stat .l{color:var(--muted);font-size:11px;margin-top:2px}
+
+/* Cards */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.card .h{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:700;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.card .h .badge{font-size:10px;padding:2px 8px;border-radius:99px;background:var(--panel3)}
+.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
 .row:last-child{border:none}
-.row .k{color:var(--muted);font-size:13px}
-.row .v{font-weight:600;font-size:13px;text-align:right}
-
-/* ── Presence hero ── */
-.hero{background:linear-gradient(135deg,rgba(139,124,246,.16),rgba(34,211,238,.08) 50%,rgba(45,212,191,.06)),var(--panel);border:1px solid var(--border2);border-radius:20px;padding:24px;position:relative;overflow:hidden;margin-bottom:16px}
-.hero::before{content:'';position:absolute;top:-60%;right:-20%;width:340px;height:340px;background:radial-gradient(circle,rgba(139,124,246,.25),transparent 70%);filter:blur(30px);animation:float 8s ease-in-out infinite}
-.hero-inner{position:relative;display:flex;gap:22px;align-items:center;flex-wrap:wrap}
-.avatar{width:78px;height:78px;border-radius:22px;background:linear-gradient(135deg,var(--violet),var(--cyan));display:flex;align-items:center;justify-content:center;font-size:36px;box-shadow:var(--glow);position:relative;flex-shrink:0}
-.avatar::after{content:'';position:absolute;inset:-6px;border-radius:26px;border:1px solid rgba(139,124,246,.35);animation:pulse 3s ease-in-out infinite}
-.hero h2{font-size:24px;font-weight:800;display:flex;align-items:center;gap:10px}
-.hero .one-liner{color:var(--muted);font-size:14px;margin-top:6px;max-width:600px}
-.hero .h-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
-@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-16px)}}
-@keyframes pulse{0%,100%{opacity:.6;transform:scale(1)}50%{opacity:1;transform:scale(1.06)}}
-.live-dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 2s infinite;display:inline-block}
-
-/* ── Mission spotlight ── */
-.mission-card{border-left:3px solid var(--violet)}
-.mission-name{font-size:17px;font-weight:800;margin-bottom:6px}
-.mission-desc{color:var(--muted);font-size:13px;line-height:1.5;margin-bottom:14px}
-.progress{height:8px;background:var(--panel3);border-radius:99px;overflow:hidden;margin-bottom:6px}
-.progress-fill{height:100%;background:linear-gradient(90deg,var(--violet),var(--cyan));border-radius:99px;transition:width .6s}
-.progress-label{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
-
-/* ── Timeline / feed ── */
-.feed{display:flex;flex-direction:column;gap:0}
-.feed-item{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
+.row .k{color:var(--muted)}
+.row .v{font-weight:600;text-align:right}
+.feed{display:flex;flex-direction:column}
+.feed-item{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
 .feed-item:last-child{border:none}
-.feed-ico{width:30px;height:30px;border-radius:8px;background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
-.feed-body .t{color:var(--text);font-weight:500}
-.feed-body .s{color:var(--faint);font-size:11px;margin-top:2px}
-.feed-body .m{color:var(--muted);font-size:12px;margin-top:2px;line-height:1.4}
+.feed-ico{width:30px;height:30px;border-radius:8px;background:var(--panel3);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.feed .t{font-weight:600}
+.feed .m{color:var(--muted);font-size:12px}
+.feed .s{color:var(--faint);font-size:10px}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700}
+.b-green{background:rgba(52,211,153,.14);color:var(--green)}
+.b-red{background:rgba(248,113,113,.14);color:var(--red)}
+.b-amber{background:rgba(251,191,36,.14);color:var(--amber)}
+.b-accent{background:rgba(124,140,255,.16);color:var(--accent)}
+.b-muted{background:var(--panel3);color:var(--muted)}
+.empty{text-align:center;padding:20px;color:var(--faint);font-size:12px}
 
-/* ── Buttons ── */
-.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:10px;border:none;cursor:pointer;font-size:13px;font-weight:700;transition:.18s;background:var(--panel2);color:var(--text);border:1px solid var(--border)}
-.btn:hover{transform:translateY(-1px);border-color:var(--border2)}
-.btn-primary{background:linear-gradient(90deg,var(--violet),var(--cyan));color:#0a0a12;border:none}
-.btn-primary:hover{filter:brightness(1.1)}
-.btn-ghost{background:transparent;border:1px solid var(--border2)}
-.btn-sm{padding:6px 11px;font-size:12px}
-.btn-block{width:100%;justify-content:center;margin-top:8px}
+/* Bottom nav */
+.bottomnav{position:fixed;bottom:0;left:0;right:0;z-index:40;background:rgba(10,13,20,.97);border-top:1px solid var(--line);display:flex;overflow-x:auto;padding:4px;backdrop-filter:blur(12px);-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.bottomnav::-webkit-scrollbar{display:none}
+.tab{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:64px;padding:8px 10px;border-radius:10px;color:var(--muted);font-size:10px;cursor:pointer;transition:.15s;border:1px solid transparent}
+.tab .ico{font-size:18px}
+.tab.active{color:var(--text);background:var(--panel2);border-color:var(--line2)}
+.tab.active .ico{color:var(--accent)}
 
-/* ── Logs / mono ── */
-pre.log{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;font-size:12px;overflow:auto;max-height:340px;color:#c6cdf0;line-height:1.5;white-space:pre-wrap;word-break:break-word}
-.err{color:var(--red)}
-.ok{color:var(--green)}
-
-/* ── Tabs inside cards ── */
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
-.chip{padding:5px 11px;border-radius:99px;font-size:12px;cursor:pointer;background:var(--panel2);border:1px solid var(--border);color:var(--muted);transition:.15s}
-.chip.active{background:linear-gradient(90deg,var(--violet),var(--cyan));color:#0a0a12;border:none;font-weight:700}
+/* panes */
 .pane{display:none}
-.pane.show{display:block;animation:fade .3s}
-@keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.pane.show{display:block;animation:fade .25s}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-/* ── Login ── */
-.login-card{max-width:360px;margin:18vh auto 0;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--border2);border-radius:22px;padding:38px 30px;text-align:center;box-shadow:var(--sh)}
-.login-card .logo{font-size:30px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:10px}
-.login-card .orb{width:14px;height:14px;border-radius:50%;background:var(--cyan);box-shadow:0 0 14px var(--cyan);animation:pulse 2s infinite}
-.login-card .tagline{color:var(--muted);font-size:13px;margin:8px 0 24px}
-.login-card input{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:13px 16px;border-radius:11px;font-size:15px;width:100%;outline:none}
-.login-card input:focus{border-color:var(--violet);box-shadow:0 0 0 3px rgba(139,124,246,.15)}
-.error{color:var(--red);margin-top:14px;font-size:13px}
-.hint{color:var(--faint);margin-top:14px;font-size:12px}
-.empty{text-align:center;padding:26px;color:var(--faint);font-size:13px}
+/* login */
+.login{max-width:340px;margin:16vh auto 0;background:var(--panel);border:1px solid var(--line2);border-radius:20px;padding:34px 26px;text-align:center}
+.login-logo{font-size:30px;font-weight:800;color:var(--accent)}
+.login p{color:var(--muted);font-size:13px;margin:8px 0 22px}
+.login input{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);padding:13px;border-radius:10px;font-size:15px;outline:none;margin-bottom:12px}
+.login input:focus{border-color:var(--accent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 18px;border-radius:10px;border:none;font-size:14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}
+.btn-primary{background:linear-gradient(90deg,var(--accent),var(--cyan));color:#0a0a12}
+.btn-block{width:100%}
+.error{color:var(--red);margin-top:12px;font-size:13px}
+.hint{color:var(--faint);margin-top:12px;font-size:11px}
 </style>
 </head>
 <body>
-<div class="app">
-  <aside class="sidebar">
-    <div class="brand"><span class="logo">◢</span> ARIA</div>
-    <nav class="side-nav" id="nav">
-      <a class="nav-item active" data-pane="home"><span class="ico">◉</span> Home</a>
-      <a class="nav-item" data-pane="missions"><span class="ico">◆</span> Missions <span class="count" id="missionCount">0</span></a>
-      <a class="nav-item" data-pane="memory"><span class="ico">🧠</span> Memory</a>
-      <a class="nav-item" data-pane="media"><span class="ico">🖼</span> Media</a>
-      <a class="nav-item" data-pane="household"><span class="ico">🏠</span> Household</a>
-      <a class="nav-item" data-pane="spawns"><span class="ico">⚡</span> Spawns</a>
-      <a class="nav-item" data-pane="trainers"><span class="ico">🎮</span> Trainers</a>
-      <a class="nav-item" data-pane="activity"><span class="ico">≋</span> Activity</a>
-      <a class="nav-item" data-pane="system"><span class="ico">▣</span> System</a>
-      <a class="nav-item" data-pane="admin"><span class="ico">👑</span> Admin</a>
-    </nav>
-    <div class="presence-mini">
-      <div class="prow"><span class="live-dot"></span> <span>online</span></div>
-      <div class="prow" style="margin-top:6px;color:var(--faint)">ARIA · ${process.env.BOT_NAME || "v2"}</div>
-    </div>
-  </aside>
-
-  <main class="main">
-    <div class="topbar">
-      <div><h1 id="pageTitle">ARIA Home</h1><div class="sub" id="pageSub">what's she up to right now</div></div>
-      <div class="action-row">
-        <div class="search"><span>⌕</span><input placeholder="search commands, memory, missions..." /></div>
-        <form method="POST" action="/dashboard/logout"><button class="btn btn-ghost btn-sm">Leave</button></form>
-      </div>
-    </div>
-    ${passwordNeeded ? `<div class="card" style="max-width:420px;margin:0 auto;text-align:center"><h3>🔒 Locked</h3><p style="color:var(--muted);margin:12px 0">Set DASHBOARD_PASSWORD in env.</p></div>` : content}
-  </main>
+<div class="topbar">
+  <div class="brand">◢ <span>ARIA</span></div>
+  <div class="right">
+    <span class="pill on">● online</span>
+    ${!isLogin ? `<form method="POST" action="/dashboard/logout"><button class="logout">Leave</button></form>` : ""}
+  </div>
 </div>
+<main class="main">
+  ${passwordNeeded ? `<div class="card"><div class="empty">Set DASHBOARD_PASSWORD in env to access.</div></div>` : content}
+</main>
+<nav class="bottomnav" id="nav">
+  <div class="tab active" data-pane="home"><span class="ico">◉</span>Home</div>
+  <div class="tab" data-pane="missions"><span class="ico">◆</span>Missions</div>
+  <div class="tab" data-pane="memory"><span class="ico">🧠</span>Memory</div>
+  <div class="tab" data-pane="media"><span class="ico">🖼️</span>Media</div>
+  <div class="tab" data-pane="household"><span class="ico">🏠</span>Home</div>
+  <div class="tab" data-pane="spawns"><span class="ico">⚡</span>Spawns</div>
+  <div class="tab" data-pane="trainers"><span class="ico">🎮</span>Trainers</div>
+  <div class="tab" data-pane="activity"><span class="ico">≋</span>Activity</div>
+  <div class="tab" data-pane="system"><span class="ico">▣</span>System</div>
+  <div class="tab" data-pane="admin"><span class="ico">👑</span>Admin</div>
+</nav>
 <script>
-// Nav switching
-const navs=document.querySelectorAll('.nav-item');
-const titles={home:['ARIA Home','what\'s she up to right now'],missions:['Missions','what ARIA is building and tracking'],memory:['Memory','what ARIA remembers about you'],media:['Media','images & voice ARIA has seen/heard'],household:['Household','shared tasks & members'],spawns:['Spawns','wild pokemon control'],trainers:['Trainers','all the players'],activity:['Activity','timeline of what ARIA did'],system:['System','health and ecosystem'],admin:['Admin','access control']};
+const titles={home:['Home','what\'s she up to'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],admin:['Admin','access']};
+const navs=document.querySelectorAll('.tab');
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
   document.querySelectorAll('.pane').forEach(x=>x.classList.remove('show'));
   const el=document.getElementById('pane-'+p); if(el)el.classList.add('show');
-  const t=titles[p]||['','']; document.getElementById('pageTitle').textContent=t[0]; document.getElementById('pageSub').textContent=t[1];
+  const t=titles[p]||['','']; document.querySelector('.page-title').textContent=t[0]; document.querySelector('.page-sub').textContent=t[1];
 }
 navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
 showPane('home');
-// Live auto-refresh: keep the dashboard current (missions, media, household,
-// activity) without manual reloads.
 setInterval(()=>{ location.reload(); }, 30000);
 </script>
 </body>
 </html>`;
 }
 
-// ── Panes ───────────────────────────────────────────────────
+// ── Routes ───────────────────────────────────────────────────
 
 router.get("/", checkAuth, (req, res) => {
   try {
     const d = collectData();
-    const errBadge = d.errors.length ? `<span class="badge b-red">${d.errors.length} incidents</span>` : `<span class="badge b-green">all clear</span>`;
-    const missionCount = d.missions.length;
-    const activeMission = d.activeMissions[0] || d.missions[0];
+    const active = d.activeMissions[0] || d.missions[0];
+    let content = `
+    <div class="pane show" id="pane-home"><div class="page-title">Home</div><div class="page-sub">what's she up to</div>
 
-    const content = `
-    <!-- HOME -->
-    <section class="pane show" id="pane-home">
-      <div class="hero">
-        <div class="hero-inner">
-          <div class="avatar">◢</div>
-          <div>
-            <h2>ARIA <span class="badge b-green"><span class="live-dot" style="width:6px;height:6px"></span> online</span></h2>
-            <div class="one-liner">I'm monitoring your projects and waiting on ${d.activeMissions.length} active mission${d.activeMissions.length===1?"":"s"}. ${d.errors.length ? "There are ${d.errors.length} things that need your attention." : "Everything's running smooth."}</div>
-          </div>
-          <div class="h-actions">
-            <button class="btn" onclick="showPane('missions')">◆ Missions</button>
-            <button class="btn btn-primary" onclick="showPane('memory')">✎ Memory</button>
-          </div>
-        </div>
+    <div class="hero">
+      <div class="hrow">
+        <div class="avatar">◢</div>
+        <div><h2>ARIA <span class="badge b-green">online</span></h2><div class="sub">${d.activeMissions.length ? "Working on " + d.activeMissions.length + " mission(s)." : "Idle — waiting for you."}</div></div>
       </div>
+    </div></div>
 
-      <div class="grid g4" style="margin-bottom:16px">
-        <div class="card"><div class="c-title"><span><span class="dot" style="background:var(--violet)"></span>Core Health</span> ${d.errors.length?`<span class="badge b-amber">attention</span>`:`<span class="badge b-green">ok</span>`}</div><div class="stat-value">${d.errors.length?"⚠":"✓"}</div><div class="stat-label">${d.errors.length?`${d.errors.length} incident(s)`: "all systems normal"}</div></div>
-        <div class="card"><div class="c-title"><span><span class="dot" style="background:var(--cyan)"></span>Missions</div><div class="stat-value">${missionCount}</div><div class="stat-label">${d.activeMissions.length} active</div></div>
-        <div class="card"><div class="c-title"><span><span class="dot" style="background:var(--green)"></span>Memory</div><div class="stat-value">${d.memories.length}</div><div class="stat-label">remembered facts</div></div>
-        <div class="card"><div class="c-title"><span><span class="dot" style="background:var(--amber)"></span>Uptime</div><div class="stat-value">${d.hrs}h</div><div class="stat-label">${d.mins}m since restart</div></div>
-      </div>
+    <div class="stats">
+      <div class="stat"><div class="n">${d.activeMissions.length}</div><div class="l">active missions</div></div>
+      <div class="stat"><div class="n">${d.missions.length}</div><div class="l">total missions</div></div>
+      <div class="stat"><div class="n">${d.memories.length}</div><div class="l">memories</div></div>
+      <div class="stat"><div class="n">${d.keysSet}/${d.aiKeys.length}</div><div class="l">AI keys</div></div>
+    </div>
 
-      <div class="grid g-hero">
-        <div class="card mission-card">
-          <div class="c-title"><span><span class="dot" style="background:var(--violet)"></span>Mission Spotlight</span> <span class="badge b-violet">spotlight</span></div>
-          ${activeMission ? `
-            <div class="mission-name">${activeMission.objective || activeMission.goal || "Untitled mission"}</div>
-            <div class="mission-desc">${(activeMission.progress || "").slice(0,140) || "No progress recorded yet."}</div>
-            <div class="progress"><div class="progress-fill" style="width:${activeMission.status==='completed'?100:activeMission.status==='running'?55:20}%"></div></div>
-            <div class="progress-label"><span>${activeMission.status||"pending"}</span><span>${activeMission.id||""}</span></div>
-          ` : `<div class="empty">No active missions. Launch one with <b>!delegate</b>.</div>`}
-        </div>
-        <div class="card">
-          <div class="c-title"><span><span class="dot" style="background:var(--amber)"></span>Attention Feed</span> ${errBadge}</div>
-          ${d.errors.length ? d.errors.slice(0,5).map(e=>`
-            <div class="feed-item"><div class="feed-ico">⚠️</div><div class="feed-body"><div class="t err">${(e.message||String(e)).slice(0,60)}</div><div class="s">${e.time?new Date(e.time).toLocaleTimeString():""}</div></div></div>
-          `).join("") : `<div class="empty">Nothing needs you right now.</div>`}
-        </div>
-      </div>
-    </section>
+    <div class="card"><div class="h">Mission Spotlight ${active ? `<span class="badge b-accent">${active.status}</span>` : ""}</div>
+      ${active ? `<div class="row"><span class="k">${active.objective || "Untitled"}</span></div><div class="row"><span class="k">Progress</span><span class="v">${active.progress || "—"}</span></div>${active.trace && active.trace.length ? `<div class="feed" style="margin-top:8px">${active.trace.slice(-3).map(t=>`<div class="feed-item"><div class="feed-ico">🧾</div><div class="feed-body"><div class="m">${t.detail}</div><div class="s">${new Date(t.ts).toLocaleTimeString()}</div></div></div>`).join("")}</div>`:""}` : `<div class="empty">No active mission. Use !delegate or !mission in chat.</div>`}
+    </div>
 
-    <!-- MISSIONS -->
-    <section class="pane" id="pane-missions">
-      <div class="grid g2">
-        ${d.missions.length ? d.missions.slice(0,10).map(m=>`
-          <div class="card mission-card">
-            <div class="c-title"><span><span class="dot" style="background:${m.status==='completed'?'var(--green)':m.status==='running'?'var(--cyan)':'var(--muted)'}"></span>${m.id||"mission"}</span> <span class="badge ${m.status==='completed'?'b-green':m.status==='running'?'b-cyan':'b-muted'}">${m.status||"pending"}</span></div>
-            <div class="mission-name">${m.objective||m.goal||"Untitled"}</div>
-            <div class="mission-desc">${(m.progress||"").slice(0,100)}</div>
-            <div class="progress"><div class="progress-fill" style="width:${m.status==='completed'?100:m.status==='running'?55:20}%"></div></div>
-            ${m.trace && m.trace.length ? `<div class="feed" style="margin-top:10px">${m.trace.slice(-4).map(t=>`<div class="feed-item"><div class="feed-ico">🧾</div><div class="feed-body"><div class="s">${new Date(t.ts).toLocaleTimeString()}</div><div class="m">${t.detail}</div></div></div>`).join("")}</div>`:""}
-          </div>
-        `).join("") : `<div class="card"><div class="empty">No missions yet. Run <b>!delegate &lt;objective&gt;</b> in chat to start one.</div></div>`}
-      </div>
-    </section>
-
-    <!-- MEMORY -->
-    <section class="pane" id="pane-memory">
-      <div class="grid g2">
-        <div class="card"><div class="c-title"><span><span class="dot" style="background:var(--green)"></span>Memories</span></div>
-          ${d.memories.length ? d.memories.slice(-15).reverse().map(m=>`
-            <div class="feed-item"><div class="feed-ico">✎</div><div class="feed-body"><div class="t">${m.text||m.content||"memory"}</div><div class="s">${new Date(m.ts||m.timestamp||Date.now()).toLocaleString()}</div></div></div>
-          `).join("") : `<div class="empty">No memories stored yet.</div>`}
-        </div>
-        <div class="card"><div class="c-title"><span><span class="dot" style="background:var(--violet)"></span>World Model</span></div>
-          <div class="row"><span class="k">Entities</span><span class="v">${d.entities.length}</span></div>
-          <div class="row"><span class="k">Relations</span><span class="v">${d.relations.length}</span></div>
-          <div class="row"><span class="k">Active goals</span><span class="v">${d.goals.length}</span></div>
-          ${d.entities.slice(-8).map(e=>`<div class="feed-item"><div class="feed-ico">◈</div><div class="feed-body"><div class="t">${e.name}</div><div class="s">${e.type||"entity"}</div></div></div>`).join("")}
-        </div>
-      </div>
-    </section>
-
-    <!-- MEDIA MEMORY -->
-    <section class="pane" id="pane-media">
-      <div class="grid g4" style="margin-bottom:16px">
-        <div class="card"><div class="c-title">Media Memories</div><div class="stat-value">${d.mediaStats.total}</div><div class="stat-label">total remembered</div></div>
-        <div class="card"><div class="c-title">Images</div><div class="stat-value">${d.mediaStats.images}</div><div class="stat-label">seen</div></div>
-        <div class="card"><div class="c-title">Voice notes</div><div class="stat-value">${d.mediaStats.voices}</div><div class="stat-label">heard</div></div>
-        <div class="card"><div class="c-title">Retrieval</div><div class="stat-value">auto</div><div class="stat-label">injected into context</div></div>
-      </div>
-      <div class="card"><div class="c-title">Recent Media ARIA Remembers</div>
-        ${d.mediaMem.length ? `<div class="feed">${d.mediaMem.map(m=>`<div class="feed-item"><div class="feed-ico">${m.kind==='image'?'🖼':'🎤'}</div><div class="feed-body"><div class="t">${m.kind}</div><div class="m">${(m.summary||"").slice(0,120)}</div><div class="s">${new Date(m.ts).toLocaleString()}</div></div></div>`).join("")}</div>`:'<div class="empty">No media remembered yet. Send ARIA an image or voice note and she\'ll remember it.</div>'}
-      </div>
-    </section>
-
-    <!-- HOUSEHOLD -->
-    <section class="pane" id="pane-household">
-      <div class="grid g2">
-        ${d.households.length ? d.households.map(h=>`<div class="card"><div class="c-title">🏠 ${h.name}</div>
-          <div class="row"><span class="k">Members</span><span class="v">${h.members.length}</span></div>
-          <div class="row"><span class="k">Shared tasks</span><span class="v">${h.sharedTasks.length}</span></div>
-          <div class="row"><span class="k">Shared notes</span><span class="v">${h.sharedNotes.length}</span></div>
-          ${h.sharedTasks.length?`<div class="feed" style="margin-top:8px">${h.sharedTasks.slice(-5).map(t=>`<div class="feed-item"><div class="feed-ico">${t.done?'✅':'⬜'}</div><div class="feed-body"><div class="m">${t.text}</div></div></div>`).join("")}</div>`:""}
-        </div>`).join("") : `<div class="card"><div class="empty">No households yet. In a group chat: <b>!household create <name></b></div></div>`}
-      </div>
-    </section>
-
-    <!-- SPAWNS -->
-    <section class="pane" id="pane-spawns">
-      <div class="grid g4">
-        <div class="card"><div class="c-title">Status</div><div class="stat-value">${d.spawnStats?.enabled?"Active":"Paused"}</div><div class="stat-label">wild spawn system</div></div>
-        <div class="card"><div class="c-title">Daily Limit</div><div class="stat-value">${d.spawnStats?.dailyLimit||"—"}</div><div class="stat-label">max spawns/day</div></div>
-        <div class="card"><div class="c-title">Used</div><div class="stat-value">${d.spawnStats?.usedToday||0}</div><div class="stat-label">today</div></div>
-        <div class="card"><div class="c-title">Remaining</div><div class="stat-value">${d.spawnStats?.remaining||"—"}</div><div class="stat-label">left today</div></div>
-      </div>
-    </section>
-
-    <!-- TRAINERS -->
-    <section class="pane" id="pane-trainers">
-      ${(() => { try { const t=tryLoad("./tools/pokemonGame"); const ts=t?.state?.trainers?Object.entries(t.state.trainers):[]; return `<div class="card"><div class="c-title">Trainers (${ts.length})</div>${ts.length?`<div class="feed">${ts.slice(0,15).map(([uid,tr])=>`<div class="feed-item"><div class="feed-ico">🎮</div><div class="feed-body"><div class="t">${tr.name||uid}</div><div class="s">Lv ${tr.level||1} · ${(tr.pokedex||[]).length} caught · ${(tr.team||[]).length} in team</div></div></div>`).join("")}</div>`:'<div class="empty">No trainers yet.</div>'}</div>`; } catch(_){ return '<div class="card"><div class="empty">Game offline.</div></div>'; } })()}
-    </section>
-
-    <!-- ACTIVITY -->
-    <section class="pane" id="pane-activity">
-      <div class="card"><div class="c-title">Activity Timeline</div>
-        <div class="feed">
-          ${(() => { try { const el = tryLoad("./utils/eventLog"); const evs = el && el.getEvents ? el.getEvents({}, 20) : []; if (!evs.length) return ""; return evs.map(e=>{ const ico = {mission:"◆",command:"⚡",error:"⚠️",memory:"✎",system:"▣",chat:"💬",alert:"🔔",decision:"🎯"}[e.type]||"•"; const col = e.type==="error"?"err":e.type==="mission"?"ok":""; return `<div class="feed-item"><div class="feed-ico">${ico}</div><div class="feed-body"><div class="t ${col}">${e.summary||""}</div><div class="s">${new Date(e.ts||Date.now()).toLocaleString()}</div></div></div>`; }).join(""); } catch(_){ return ""; } })()}
-          <div class="feed-item"><div class="feed-ico">⚙️</div><div class="feed-body"><div class="t">Bot started</div><div class="s">${new Date(Date.now()-process.uptime()*1000).toLocaleString()}</div></div></div>
-          <div class="feed-item"><div class="feed-ico">💬</div><div class="feed-body"><div class="t">${d.stats?.messages||0} messages processed</div><div class="s">session lifetime</div></div></div>
-          <div class="feed-item"><div class="feed-ico">⚡</div><div class="feed-body"><div class="t">${d.stats?.commands||0} commands executed</div><div class="s">session lifetime</div></div></div>
-          <div class="feed-item"><div class="feed-ico">🔑</div><div class="feed-body"><div class="t">${d.keysSet}/${d.aiKeys.length} AI providers configured</div><div class="s">${d.aiKeys.filter(k=>process.env[k]).join(", ")||"none"}</div></div></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- SYSTEM -->
-    <section class="pane" id="pane-system">
-      <div class="grid g2">
-        <div class="card"><div class="c-title">System</div>
-          <div class="row"><span class="k">Uptime</span><span class="v">${d.hrs}h ${d.mins}m</span></div>
-          <div class="row"><span class="k">Memory (RSS)</span><span class="v">${d.memMB} MB</span></div>
-          <div class="row"><span class="k">Heap</span><span class="v">${d.heapMB} MB</span></div>
-          <div class="row"><span class="k">Node</span><span class="v mono">${process.version}</span></div>
-          <div class="row"><span class="k">Platform</span><span class="v">${d.os.platform?.()||"?"} ${d.os.arch?.()||""}</span></div>
-          <div class="row"><span class="k">CPU cores</span><span class="v">${d.os.cpus?.().length||"?"}</span></div>
-          <div class="row"><span class="k">Load</span><span class="v">${d.os.loadavg?.()[0].toFixed(2)||"?"}</span></div>
-          <div class="row"><span class="k">PID</span><span class="v mono">${process.pid}</span></div>
-        </div>
-        <div class="card"><div class="c-title">Ecosystem</div>
-          ${d.aiKeys.map(k=>`<div class="row"><span class="k mono">${k}</span><span class="badge ${process.env[k]?"b-green":"b-red"}">${process.env[k]?"on":"off"}</span></div>`).join("")}
-          <div class="row"><span class="k">Session persistence</span><span class="badge ${process.env.SESSION_GIT_REPO?"b-green":"b-amber"}">${process.env.SESSION_GIT_REPO?"git-synced":"not set"}</span></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ADMIN -->
-    <section class="pane" id="pane-admin">
-      <div class="grid g2">
-        <div class="card"><div class="c-title">Bot Admins</div>
-          ${(() => { try { const p=tryLoad("./utils/permissions"); const a=p?.listAdmins?p.listAdmins():[]; return a.length?a.map(x=>`<div class="row"><span class="k mono">${x}</span></div>`).join(""):'<div class="empty">No custom admins</div>'; } catch(_){ return '<div class="empty">—</div>'; } })()}
-        </div>
-        <div class="card"><div class="c-title">Access</div>
-          <div class="row"><span class="k">Owner</span><span class="v mono">${process.env.OWNER_NUMBER||"built-in"}</span></div>
-          <div class="row"><span class="k">Dashboard</span><span class="badge b-green">secured</span></div>
-        </div>
-      </div>
-    </section>
+    <div class="card"><div class="h">Attention ${d.errors.length ? `<span class="badge b-red">${d.errors.length}</span>` : `<span class="badge b-green">clear</span>`}</div>
+      ${d.errors.length ? d.errors.slice(0,4).map(e=>`<div class="feed-item"><div class="feed-ico">⚠️</div><div class="feed-body"><div class="t" style="color:var(--red)">${(e.message||String(e)).slice(0,70)}</div><div class="s">${new Date(e.time||Date.now()).toLocaleTimeString()}</div></div></div>`).join("") : `<div class="empty">All clear.</div>`}
+    </div>
+    </div>
     `;
+
+    // Missions pane
+    content += `
+    <div class="pane" id="pane-missions"><div class="page-title">Missions</div><div class="page-sub">what ARIA is building</div>
+      ${d.missions.length ? d.missions.slice(0,12).map(m=>`
+        <div class="card"><div class="h"><span>${m.id||"mission"}</span><span class="badge ${m.status==='completed'?'b-green':m.status==='running'?'b-cyan':m.status==='failed'?'b-red':'b-muted'}">${m.status}</span></div>
+          <div class="row"><span class="k">${m.objective||"Untitled"}</span></div>
+          <div class="row"><span class="k">Progress</span><span class="v">${m.progress||"—"}</span></div>
+        </div>`).join("") : `<div class="card"><div class="empty">No missions yet.</div></div>`}
+    </div>`;
+
+    // Memory pane
+    content += `
+    <div class="pane" id="pane-memory"><div class="page-title">Memory</div><div class="page-sub">what she remembers</div>
+      <div class="card"><div class="h">Long-term memories (${d.memories.length})</div>
+        ${d.memories.length ? d.memories.slice(-12).reverse().map(m=>`<div class="feed-item"><div class="feed-ico">🧠</div><div class="feed-body"><div class="t">${m.text}</div><div class="s">${new Date(m.ts||Date.now()).toLocaleString()}</div></div></div>`).join("") : `<div class="empty">No memories yet.</div>`}
+      </div>
+    </div>`;
+
+    // Media pane
+    content += `
+    <div class="pane" id="pane-media"><div class="page-title">Media</div><div class="page-sub">images & voice</div>
+      <div class="card"><div class="h">Media remembered (${d.mediaMem.length})</div>
+        ${d.mediaMem.length ? d.mediaMem.map(m=>`<div class="feed-item"><div class="feed-ico">${m.kind==='image'?'🖼️':'🎤'}</div><div class="feed-body"><div class="m">${(m.summary||"").slice(0,110)}</div><div class="s">${m.kind} · ${new Date(m.ts).toLocaleString()}</div></div></div>`).join("") : `<div class="empty">Send ARIA an image or voice note.</div>`}
+      </div>
+    </div>`;
+
+    // Household pane
+    content += `
+    <div class="pane" id="pane-household"><div class="page-title">Household</div><div class="page-sub">shared space</div>
+      ${d.households.length ? d.households.map(h=>`<div class="card"><div class="h">🏠 ${h.name}</div>
+        <div class="row"><span class="k">Members</span><span class="v">${h.members.length}</span></div>
+        <div class="row"><span class="k">Tasks</span><span class="v">${h.sharedTasks.length}</span></div>
+        ${h.sharedTasks.length ? h.sharedTasks.slice(-5).map(t=>`<div class="feed-item"><div class="feed-ico">${t.done?'✅':'⬜'}</div><div class="feed-body"><div class="m">${t.text}</div></div></div>`).join("") : ""}
+      </div>`).join("") : `<div class="card"><div class="empty">No households. In a group: !household create</div></div>`}
+    </div>`;
+
+    // Spawns pane
+    content += `
+    <div class="pane" id="pane-spawns"><div class="page-title">Spawns</div><div class="page-sub">wild pokemon</div>
+      <div class="stats">
+        <div class="stat"><div class="n">${d.spawnStats?.enabled?"Active":"Paused"}</div><div class="l">status</div></div>
+        <div class="stat"><div class="n">${d.spawnStats?.remaining||"—"}</div><div class="l">remaining today</div></div>
+        <div class="stat"><div class="n">${d.spawnStats?.usedToday||0}</div><div class="l">used today</div></div>
+        <div class="stat"><div class="n">${d.spawnStats?.dailyLimit||"—"}</div><div class="l">daily limit</div></div>
+      </div>
+    </div>`;
+
+    // Trainers pane
+    content += `
+    <div class="pane" id="pane-trainers"><div class="page-title">Trainers</div><div class="page-sub">players</div>
+      <div class="card"><div class="h">Trainers (${d.trainers.length})</div>
+        ${d.trainers.length ? d.trainers.slice(0,15).map(([uid,t])=>`<div class="feed-item"><div class="feed-ico">🎮</div><div class="feed-body"><div class="t">${t.name||uid}</div><div class="m">Lv ${t.level||1} · ${(t.pokedex||[]).length} caught</div></div></div>`).join("") : `<div class="empty">No trainers yet.</div>`}
+      </div>
+    </div>`;
+
+    // Activity pane
+    content += `
+    <div class="pane" id="pane-activity"><div class="page-title">Activity</div><div class="page-sub">what she did</div>
+      <div class="card"><div class="h">Session</div>
+        <div class="row"><span class="k">Uptime</span><span class="v">${d.hrs}h ${d.mins}m</span></div>
+        <div class="row"><span class="k">Messages</span><span class="v">${d.stats?.messages||0}</span></div>
+        <div class="row"><span class="k">Commands</span><span class="v">${d.stats?.commands||0}</span></div>
+        <div class="row"><span class="k">Started</span><span class="v">${new Date(Date.now()-process.uptime()*1000).toLocaleString()}</span></div>
+      </div>
+    </div>`;
+
+    // System pane
+    content += `
+    <div class="pane" id="pane-system"><div class="page-title">System</div><div class="page-sub">health</div>
+      <div class="card"><div class="h">Runtime</div>
+        <div class="row"><span class="k">Uptime</span><span class="v">${d.hrs}h ${d.mins}m</span></div>
+        <div class="row"><span class="k">Memory</span><span class="v">${d.memMB} MB</span></div>
+        <div class="row"><span class="k">Node</span><span class="v mono">${process.version}</span></div>
+        <div class="row"><span class="k">Platform</span><span class="v">${d.os.platform?.()||"?"} ${d.os.arch?.()||""}</span></div>
+        <div class="row"><span class="k">CPU</span><span class="v">${d.os.cpus?.().length||"?"} cores</span></div>
+      </div>
+      <div class="card"><div class="h">AI Providers</div>
+        ${d.aiKeys.map(k=>`<div class="row"><span class="k mono">${k}</span><span class="badge ${process.env[k]?"b-green":"b-muted"}">${process.env[k]?"on":"off"}</span></div>`).join("")}
+      </div>
+    </div>`;
+
+    // Admin pane
+    content += `
+    <div class="pane" id="pane-admin"><div class="page-title">Admin</div><div class="page-sub">access</div>
+      <div class="card"><div class="h">Access</div>
+        <div class="row"><span class="k">Owner</span><span class="v mono">${process.env.OWNER_NUMBER||"built-in"}</span></div>
+        <div class="row"><span class="k">Dashboard</span><span class="badge b-green">secured</span></div>
+      </div>
+    </div>`;
 
     res.send(renderPage("Home", content));
   } catch (e) {
-    res.send(renderPage("Error", `<div class="card"><h3>❌ Error</h3><pre class="log err">${e.message}</pre></div>`));
+    res.send(renderPage("Error", `<div class="card"><div class="empty">${e.message}</div></div>`));
   }
-});
-
-// /spawns API
-router.post("/spawns/set", checkAuth, (req, res) => {
-  let b=""; req.on("data",c=>b+=c); req.on("end",()=>{
-    try { const {limit}=JSON.parse(b||"{}"); const s=tryLoad("./tools/pokemonSpawn"); if(s&&s.setSpawnLimit&&Number(limit)>0)s.setSpawnLimit(Number(limit)); res.json({ok:true}); } catch(e){ res.json({ok:false,error:e.message}); }
-  });
 });
 
 module.exports = router;

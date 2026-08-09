@@ -1598,12 +1598,27 @@ async function handleMission(sock, msg, args, ctx) {
   const sub = parts[0]?.toLowerCase();
 
   if (sub === "approve") {
-    const r = decideApproval(parts[1], "approve");
+    const r = await decideApproval(parts[1], "approve");
     return reply(sock, msg, r.ok ? "✅ " + r.msg : "❌ " + r.msg);
   }
   if (sub === "reject") {
-    const r = decideApproval(parts[1], "reject");
+    const r = await decideApproval(parts[1], "reject");
     return reply(sock, msg, r.ok ? "✅ " + r.msg : "❌ " + r.msg);
+  }
+  if (sub === "trace") {
+    const m = getMission(parts[1]);
+    if (!m) return reply(sock, msg, "Mission not found.");
+    const trace = m.trace && m.trace.length ? m.trace : [];
+    let out = `🧾 *Mission ${m.id} — execution trace*\n\n`;
+    if (!trace.length) out += "(no trace entries yet)";
+    else {
+      for (const t of trace.slice(-25)) {
+        const time = new Date(t.ts).toLocaleTimeString();
+        const icon = t.type === "step_done" ? "✅" : t.type === "step_retry" ? "🔁" : t.type === "step_start" ? "▶️" : t.type === "plan" ? "📐" : t.type === "complete" ? "🏁" : t.type === "approval" ? "🛑" : "•";
+        out += `${icon} [${time}] ${t.detail}\n`;
+      }
+    }
+    return reply(sock, msg, out);
   }
   if (sub === "status") {
     const m = getMission(parts[1]);

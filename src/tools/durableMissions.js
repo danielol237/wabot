@@ -147,10 +147,21 @@ function createMission(chatId, creator, objective, opts = {}) {
     lease: null,
     needsReview: [],
     resumed: false,
+    trace: [], // execution trace: human-readable narrative of decisions/actions
   };
   missions[id] = mission;
   saveMission(mission).catch((e) => error("Failed to persist new mission:", e.message));
   return id;
+}
+
+// Append an entry to a mission's execution trace (explainable AI narrative).
+function traceMission(id, type, detail) {
+  const m = missions[id];
+  if (!m) return;
+  if (!Array.isArray(m.trace)) m.trace = [];
+  m.trace.push({ type, detail: String(detail || "").slice(0, 500), ts: Date.now() });
+  if (m.trace.length > 100) m.trace = m.trace.slice(-100);
+  saveMission(m);
 }
 
 // ── Executor lease (at-most-one executor per mission) ─────────
@@ -192,6 +203,7 @@ async function runStep(mission, step, index) {
   step.startedAt = Date.now();
   step.intent = { effectId: `${mission.id}#${index}#${step.attempts || 0}`, at: Date.now() };
   step.intentResolved = false;
+  traceMission(mission.id, "step_start", `Starting step ${index + 1}: ${step.type} ${step.arg}`);
   await saveMission(mission); // intent durable BEFORE the effect
 
   let result = "";
@@ -217,12 +229,14 @@ async function runStep(mission, step, index) {
     step.checkpointAt = Date.now();
     mission.currentStepIndex = index;
     mission.progress = `Step ${index + 1}/${mission.steps.length} done: ${step.type}`;
+    traceMission(mission.id, "step_done", `Step ${index + 1} (${step.type}) completed.`);
     await saveMission(mission);
     return result;
   } catch (err) {
     step.intentResolved = true; // the call returned (error), no ambiguity
     step.attempts = (step.attempts || 0) + 1;
     step.lastError = err.message;
+    traceMission(mission.id, "step_retry", `Step ${index + 1} attempt ${step.attempts} failed: ${err.message.slice(0, 200)}`);
     if (step.attempts < 3) {
       step.status = "retry";
       mission.progress = `Step ${index + 1} retry ${step.attempts}/3: ${err.message}`;
@@ -273,6 +287,7 @@ async function executeMission(id, force = false) {
         mission.steps = steps;
         mission.plan = steps.map((s) => s.type + ": " + s.arg).join("\n");
         mission.progress = "Planned " + steps.length + " steps";
+        traceMission(id, "plan", `Planned ${steps.length} steps.`);
         await saveMission(mission);
       }
 
@@ -340,6 +355,7 @@ async function executeMission(id, force = false) {
         mission.status = "completed";
         mission.result = finalResult;
         mission.progress = "Completed";
+        traceMission(id, "complete", "Mission completed successfully.");
         await saveMission(mission);
         notify(mission, "✅ *Mission Complete: " + mission.objective.slice(0, 50) + "...*\n\n" + finalResult.slice(0, 1500) + "\n\n_Full: !mission view " + mission.id + "_");
         // Prune old completed/failed missions to keep the store small (file bloat fix).
@@ -481,5 +497,5 @@ loadAll();
 module.exports = {
   createMission, executeMission, decideApproval, recoverMissions,
   getMission, getMissions, getAllMissions, cancelMission, formatMissionList, setSock,
-  save, saveMission,
+  save, saveMission, traceMission,
 };

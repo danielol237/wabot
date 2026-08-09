@@ -101,7 +101,39 @@ async function orchestrate(chatId, creator, objective) {
     mission.steps[2].status = "running";
     mission.progress = "Building output...";
     saveMission(mission);
-    const built = await runRole("builder", mission, context, "Produce the final deliverable based on the plan and research.");
+
+    // If the objective is a code/build task, use the app builder so real files are
+    // written, verified, zipped and uploaded — not just an AI-written plan.
+    const isBuildTask = /(build|create|make|write|develop|app|website|calculator|todo|game|script|bot|api|dashboard|landing|project)/i.test(objective);
+    let built = "";
+    let buildLink = "";
+    if (isBuildTask) {
+      try {
+        notify(mission, "👨‍💻 *Builder:* Writing real files, verifying, and packaging the project...");
+        const { buildProject, continueProject } = require("./appBuilder");
+        let buildResult = await buildProject(objective, "ARIA", mission.chatId, async (msg) => notify(mission, msg));
+        // If the build paused (more files than one batch), auto-continue until done.
+        let guard = 0;
+        while (buildResult && buildResult.paused && guard < 6) {
+          notify(mission, "⏩ Continuing the build...");
+          buildResult = await continueProject(mission.chatId, "ARIA", async (msg) => notify(mission, msg));
+          guard++;
+        }
+        if (buildResult && buildResult.success && buildResult.downloadUrl) {
+          built = "Built and packaged the project. Download: " + buildResult.downloadUrl;
+          buildLink = buildResult.downloadUrl;
+          mission.steps[2].result = { built: true, downloadUrl: buildResult.downloadUrl, detail: buildResult.message || "" };
+          mission.buildLink = buildResult.downloadUrl;
+        } else {
+          built = "[BUILDER] " + (buildResult?.error || "Build did not complete (may need !continue).");
+        }
+      } catch (err) {
+        error("Mission build failed:", err.message);
+        built = "[BUILDER] " + err.message;
+      }
+    } else {
+      built = await runRole("builder", mission, context, "Produce the final deliverable based on the plan and research.");
+    }
     mission.steps[2].status = "completed";
     mission.steps[2].result = built;
     mission.progress = "Built — verifying...";
@@ -133,7 +165,8 @@ async function orchestrate(chatId, creator, objective) {
     mission.progress = "Completed";
     saveMission(mission);
 
-    notify(mission, "✅ *Mission Complete* " + missionId + "\n\n" + finalResult.slice(0, 1800) + "\n\n_Details: !mission status " + missionId + "_");
+    const downloadNote = buildLink ? `\n\n📦 *Download the finished project:* ${buildLink}` : "";
+    notify(mission, "✅ *Mission Complete* " + missionId + "\n\n" + finalResult.slice(0, 1400) + downloadNote + "\n\n_Details: !mission status " + missionId + "_");
     return missionId;
   } catch (err) {
     mission.status = "failed";

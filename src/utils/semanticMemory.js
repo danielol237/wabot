@@ -32,6 +32,11 @@ function getUserStore(userId) {
   return db[userId];
 }
 
+// Expose the raw store map so the memory curator can run a global pass over it.
+function getAllStores() {
+  return db;
+}
+
 // ── Core: store a memory with keyword extraction ───────────────
 const STOPWORDS = new Set([
   "the","a","an","is","are","was","were","and","or","but","i","you","he","she","it",
@@ -191,5 +196,5 @@ function learnCommunicationStyle(userId, userName, text) {
 module.exports = {
   addMemory, retrieveMemories, getRelevantContext,
   autoExtractMemory, getProfile, setProfileField,
-  getProfileContext, learnCommunicationStyle, getUserStore,
+  getProfileContext, learnCommunicationStyle, getUserStore, getAllStores, save,
 };

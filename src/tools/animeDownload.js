@@ -282,10 +282,98 @@ async function search(query) {
   return { jikan, omniscrape };
 }
 
+// ── AnimePahe episode stream resolution ──────────────────────────
+// AnimePahe serves episodes behind a session + server-embed flow:
+//   /anime/{id}            -> find session id
+//   /play/{id}/{session}   -> find the target episode's md5_id
+//   /anime/get-servers/{md5} -> list server embed URLs
+//   embed URL              -> find data-id
+//   {base}stream/getSources?id= -> get m3u8 HLS URL
+// Then yt-dlp downloads the m3u8.
+const PAHE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+async function animepaheGetEpisodeMd5(animeId, episodeNum) {
+  const page = await axios.get(`https://animepahetv.to/anime/${animeId}`, {
+    timeout: 15000, headers: { "User-Agent": PAHE_UA, Accept: "text/html" },
+  }).then((r) => r.data);
+  // Find session id from a /play/{animeId}/{session} link
+  const sessionM = page.match(new RegExp(`/play/${animeId}/([a-f0-9]{32})`));
+  const session = sessionM ? sessionM[1] : "";
+  if (!session) return { error: "no session" };
+
+  const play = await axios.get(`https://animepahetv.to/play/${animeId}/${session}`, {
+    timeout: 15000, headers: { "User-Agent": PAHE_UA, Accept: "text/html" },
+  }).then((r) => r.data);
+
+  // Parse allEpisodes JSON
+  const epStart = play.indexOf("allEpisodes:");
+  if (epStart < 0) return { error: "no episodes" };
+  const start = epStart + "allEpisodes:".length;
+  let depth = 0, end = start;
+  for (let i = start; i < play.length; i++) {
+    if (play[i] === "[") depth++;
+    else if (play[i] === "]") { depth--; if (depth === 0) { end = i + 1; break; } }
+  }
+  let episodes = [];
+  try { episodes = JSON.parse(play.slice(start, end)); } catch (_) {}
+  if (!Array.isArray(episodes)) return { error: "no episode list" };
+
+  const target = episodes.find((e) => Number(e.chapter_number) === Number(episodeNum)) || episodes[episodeNum - 1];
+  if (!target || !target.md5_id) return { error: `no md5 for ep ${episodeNum}` };
+  return { md5: target.md5_id, title: target.title || "" };
+}
+
+async function animepaheGetStreamUrl(animeId, episodeNum) {
+  const md5Res = await animepaheGetEpisodeMd5(animeId, episodeNum);
+  if (md5Res.error) return { error: md5Res.error };
+
+  const servers = await axios.get(`https://animepahetv.to/anime/get-servers/${md5Res.md5}`, {
+    timeout: 15000, headers: { "User-Agent": PAHE_UA, "X-Requested-With": "XMLHttpRequest" },
+  }).then((r) => r.data).catch(() => null);
+  if (!servers || servers.status !== "success" || !servers.servers?.length) {
+    return { error: "no servers for episode" };
+  }
+
+  // Pick the best-quality server
+  const server = servers.servers.sort((a, b) => (parseInt(b.resolution) || 0) - (parseInt(a.resolution) || 0))[0];
+  const embedUrl = server.url;
+  if (!embedUrl) return { error: "no embed url" };
+
+  const embedHtml = await axios.get(embedUrl, {
+    timeout: 10000, headers: { "User-Agent": PAHE_UA },
+  }).then((r) => r.data).catch(() => "");
+  const dataIdM = embedHtml.match(/data-id="(\d+)"/);
+  if (!dataIdM) return { error: "no data-id in embed" };
+  const dataId = dataIdM[1];
+
+  const embedBase = embedUrl.split("/").slice(0, 3).join("/") + "/";
+  const bases = ["https://vidwish.live/", embedBase];
+  for (const base of bases) {
+    try {
+      const src = await axios.get(`${base}stream/getSources?id=${dataId}`, {
+        timeout: 10000, headers: { "User-Agent": "Mozilla/5.0", Referer: `${base}stream/s-2/${dataId}/sub` },
+      });
+      const m3u8 = src.data?.sources?.file || src.data?.sources?.[0]?.file;
+      if (m3u8) return { m3u8, title: md5Res.title };
+    } catch (_) {}
+  }
+  return { error: "couldn't resolve m3u8" };
+}
+
 // Download a single anime episode to a video file.
 // Uses OmniSave to resolve the direct stream URL, then yt-dlp to fetch it.
 // Returns { success, filePath, size } or { success:false, error }.
 async function downloadAnimeEpisode(subjectId, episode, detailPath = "") {
+  // If the id looks like an AnimePahe MD5 (32 hex chars), resolve via AnimePahe.
+  if (/^[a-f0-9]{32}$/i.test(String(subjectId))) {
+    const pahe = await animepaheGetStreamUrl(subjectId, episode);
+    if (pahe.m3u8) {
+      const dl = await downloadVideo(pahe.m3u8);
+      if (dl.success) return dl;
+    }
+    return { success: false, error: pahe.error || "AnimePahe resolve failed" };
+  }
+
   // If we have a subjectId from an OmniSave search, resolve a download URL.
   try {
     const omni = await searchOmniSaveById(subjectId);

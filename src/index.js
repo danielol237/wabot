@@ -173,6 +173,29 @@ async function startBot() {
         error("Autonomous init error:", e.message);
       }
 
+      // Start proactive monitoring (errors, stalled missions, provider status)
+      try {
+        const { startMonitor } = require("./tools/proactiveMonitor");
+        const holder = require("./tools/missionSock");
+        holder.setSock(sock);
+        startMonitor(holder);
+      } catch (e) {
+        error("Proactive monitor init error:", e.message);
+      }
+
+      // Start periodic memory curation (keeps long-term memory clean)
+      try {
+        const { startCurator } = require("./tools/memoryCurator");
+        startCurator();
+      } catch (e) {
+        error("Memory curator init error:", e.message);
+      }
+
+      // Log the connection as an event
+      try {
+        require("./utils/eventLog").track("system", "ARIA came online");
+      } catch (_) {}
+
       // Request pairing code once the connection is open and if not yet registered
       if (USE_PAIRING_CODE && !sock.authState.creds.registered && !pairingCodeRequested) {
         pairingCodeRequested = true;

@@ -66,6 +66,7 @@ async function orchestrate(chatId, creator, objective) {
   ];
   saveMission(mission);
   notify(mission, "🎯 *Mission started:* " + objective.slice(0, 80) + "\nID: `" + missionId + "`");
+  try { require("../utils/eventLog").track("mission", "Started mission: " + objective.slice(0, 80), { id: missionId }); } catch (_) {}
 
   try {
     // 1. PLAN
@@ -167,6 +168,7 @@ async function orchestrate(chatId, creator, objective) {
 
     const downloadNote = buildLink ? `\n\n📦 *Download the finished project:* ${buildLink}` : "";
     notify(mission, "✅ *Mission Complete* " + missionId + "\n\n" + finalResult.slice(0, 1400) + downloadNote + "\n\n_Details: !mission status " + missionId + "_");
+    try { require("../utils/eventLog").track("mission", "Completed mission: " + objective.slice(0, 80), { id: missionId }); } catch (_) {}
     return missionId;
   } catch (err) {
     mission.status = "failed";
@@ -174,6 +176,7 @@ async function orchestrate(chatId, creator, objective) {
     mission.progress = "Failed";
     saveMission(mission);
     notify(mission, "❌ *Mission Failed* " + missionId + "\n" + err.message);
+    try { require("../utils/eventLog").track("error", "Mission failed: " + err.message.slice(0, 80), { id: missionId }); } catch (_) {}
     return missionId;
   }
 }

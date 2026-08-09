@@ -415,6 +415,7 @@ router.get("/", checkAuth, (req, res) => {
     <section class="pane" id="pane-activity">
       <div class="card"><div class="c-title">Activity Timeline</div>
         <div class="feed">
+          ${(() => { try { const el = tryLoad("./utils/eventLog"); const evs = el && el.getEvents ? el.getEvents({}, 20) : []; if (!evs.length) return ""; return evs.map(e=>{ const ico = {mission:"◆",command:"⚡",error:"⚠️",memory:"✎",system:"▣",chat:"💬",alert:"🔔",decision:"🎯"}[e.type]||"•"; const col = e.type==="error"?"err":e.type==="mission"?"ok":""; return `<div class="feed-item"><div class="feed-ico">${ico}</div><div class="feed-body"><div class="t ${col}">${e.summary||""}</div><div class="s">${new Date(e.ts||Date.now()).toLocaleString()}</div></div></div>`; }).join(""); } catch(_){ return ""; } })()}
           <div class="feed-item"><div class="feed-ico">⚙️</div><div class="feed-body"><div class="t">Bot started</div><div class="s">${new Date(Date.now()-process.uptime()*1000).toLocaleString()}</div></div></div>
           <div class="feed-item"><div class="feed-ico">💬</div><div class="feed-body"><div class="t">${d.stats?.messages||0} messages processed</div><div class="s">session lifetime</div></div></div>
           <div class="feed-item"><div class="feed-ico">⚡</div><div class="feed-body"><div class="t">${d.stats?.commands||0} commands executed</div><div class="s">session lifetime</div></div></div>

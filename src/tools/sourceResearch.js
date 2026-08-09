@@ -48,6 +48,7 @@ async function searchGitHub(query) {
     source: "GitHub",
     title: `🔍 *GitHub: "${query}"*`,
     body: lines.join("\n"),
+    repos, // raw repo objects for programmatic use (releases fallback)
   };
 }
 
@@ -99,7 +100,11 @@ async function gitHubReleases(query) {
       // If single candidate failed and it wasn't owner/repo, try GitHub repo search.
       if (!q.includes("/") && candidates.length === 1) {
         const search = await searchGitHub(q);
-        if (search.repos) {
+        if (search && !search.error && search.repos) {
+          const top = search.repos[0];
+          if (top) {
+            return await gitHubReleases(top.full_name);
+          }
           return {
             source: "GitHub",
             title: `❓ Couldn't resolve "${q}" to a repo. Try "owner/repo".\n\nClosest repos:`,

@@ -777,7 +777,15 @@ async function handleLyrics(sock, msg, args, ctx) {
   if (!args) return reply(sock, msg, "Usage: !lyrics <song name>");
   await react(sock, msg, "🎵");
   const result = await getLyrics(args);
-  await reply(sock, msg, result);
+  if (!result) return reply(sock, msg, "❌ Couldn't fetch lyrics.");
+  if (result.success === false) return reply(sock, msg, `❌ ${result.error || "Lyrics not found."}`);
+  // Truncate very long lyrics so WhatsApp doesn't drop the message
+  const maxLen = 4000;
+  let text = `🎵 *${result.title}*`;
+  if (result.artist) text += ` — ${result.artist}`;
+  text += `\n\n${result.lyrics}`;
+  if (text.length > maxLen) text = text.slice(0, maxLen) + "\n\n_(truncated)_";
+  await reply(sock, msg, text);
 }
 
 async function handleTTS(sock, msg, args, ctx) {
@@ -845,7 +853,14 @@ async function handleAnimeSearch(sock, msg, args, ctx) {
   if (!args) return reply(sock, msg, "Usage: !anime <name>");
   await react(sock, msg, "🔎");
   const result = await searchAnime(args);
-  await reply(sock, msg, result);
+  if (!Array.isArray(result) || result.length === 0) {
+    return reply(sock, msg, "❌ No anime found for that search.");
+  }
+  const text = result
+    .slice(0, 8)
+    .map((a) => `*${a.title}*\n  ID: ${a.id} · ${a.type || "?"} · ${a.episodes || "?"} eps · ⭐${a.score || "?"}\n  ${a.synopsis || ""}`)
+    .join("\n\n");
+  await reply(sock, msg, `🎬 *Anime Search: "${args}"*\n\n${text}\n\n_Use !animeinfo <id> for details._`);
 }
 
 async function handleAnimeInfo(sock, msg, args, ctx) {
@@ -853,7 +868,11 @@ async function handleAnimeInfo(sock, msg, args, ctx) {
   if (!args) return reply(sock, msg, "Usage: !animeinfo <id or name>");
   await react(sock, msg, "📺");
   const result = await getAnimeDetails(args);
-  await reply(sock, msg, result);
+  if (!result || typeof result !== "object" || result.success === false) {
+    return reply(sock, msg, "❌ Couldn't fetch anime details.");
+  }
+  const t = `*${result.title}* (${result.titleEnglish || result.title})\n📺 ${result.type} · ${result.episodes || "?"} eps · ⭐${result.score || "?"}\n📊 Status: ${result.status}\n📅 Year: ${result.year || "?"}\n\n${result.synopsis || ""}\n\n🔗 ${result.url || ""}`;
+  await reply(sock, msg, t);
 }
 
 async function handleAnimeEps(sock, msg, args, ctx) {

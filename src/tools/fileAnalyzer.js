@@ -6,14 +6,18 @@ const { getAIResponse } = require("./ai");
 const TEMP_DIR = path.join(__dirname, "../../temp");
 
 async function analyzeFile(media, question) {
+  if (!media || !media.data) return "❌ No file data received.";
   const { mimetype, data, filename } = media;
-  const ext = (filename?.split(".").pop() || mimetype.split("/")[1] || "bin").toLowerCase();
+  const mime = mimetype || "";
+  const ext = (filename?.split(".").pop() || mime.split("/")[1] || "bin").toLowerCase();
   const id = uuidv4();
   const filePath = path.join(TEMP_DIR, `${id}.${ext}`);
 
   try {
-    // Write file to disk
-    fs.writeFileSync(filePath, Buffer.from(data, "base64"));
+    // Write file to disk. `data` may be a Buffer already (from baileys download)
+    // or a base64 string — handle both so we never corrupt a raw Buffer.
+    const buffer = Buffer.isBuffer(data) ? data : Buffer.from(String(data), "base64");
+    fs.writeFileSync(filePath, buffer);
 
     let content = "";
 
@@ -43,9 +47,9 @@ async function analyzeFile(media, question) {
     }
 
     // Image — use vision model to actually see and describe it
-    else if (mimetype.startsWith("image/")) {
+    else if (mime.startsWith("image/")) {
       const { analyzeImage } = require("./visionAI");
-      const result = await analyzeImage(data, mimetype, question);
+      const result = await analyzeImage(buffer.toString("base64"), mime, question);
       return result;
     }
 

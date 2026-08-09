@@ -4,7 +4,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
+const { execFile } = require("child_process");
 const { getAIResponse } = require("./ai");
 
 const SRC_DIR = path.join(__dirname, "..");
@@ -96,9 +96,10 @@ async function applyFix(filePath, findStr, replaceStr) {
     content = content.replace(findStr, replaceStr);
     fs.writeFileSync(fullPath, content);
 
-    // Verify syntax
+    // Verify syntax — use execFile (args array) so the path is never interpreted
+    // by a shell. This prevents command injection via a crafted filePath.
     return new Promise((resolve) => {
-      exec(`node --check "${fullPath}"`, (err) => {
+      execFile("node", ["--check", fullPath], (err) => {
         if (err) {
           // Rollback
           if (fs.existsSync(backup)) fs.copyFileSync(backup, fullPath);

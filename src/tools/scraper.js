@@ -1,7 +1,11 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
+const { isSafeUrl } = require("./webBrowser");
 
 async function scrapeUrl(url) {
+  if (!(await isSafeUrl(url))) {
+    return "❌ Blocked: only public http(s) URLs are allowed.";
+  }
   if (!url.startsWith("http")) url = "https://" + url;
 
   // Stage 1: Fast axios fetch

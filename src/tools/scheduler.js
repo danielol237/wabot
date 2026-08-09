@@ -124,15 +124,20 @@ function scheduleMessage(chatId, message, timeStr, creator) {
     const target = new Date(now.getFullYear(), parsed.at.month - 1, parsed.at.day, parsed.at.hour, parsed.at.min, 0);
     if (target <= now) target.setFullYear(target.getFullYear() + 1);
 
-    const msUntil = target.getTime() - now.getTime();
-    const timeout = setTimeout(async () => {
-      try {
-        if (sockRef) await sockRef.sendMessage(chatId, { text: `⏰ ${message}` });
-      } catch (err) { console.error("Scheduled message error:", err.message); }
+    // setTimeout caps at ~24.8 days (2^31-1 ms). For longer waits, re-arm in
+    // chunks so far-future schedules actually fire instead of firing instantly.
+    const MAX_TIMEOUT = 2147483647;
+    const fire = async () => {
+      try { if (sockRef) await sockRef.sendMessage(chatId, { text: `⏰ ${message}` }); }
+      catch (err) { console.error("Scheduled message error:", err.message); }
       scheduled.delete(id);
-    }, msUntil);
-
-    task = { timeout, date: target };
+      save();
+    };
+    const armTimer = (delay) => setTimeout(() => {
+      if (delay > MAX_TIMEOUT) { task.timeout = armTimer(delay - MAX_TIMEOUT); }
+      else fire();
+    }, Math.min(delay, MAX_TIMEOUT));
+    task = { timeout: armTimer(target.getTime() - now.getTime()), date: target };
   } else if (parsed.type === "interval") {
     const interval = setInterval(async () => {
       try {
@@ -195,14 +200,19 @@ function rearmAll() {
       const now = new Date();
       const target = new Date(now.getFullYear(), parsed.at.month - 1, parsed.at.day, parsed.at.hour, parsed.at.min, 0);
       if (target <= now) continue; // already passed — drop it
+      const MAX_TIMEOUT = 2147483647;
       const msUntil = target.getTime() - now.getTime();
-      const timeout = setTimeout(async () => {
+      const fire = async () => {
         try { if (sockRef) await sockRef.sendMessage(chatId, { text: `⏰ ${message}` }); }
         catch (err) { console.error("Scheduled message error:", err.message); }
         scheduled.delete(item.id);
         save();
-      }, msUntil);
-      task = { timeout, date: target };
+      };
+      const armTimer = (delay) => setTimeout(() => {
+        if (delay > MAX_TIMEOUT) { item.task.timeout = armTimer(delay - MAX_TIMEOUT); }
+        else fire();
+      }, Math.min(delay, MAX_TIMEOUT));
+      task = { timeout: armTimer(msUntil), date: target };
     }
 
     item.task = task;

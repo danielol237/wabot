@@ -857,11 +857,16 @@ async function handleRecurring(sock, msg, args, ctx) {
   await react(sock, msg, "🔄");
   const parts = args.split("\n");
   const cmd = parts[0]?.trim().toLowerCase();
-  if (cmd === "list") return reply(sock, msg, listRecurringReminders(ctx.chatId));
+  if (cmd === "list") {
+    const list = listRecurringReminders(ctx.chatId);
+    if (!list.length) return reply(sock, msg, "No recurring reminders in this chat. Set one with !recurring every day at 8am remind me to...");
+    return reply(sock, msg, "🔁 *Recurring reminders:*\n" + list.map((r) => `• ${r.label} — \"${r.message}\" _(id: \`${r.id}\`)_`).join("\n"));
+  }
   if (cmd?.startsWith("cancel")) {
     const id = parts[0]?.split(/\s+/)[1];
-    if (id) cancelRecurringReminder(ctx.chatId, id);
-    return reply(sock, msg, "✅ Reminder cancelled.");
+    if (!id) return reply(sock, msg, "Usage: !recurring cancel <id>");
+    const ok = cancelRecurringReminder(id);
+    return reply(sock, msg, ok ? "✅ Recurring reminder cancelled." : "❌ Couldn't find a reminder with that id. Use !recurring list to see ids.");
   }
   const result = await setRecurringReminder(sock, ctx.chatId, args);
   await reply(sock, msg, result);

@@ -5,9 +5,48 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 const { URL } = require("url");
+const net = require("net");
+
+// Block SSRF: reject non-http(s) schemes and any host that resolves to a
+// private/internal/loopback/link-local address (AWS metadata, internal services).
+async function isSafeUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    if (!/^https?:$/.test(u.protocol)) return false;
+    const host = u.hostname;
+    if (host === "localhost") return false;
+    if (net.isIP(host)) {
+      return !(isPrivate(host));
+    }
+    // resolve DNS and check all resolved addresses
+    const addresses = await new Promise((resolve) => {
+      try { require("dns").lookup(host, { all: true }, (err, addrs) => resolve(err ? [] : (addrs || []).map((a) => a.address))); }
+      catch (_) { resolve([]); }
+    });
+    if (addresses.length === 0) return true; // allow if we can't resolve (browse will error anyway)
+    return addresses.every((a) => !isPrivate(a));
+  } catch (_) {
+    return false;
+  }
+}
+
+function isPrivate(ip) {
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4) return true; // IPv6 => block by default (conservative)
+  if (p[0] === 10) return true;                    // 10.0.0.0/8
+  if (p[0] === 127) return true;                   // loopback
+  if (p[0] === 169 && p[1] === 254) return true;   // link-local / AWS metadata
+  if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true; // 172.16/12
+  if (p[0] === 192 && p[1] === 168) return true;   // 192.168/16
+  if (p[0] === 0) return true;
+  return false;
+}
 
 // Browse a URL and extract readable content
 async function browse(url) {
+  if (!(await isSafeUrl(url))) {
+    return { success: false, error: "Blocked: only public http(s) URLs are allowed." };
+  }
   try {
     const res = await axios.get(url, {
       timeout: 15000,
@@ -174,4 +213,4 @@ async function searchAndBrowse(query) {
   return search;
 }
 
-module.exports = { browse, searchWeb, searchAndBrowse };
+module.exports = { browse, searchWeb, searchAndBrowse, isSafeUrl };

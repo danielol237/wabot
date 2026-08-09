@@ -443,7 +443,9 @@ async function battleAction(battleId, uid, action, data) {
   const isU1 = uid === b.uid1;
   const t1 = getTrainer(b.uid1), t2 = getTrainer(b.uid2);
   const att = isU1 ? t1.team[b.active1] : t2.team[b.active2];
-  const def = isU1 ? t2.team[b.active2] : t2.team[b.active1];
+  // Defender is always the OTHER trainer's active Pokémon. (Bug fix: player 2
+  // was reading their own team[active1] instead of player 1's active.)
+  const def = isU1 ? t2.team[b.active2] : t1.team[b.active1];
   if (!att || !def) return { error: "Missing Pokémon." };
 
   await recalc(att); await recalc(def);
@@ -702,12 +704,16 @@ function createTrade(uid1, uid2, monIdx1, monIdx2) {
 function acceptTrade(tradeId, uid) {
   const tr = state.trades[tradeId];
   if (!tr) return { error: "Trade not found." };
+  // Security fix: only the two participants may accept/complete a trade.
+  if (uid !== tr.uid1 && uid !== tr.uid2) return { error: "You're not part of this trade." };
   if (tr.accepted) return { error: "Trade already completed." };
   const t1 = getTrainer(tr.uid1), t2 = getTrainer(tr.uid2);
+  if (!t1.team[tr.mon1] || !t2.team[tr.mon2]) return { error: "A Pokémon in this trade is no longer available." };
   const m1 = t1.team.splice(tr.mon1, 1)[0];
   const m2 = t2.team.splice(tr.mon2, 1)[0];
   t1.team.push(m2);
   t2.team.push(m1);
+  tr.accepted = true;
   delete state.trades[tradeId];
   save();
   return { success: true };

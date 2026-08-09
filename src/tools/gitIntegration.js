@@ -5,7 +5,7 @@
 // !github pr — create PR
 
 const axios = require("axios");
-const { exec } = require("child_process");
+const { execFile } = require("child_process");
 const path = require("path");
 
 const BASE = "https://api.github.com";
@@ -70,9 +70,12 @@ async function listCommits(owner, repoName, perPage = 5) {
 // Run git commands locally
 function runGit(args) {
   return new Promise((resolve) => {
-    exec(`cd "${GIT_DIR}" && git ${args} 2>&1`, { timeout: 15000 }, (err, stdout) => {
-      if (err) resolve({ error: err.message, output: stdout });
-      else resolve({ output: stdout.trim() });
+    const argArray = Array.isArray(args) ? args : String(args).split(" ");
+    // execFile with an args array + cwd => no shell, so no command injection.
+    execFile("git", argArray, { cwd: GIT_DIR, timeout: 15000 }, (err, stdout, stderr) => {
+      const output = (stdout || "") + (stderr || "");
+      if (err) resolve({ error: err.message, output: output.trim() });
+      else resolve({ output: output.trim() });
     });
   });
 }

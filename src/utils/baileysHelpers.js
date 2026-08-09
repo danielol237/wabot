@@ -151,9 +151,57 @@ async function downloadMediaFromMsg(sock, msg) {
   }
 }
 
+// Download media from the message this one is REPLYING TO (if any). Returns
+// null when the bot isn't replying to media. Needed for commands like
+// !sticker where the user replies to a photo with a text command.
+async function downloadQuotedMedia(sock, msg) {
+  const contextInfo =
+    msg.message?.extendedTextMessage?.contextInfo ||
+    msg.message?.imageMessage?.contextInfo ||
+    msg.message?.videoMessage?.contextInfo ||
+    msg.message?.documentMessage?.contextInfo;
+  const quoted = contextInfo?.quotedMessage;
+  if (!quoted) return null;
+
+  const quotedMedia =
+    quoted.imageMessage ||
+    quoted.videoMessage ||
+    quoted.documentMessage ||
+    quoted.audioMessage;
+  if (!quotedMedia) return null;
+
+  try {
+    // Reconstruct a media message the downloader can use, pointing at the
+    // quoted media's message key so downloadMediaMessage fetches the right one.
+    const quotedMsg = {
+      key: {
+        remoteJid: contextInfo.remoteJid || msg.key?.remoteJid,
+        id: contextInfo.stanzaId,
+        participant: contextInfo.participant,
+      },
+      message: {
+        imageMessage: quoted.imageMessage,
+        videoMessage: quoted.videoMessage,
+        documentMessage: quoted.documentMessage,
+        audioMessage: quoted.audioMessage,
+      },
+    };
+    const buffer = await downloadMediaMessage(quotedMsg, "buffer", {});
+    return {
+      data: buffer.toString("base64"),
+      buffer,
+      mimetype: quotedMedia.mimetype || "application/octet-stream",
+      filename: quotedMedia.fileName || null,
+    };
+  } catch (err) {
+    error("Quoted media download error:", err.message);
+    return null;
+  }
+}
+
 module.exports = {
   getMessageText, getSenderName, getTargetJid, isBotMentioned,
   reply, react, splitMessage, sleep,
   isQuotingBotMessage, getQuotedMessageText,
-  hasMedia, hasVoiceNote, downloadMediaFromMsg,
+  hasMedia, hasVoiceNote, downloadMediaFromMsg, downloadQuotedMedia,
 };

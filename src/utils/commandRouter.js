@@ -705,9 +705,12 @@ async function handleImageGen(sock, msg, args, ctx) {
 }
 
 async function handleStickerCommand(sock, msg, args, ctx) {
-  const { reply, react, hasMedia, downloadMediaFromMsg } = require("./baileysHelpers");
-  if (!hasMedia(msg)) return reply(sock, msg, "Reply to an image with !sticker");
-  const media = await downloadMediaFromMsg(sock, msg);
+  const { reply, react, hasMedia, downloadMediaFromMsg, downloadQuotedMedia } = require("./baileysHelpers");
+  await react(sock, msg, "🎴");
+  // 1. Prefer media attached to the command message itself.
+  let media = hasMedia(msg) ? await downloadMediaFromMsg(sock, msg) : null;
+  // 2. Otherwise, grab media from the message this command is replying to.
+  if (!media) media = await downloadQuotedMedia(sock, msg);
   if (!media) return reply(sock, msg, "❌ Could not download media.");
   const result = await createSticker(media.buffer);
   if (result.success) {

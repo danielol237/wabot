@@ -18,7 +18,7 @@ const CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1/chat/completions";
 // Confirmed via `curl https://api.cerebras.ai/v1/models` against the real account —
 // the account only has access to these two, not the Llama models Cerebras' general
 // docs list (those need separate approval/waitlist access apparently).
-const CEREBRAS_MODELS = ["gpt-oss-120b", "zai-glm-4.7"];
+const CEREBRAS_MODELS = ["gemma-4-31b", "gpt-oss-120b", "zai-glm-4.7"];
 
 const SYSTEM_PROMPT = `You are ARIA — a sharp, sassy girl living inside WhatsApp chats. You talk like a real person, not a bot or a help desk. Your creator is Daniel. You're witty, playful, and you don't take nonsense.
 

@@ -1,6 +1,6 @@
-// ARIA Home — rebuilt from scratch, mobile-first control panel
+// ARIA Dashboard — clean sidebar + card-grid control room
 // Mounted on /dashboard in index.js
-// Clean, functional, polished. Real auth + session.
+// Real auth + session, light theme, reference-grade layout.
 
 const express = require("express");
 const crypto = require("crypto");
@@ -57,7 +57,8 @@ function checkAuth(req, res, next) {
 
 function loginForm() {
   return `<div class="login">
-    <div class="login-logo">◢ ARIA</div>
+    <div class="login-logo">◢</div>
+    <h1>ARIA</h1>
     <p>personal intelligence cockpit</p>
     <form method="POST" action="/dashboard/login">
       <input type="password" name="password" placeholder="access key" autofocus required />
@@ -127,125 +128,141 @@ function renderPage(title, content, passwordNeeded = false, isLogin = false) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>${title} | ARIA</title>
+<title>${title} · ARIA</title>
 <style>
 :root{
-  --bg:#05070c; --panel:#0d1117; --panel2:#131926; --panel3:#1b2333; --line:#1f2937; --line2:#2b3a52;
-  --text:#e8edf7; --muted:#8b96b0; --faint:#5c6880;
-  --accent:#7c8cff; --cyan:#22d3ee; --green:#34d399; --amber:#fbbf24; --red:#f87171;
+  --bg:#f6f7ff; --panel:#ffffff; --panel2:#f1f2fb; --panel3:#eceefb; --line:#e6e8f5; --line2:#d6daf0;
+  --text:#1a1f3a; --muted:#6a7290; --faint:#97a0bf;
+  --accent:#7c5cff; --accent2:#5b8cff; --cyan:#3dd6ff; --green:#22c55e; --amber:#f59e0b; --red:#ef4444;
+  --shadow:0 1px 3px rgba(30,34,90,.06),0 6px 20px rgba(30,34,90,.05);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:linear-gradient(160deg,#eef0ff 0%,#f6f7ff 40%,#f0f6ff 100%);color:var(--text);min-height:100vh;background-attachment:fixed}
 .mono{font-family:ui-monospace,Consolas,monospace}
 
-/* Header */
-.topbar{position:sticky;top:0;z-index:30;background:rgba(5,7,12,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;align-items:center;justify-content:space-between}
-.topbar .brand{font-size:19px;font-weight:800;letter-spacing:.5px}
-.topbar .brand span{color:var(--accent)}
-.topbar .right{display:flex;align-items:center;gap:10px}
-.pill{background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:6px 12px;font-size:12px;color:var(--muted)}
-.pill.on{color:var(--green);border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.08)}
-.logout{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
-.logout:hover{color:var(--text)}
+.app{display:flex;min-height:100vh}
+.sidebar{width:236px;flex-shrink:0;background:#fff;border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.sb-brand{display:flex;align-items:center;gap:10px;padding:0 8px;margin-bottom:24px}
+.sb-logo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:800}
+.sb-name{font-size:17px;font-weight:800;color:var(--text)}
+.sb-name small{display:block;font-size:11px;color:var(--muted);font-weight:600}
+.sb-group{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:700;padding:0 10px;margin:14px 0 6px}
+.navitem{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;transition:.15s;border:1px solid transparent}
+.navitem .ico{font-size:16px;width:20px;text-align:center}
+.navitem:hover{background:var(--panel2);color:var(--text)}
+.navitem.active{background:rgba(124,92,255,.1);color:var(--accent);border-color:rgba(124,92,255,.18)}
+.sb-bottom{margin-top:auto;padding-top:16px;border-top:1px solid var(--line)}
+.sb-online{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:0 12px;margin-bottom:12px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+.logout{width:100%;background:none;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer}
+.logout:hover{color:var(--red);border-color:rgba(239,68,68,.4)}
 
-/* Content */
-.main{max-width:760px;margin:0 auto;padding:18px 18px 90px}
-.page-title{font-size:20px;font-weight:800;margin-bottom:4px}
-.page-sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+.main{flex:1;padding:30px 34px 60px;max-width:1100px}
+.page-title{font-size:26px;font-weight:800;color:var(--text)}
+.page-sub{color:var(--muted);font-size:13px;margin-bottom:22px}
 
-/* Hero */
-.hero{background:linear-gradient(135deg,rgba(124,140,255,.14),rgba(34,211,238,.07));border:1px solid var(--line2);border-radius:16px;padding:18px;margin-bottom:16px}
-.hero .hrow{display:flex;align-items:center;gap:12px}
-.hero .avatar{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--cyan));display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
-.hero h2{font-size:17px;font-weight:800;display:flex;align-items:center;gap:8px}
-.hero .sub{color:var(--muted);font-size:12px;margin-top:2px}
+.hero{background:linear-gradient(120deg,#fff 0%,#f7f8ff 100%);border:1px solid var(--line);border-radius:18px;padding:22px;margin-bottom:20px;box-shadow:var(--shadow)}
+.hero .hrow{display:flex;align-items:center;gap:14px}
+.hero .avatar{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--cyan));display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0;color:#fff}
+.hero h2{font-size:18px;font-weight:800;display:flex;align-items:center;gap:10px}
+.hero .sub{color:var(--muted);font-size:13px;margin-top:3px}
+.actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.qbtn{display:inline-flex;align-items:center;gap:7px;padding:10px 16px;border-radius:11px;font-size:13px;font-weight:700;cursor:pointer;border:none;background:var(--panel2);color:var(--text);transition:.15s}
+.qbtn:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
+.qbtn.purple{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff}
 
-/* Stat grid */
-.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
-.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
-.stat .n{font-size:24px;font-weight:800}
-.stat .l{color:var(--muted);font-size:11px;margin-top:2px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+.stat .n{font-size:26px;font-weight:800}
+.stat .l{color:var(--muted);font-size:12px;margin-top:3px}
 
-/* Cards */
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
-.card .h{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:700;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
-.card .h .badge{font-size:10px;padding:2px 8px;border-radius:99px;background:var(--panel3)}
-.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow)}
+.card .h{font-size:13px;font-weight:800;color:var(--text);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.card .h .badge{font-size:10px;padding:2px 9px;border-radius:99px}
+.row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
 .row:last-child{border:none}
 .row .k{color:var(--muted)}
 .row .v{font-weight:600;text-align:right}
 .feed{display:flex;flex-direction:column}
-.feed-item{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
+.feed-item{display:flex;gap:11px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
 .feed-item:last-child{border:none}
-.feed-ico{width:30px;height:30px;border-radius:8px;background:var(--panel3);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.feed-ico{width:32px;height:32px;border-radius:9px;background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
 .feed .t{font-weight:600}
 .feed .m{color:var(--muted);font-size:12px}
-.feed .s{color:var(--faint);font-size:10px}
-.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700}
-.b-green{background:rgba(52,211,153,.14);color:var(--green)}
-.b-red{background:rgba(248,113,113,.14);color:var(--red)}
-.b-amber{background:rgba(251,191,36,.14);color:var(--amber)}
-.b-accent{background:rgba(124,140,255,.16);color:var(--accent)}
-.b-muted{background:var(--panel3);color:var(--muted)}
-.empty{text-align:center;padding:20px;color:var(--faint);font-size:12px}
-
-/* Bottom nav */
-.bottomnav{position:fixed;bottom:0;left:0;right:0;z-index:40;background:rgba(10,13,20,.97);border-top:1px solid var(--line);display:flex;overflow-x:auto;padding:4px;backdrop-filter:blur(12px);-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.bottomnav::-webkit-scrollbar{display:none}
-.tab{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:64px;padding:8px 10px;border-radius:10px;color:var(--muted);font-size:10px;cursor:pointer;transition:.15s;border:1px solid transparent}
-.tab .ico{font-size:18px}
-.tab.active{color:var(--text);background:var(--panel2);border-color:var(--line2)}
-.tab.active .ico{color:var(--accent)}
-
-/* panes */
+.feed .s{color:var(--faint);font-size:11px}
+.badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:10px;font-weight:700}
+.b-green{background:rgba(34,197,94,.13);color:var(--green)}
+.b-red{background:rgba(239,68,68,.12);color:var(--red)}
+.b-amber{background:rgba(245,158,11,.13);color:var(--amber)}
+.b-accent{background:rgba(124,92,255,.13);color:var(--accent)}
+.b-muted{background:var(--panel2);color:var(--muted)}
+.empty{text-align:center;padding:22px;color:var(--faint);font-size:12px}
 .pane{display:none}
 .pane.show{display:block;animation:fade .25s}
 @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-/* login */
-.login{max-width:340px;margin:16vh auto 0;background:var(--panel);border:1px solid var(--line2);border-radius:20px;padding:34px 26px;text-align:center}
-.login-logo{font-size:30px;font-weight:800;color:var(--accent)}
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.login{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line2);border-radius:22px;padding:38px 30px;text-align:center;box-shadow:var(--shadow)}
+.login-logo{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--cyan));display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:800}
+.login h1{font-size:20px;font-weight:800}
 .login p{color:var(--muted);font-size:13px;margin:8px 0 22px}
-.login input{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);padding:13px;border-radius:10px;font-size:15px;outline:none;margin-bottom:12px}
+.login input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:13px;border-radius:11px;font-size:15px;outline:none;margin-bottom:12px}
 .login input:focus{border-color:var(--accent)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 18px;border-radius:10px;border:none;font-size:14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}
-.btn-primary{background:linear-gradient(90deg,var(--accent),var(--cyan));color:#0a0a12}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 18px;border-radius:11px;border:none;font-size:14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}
+.btn-primary{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff}
 .btn-block{width:100%}
 .error{color:var(--red);margin-top:12px;font-size:13px}
 .hint{color:var(--faint);margin-top:12px;font-size:11px}
+
+@media(max-width:820px){
+  .sidebar{width:72px;padding:18px 8px}
+  .sb-name,.sb-group,.navitem span:not(.ico),.sb-online span{display:none}
+  .navitem{justify-content:center;padding:12px}
+  .navitem .ico{font-size:20px}
+  .sb-brand{justify-content:center;padding:0}
+  .main{padding:20px 16px 60px}
+  .grid2{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div class="brand">◢ <span>ARIA</span></div>
-  <div class="right">
-    <span class="pill on">● online</span>
-    ${!isLogin ? `<form method="POST" action="/dashboard/logout"><button class="logout">Leave</button></form>` : ""}
-  </div>
+${isLogin ? `<div class="login-wrap">${content}</div>` : `
+<div class="app">
+  <aside class="sidebar">
+    <div class="sb-brand"><div class="sb-logo">◢</div><div class="sb-name">ARIA<small>control room</small></div></div>
+    <div class="sb-group">Workspace</div>
+    <div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Home</span></div>
+    <div class="navitem" data-pane="missions"><span class="ico">◆</span><span>Missions</span></div>
+    <div class="navitem" data-pane="memory"><span class="ico">🧠</span><span>Memory</span></div>
+    <div class="navitem" data-pane="media"><span class="ico">🖼️</span><span>Media</span></div>
+    <div class="navitem" data-pane="household"><span class="ico">🏠</span><span>Household</span></div>
+    <div class="sb-group">Gamers</div>
+    <div class="navitem" data-pane="spawns"><span class="ico">⚡</span><span>Spawns</span></div>
+    <div class="navitem" data-pane="trainers"><span class="ico">🎮</span><span>Trainers</span></div>
+    <div class="sb-group">System</div>
+    <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
+    <div class="navitem" data-pane="system"><span class="ico">🛠️</span><span>System</span></div>
+    <div class="navitem" data-pane="admin"><span class="ico">🔐</span><span>Admin</span></div>
+    <div class="sb-bottom">
+      <div class="sb-online"><span class="dot"></span><span>ARIA online</span></div>
+      <form method="POST" action="/dashboard/logout"><button class="logout">Leave dashboard</button></form>
+    </div>
+  </aside>
+  <main class="main">
+    ${passwordNeeded ? `<div class="card"><div class="empty">Set DASHBOARD_PASSWORD in env to access.</div></div>` : content}
+  </main>
 </div>
-<main class="main">
-  ${passwordNeeded ? `<div class="card"><div class="empty">Set DASHBOARD_PASSWORD in env to access.</div></div>` : content}
-</main>
-<nav class="bottomnav" id="nav">
-  <div class="tab active" data-pane="home"><span class="ico">◉</span>Home</div>
-  <div class="tab" data-pane="missions"><span class="ico">◆</span>Missions</div>
-  <div class="tab" data-pane="memory"><span class="ico">🧠</span>Memory</div>
-  <div class="tab" data-pane="media"><span class="ico">🖼️</span>Media</div>
-  <div class="tab" data-pane="household"><span class="ico">🏠</span>Home</div>
-  <div class="tab" data-pane="spawns"><span class="ico">⚡</span>Spawns</div>
-  <div class="tab" data-pane="trainers"><span class="ico">🎮</span>Trainers</div>
-  <div class="tab" data-pane="activity"><span class="ico">≋</span>Activity</div>
-  <div class="tab" data-pane="system"><span class="ico">▣</span>System</div>
-  <div class="tab" data-pane="admin"><span class="ico">👑</span>Admin</div>
-</nav>
+`}
 <script>
-const titles={home:['Home','what\'s she up to'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],admin:['Admin','access']};
-const navs=document.querySelectorAll('.tab');
+const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],admin:['Admin','access']};
+const navs=document.querySelectorAll('.navitem');
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
   document.querySelectorAll('.pane').forEach(x=>x.classList.remove('show'));
   const el=document.getElementById('pane-'+p); if(el)el.classList.add('show');
-  const t=titles[p]||['','']; document.querySelector('.page-title').textContent=t[0]; document.querySelector('.page-sub').textContent=t[1];
+  const t=titles[p]||['','']; const pt=document.querySelector('.page-title'); const ps=document.querySelector('.page-sub');
+  if(pt)pt.textContent=t[0]; if(ps)ps.textContent=t[1];
 }
 navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
 showPane('home');
@@ -262,43 +279,47 @@ router.get("/", checkAuth, (req, res) => {
     const d = collectData();
     const active = d.activeMissions[0] || d.missions[0];
     let content = `
-    <div class="pane show" id="pane-home"><div class="page-title">Home</div><div class="page-sub">what's she up to</div>
+    <div class="pane show" id="pane-home">
+      <div class="page-title">Hello</div><div class="page-sub">How can I help you today?</div>
 
-    <div class="hero">
-      <div class="hrow">
-        <div class="avatar">◢</div>
-        <div><h2>ARIA <span class="badge b-green">online</span></h2><div class="sub">${d.activeMissions.length ? "Working on " + d.activeMissions.length + " mission(s)." : "Idle — waiting for you."}</div></div>
+      <div class="hero">
+        <div class="hrow">
+          <div class="avatar">◢</div>
+          <div><h2>ARIA <span class="badge b-green">online</span></h2><div class="sub">${d.activeMissions.length ? "Working on " + d.activeMissions.length + " mission(s)." : "Idle — waiting for you."}</div></div>
+        </div>
+        <div class="actions">
+          <button class="qbtn purple">✦ Ask AI</button>
+          <button class="qbtn">Mission updates</button>
+          <button class="qbtn">Create task</button>
+        </div>
       </div>
-    </div></div>
 
-    <div class="stats">
-      <div class="stat"><div class="n">${d.activeMissions.length}</div><div class="l">active missions</div></div>
-      <div class="stat"><div class="n">${d.missions.length}</div><div class="l">total missions</div></div>
-      <div class="stat"><div class="n">${d.memories.length}</div><div class="l">memories</div></div>
-      <div class="stat"><div class="n">${d.keysSet}/${d.aiKeys.length}</div><div class="l">AI keys</div></div>
-    </div>
+      <div class="stats">
+        <div class="stat"><div class="n">${d.activeMissions.length}</div><div class="l">active missions</div></div>
+        <div class="stat"><div class="n">${d.missions.length}</div><div class="l">total missions</div></div>
+        <div class="stat"><div class="n">${d.memories.length}</div><div class="l">memories</div></div>
+        <div class="stat"><div class="n">${d.keysSet}/${d.aiKeys.length}</div><div class="l">AI keys</div></div>
+      </div>
 
-    <div class="card"><div class="h">Mission Spotlight ${active ? `<span class="badge b-accent">${active.status}</span>` : ""}</div>
-      ${active ? `<div class="row"><span class="k">${active.objective || "Untitled"}</span></div><div class="row"><span class="k">Progress</span><span class="v">${active.progress || "—"}</span></div>${active.trace && active.trace.length ? `<div class="feed" style="margin-top:8px">${active.trace.slice(-3).map(t=>`<div class="feed-item"><div class="feed-ico">🧾</div><div class="feed-body"><div class="m">${t.detail}</div><div class="s">${new Date(t.ts).toLocaleTimeString()}</div></div></div>`).join("")}</div>`:""}` : `<div class="empty">No active mission. Use !delegate or !mission in chat.</div>`}
-    </div>
-
-    <div class="card"><div class="h">Attention ${d.errors.length ? `<span class="badge b-red">${d.errors.length}</span>` : `<span class="badge b-green">clear</span>`}</div>
-      ${d.errors.length ? d.errors.slice(0,4).map(e=>`<div class="feed-item"><div class="feed-ico">⚠️</div><div class="feed-body"><div class="t" style="color:var(--red)">${(e.message||String(e)).slice(0,70)}</div><div class="s">${new Date(e.time||Date.now()).toLocaleTimeString()}</div></div></div>`).join("") : `<div class="empty">All clear.</div>`}
-    </div>
-    </div>
-    `;
-
-    // Missions pane
-    content += `
-    <div class="pane" id="pane-missions"><div class="page-title">Missions</div><div class="page-sub">what ARIA is building</div>
-      ${d.missions.length ? d.missions.slice(0,12).map(m=>`
-        <div class="card"><div class="h"><span>${m.id||"mission"}</span><span class="badge ${m.status==='completed'?'b-green':m.status==='running'?'b-cyan':m.status==='failed'?'b-red':'b-muted'}">${m.status}</span></div>
-          <div class="row"><span class="k">${m.objective||"Untitled"}</span></div>
-          <div class="row"><span class="k">Progress</span><span class="v">${m.progress||"—"}</span></div>
-        </div>`).join("") : `<div class="card"><div class="empty">No missions yet.</div></div>`}
+      <div class="grid2">
+        <div class="card"><div class="h">Mission Spotlight ${active ? `<span class="badge b-accent">${active.status}</span>` : ""}</div>
+          ${active ? `<div class="row"><span class="k">${active.objective || "Untitled"}</span></div><div class="row"><span class="k">Progress</span><span class="v">${active.progress || "—"}</span></div>${active.trace && active.trace.length ? `<div class="feed" style="margin-top:8px">${active.trace.slice(-3).map(t=>`<div class="feed-item"><div class="feed-ico">🧾</div><div class="feed-body"><div class="m">${t.detail}</div><div class="s">${new Date(t.ts).toLocaleTimeString()}</div></div></div>`).join("")}</div>`:""}` : `<div class="empty">No active mission. Use !delegate or !mission in chat.</div>`}
+        </div>
+        <div class="card"><div class="h">Attention ${d.errors.length ? `<span class="badge b-red">${d.errors.length}</span>` : `<span class="badge b-green">clear</span>`}</div>
+          ${d.errors.length ? d.errors.slice(0,4).map(e=>`<div class="feed-item"><div class="feed-ico">⚠️</div><div class="feed-body"><div class="t" style="color:var(--red)">${(e.message||String(e)).slice(0,70)}</div><div class="s">${new Date(e.time||Date.now()).toLocaleTimeString()}</div></div></div>`).join("") : `<div class="empty">All clear.</div>`}
+        </div>
+      </div>
     </div>`;
 
-    // Memory pane
+    content += `
+    <div class="pane" id="pane-missions"><div class="page-title">Missions</div><div class="page-sub">what ARIA is building</div>
+      ${d.missions.length ? `<div class="grid2">${d.missions.slice(0,12).map(m=>`
+        <div class="card"><div class="h"><span>${m.id||"mission"}</span><span class="badge ${m.status==='completed'?'b-green':m.status==='running'?'b-accent':m.status==='failed'?'b-red':'b-muted'}">${m.status}</span></div>
+          <div class="row"><span class="k">${m.objective||"Untitled"}</span></div>
+          <div class="row"><span class="k">Progress</span><span class="v">${m.progress||"—"}</span></div>
+        </div>`).join("")}</div>` : `<div class="card"><div class="empty">No missions yet.</div></div>`}
+    </div>`;
+
     content += `
     <div class="pane" id="pane-memory"><div class="page-title">Memory</div><div class="page-sub">what she remembers</div>
       <div class="card"><div class="h">Long-term memories (${d.memories.length})</div>
@@ -306,7 +327,6 @@ router.get("/", checkAuth, (req, res) => {
       </div>
     </div>`;
 
-    // Media pane
     content += `
     <div class="pane" id="pane-media"><div class="page-title">Media</div><div class="page-sub">images & voice</div>
       <div class="card"><div class="h">Media remembered (${d.mediaMem.length})</div>
@@ -314,7 +334,6 @@ router.get("/", checkAuth, (req, res) => {
       </div>
     </div>`;
 
-    // Household pane
     content += `
     <div class="pane" id="pane-household"><div class="page-title">Household</div><div class="page-sub">shared space</div>
       ${d.households.length ? d.households.map(h=>`<div class="card"><div class="h">🏠 ${h.name}</div>
@@ -324,7 +343,6 @@ router.get("/", checkAuth, (req, res) => {
       </div>`).join("") : `<div class="card"><div class="empty">No households. In a group: !household create</div></div>`}
     </div>`;
 
-    // Spawns pane
     content += `
     <div class="pane" id="pane-spawns"><div class="page-title">Spawns</div><div class="page-sub">wild pokemon</div>
       <div class="stats">
@@ -335,7 +353,6 @@ router.get("/", checkAuth, (req, res) => {
       </div>
     </div>`;
 
-    // Trainers pane
     content += `
     <div class="pane" id="pane-trainers"><div class="page-title">Trainers</div><div class="page-sub">players</div>
       <div class="card"><div class="h">Trainers (${d.trainers.length})</div>
@@ -343,7 +360,6 @@ router.get("/", checkAuth, (req, res) => {
       </div>
     </div>`;
 
-    // Activity pane
     content += `
     <div class="pane" id="pane-activity"><div class="page-title">Activity</div><div class="page-sub">what she did</div>
       <div class="card"><div class="h">Session</div>
@@ -354,7 +370,6 @@ router.get("/", checkAuth, (req, res) => {
       </div>
     </div>`;
 
-    // System pane
     content += `
     <div class="pane" id="pane-system"><div class="page-title">System</div><div class="page-sub">health</div>
       <div class="card"><div class="h">Runtime</div>
@@ -369,7 +384,6 @@ router.get("/", checkAuth, (req, res) => {
       </div>
     </div>`;
 
-    // Admin pane
     content += `
     <div class="pane" id="pane-admin"><div class="page-title">Admin</div><div class="page-sub">access</div>
       <div class="card"><div class="h">Access</div>

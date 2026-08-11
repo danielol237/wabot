@@ -1568,7 +1568,12 @@ async function handleSelfCheck(sock, msg, args, ctx) {
     await reply(sock, msg, result.message || "✅ All clear.");
   } else if (result && result.diagnosis) {
     const d = result.diagnosis;
-    const text = `🔍 *Self-check*\n\n*Issue:* ${d.issue || d.title || "Unknown"}\n\n${d.summary || ""}\n\n_Fix proposal:_ ${d.fix || d.proposedFix || "See pending fix."}`;
+    // The AI is asked to return { diagnosis, file, proposedFix, confidence }.
+    // Map those to the report (previously we read d.issue/d.summary/d.fix,
+    // which the AI never produces, so the report came out "Unknown" + blank).
+    const confidence = d.confidence ? ` · _${d.confidence}_` : "";
+    const file = d.file ? `\n*File:* \`${d.file}\`` : "";
+    const text = `🔍 *Self-check*${confidence}\n\n${d.diagnosis || d.issue || d.title || "No diagnosis."}${file}\n\n_Fix proposal:_ ${d.proposedFix || d.fix || "See pending fix."}`;
     await reply(sock, msg, text);
   } else if (result && result.error) {
     await reply(sock, msg, `⚠️ ${result.error}`);

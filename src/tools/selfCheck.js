@@ -33,11 +33,28 @@ async function runSelfCheck(senderName) {
 
   try {
     const response = await getAIResponse(prompt, senderName, [], DIAGNOSIS_SYSTEM_PROMPT, "");
-    let cleaned = response.replace(/```json|```/g, "").trim();
-    const objMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (objMatch) cleaned = objMatch[0];
-
-    const diagnosis = JSON.parse(cleaned);
+    // Robust extraction: the AI is told to return ONLY JSON, but models
+    // sometimes wrap it in ```json fences or add a sentence. Try a direct
+    // parse, then strip fences, then fall back to the first {...} block.
+    let cleaned = response.trim();
+    let diagnosis = null;
+    try {
+      diagnosis = JSON.parse(cleaned);
+    } catch (_) {
+      // Strip ```json / ``` fences
+      cleaned = cleaned.replace(/```(?:json)?/gi, "").trim();
+      try {
+        diagnosis = JSON.parse(cleaned);
+      } catch (_) {
+        const objMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (objMatch) {
+          try { diagnosis = JSON.parse(objMatch[0]); } catch (_) { diagnosis = null; }
+        }
+      }
+    }
+    if (!diagnosis) {
+      return { success: false, error: "Couldn't produce a clear diagnosis from the current logs." };
+    }
 
     // Save as a pending fix — NOT applied yet, just stored for !approve to act on later
     fs.writeFileSync(PENDING_FIX_FILE, JSON.stringify({ ...diagnosis, proposedAt: Date.now() }, null, 2));

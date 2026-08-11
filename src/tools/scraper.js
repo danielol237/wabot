@@ -3,10 +3,12 @@ const cheerio = require("cheerio");
 const { isSafeUrl } = require("./webBrowser");
 
 async function scrapeUrl(url) {
+  // Normalize FIRST so bare hostnames like "example.com" get a scheme before
+  // the safety check — previously isSafeUrl ran first and always rejected them.
+  if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
   if (!(await isSafeUrl(url))) {
     return "❌ Blocked: only public http(s) URLs are allowed.";
   }
-  if (!url.startsWith("http")) url = "https://" + url;
 
   // Stage 1: Fast axios fetch
   const axiosResult = await tryAxios(url);

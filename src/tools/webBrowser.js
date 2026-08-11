@@ -13,7 +13,8 @@ async function isSafeUrl(rawUrl) {
   try {
     const u = new URL(rawUrl);
     if (!/^https?:$/.test(u.protocol)) return false;
-    const host = u.hostname;
+    // URL.hostname keeps IPv6 brackets ([::1]); strip them so net.isIP works.
+    const host = u.hostname.replace(/^\[|\]$/g, "");
     if (host === "localhost") return false;
     if (net.isIP(host)) {
       return !(isPrivate(host));
@@ -31,8 +32,17 @@ async function isSafeUrl(rawUrl) {
 }
 
 function isPrivate(ip) {
+  if (ip.includes(":")) {
+    // IPv6: block loopback and link-local/ULA private ranges; allow public.
+    const lower = ip.toLowerCase();
+    if (lower === "::1" || lower.startsWith("::ffff:127.") || lower.startsWith("0:0:0:0:0:0:0:1")) return true; // loopback
+    if (lower.startsWith("fe80:")) return true; // link-local
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // ULA fc00::/7
+    if (lower.startsWith("::ffff:") && isPrivate(lower.split("::ffff:")[1])) return true; // IPv4-mapped
+    return false; // public IPv6
+  }
   const p = ip.split(".").map(Number);
-  if (p.length !== 4) return true; // IPv6 => block by default (conservative)
+  if (p.length !== 4) return true;
   if (p[0] === 10) return true;                    // 10.0.0.0/8
   if (p[0] === 127) return true;                   // loopback
   if (p[0] === 169 && p[1] === 254) return true;   // link-local / AWS metadata
@@ -47,6 +57,15 @@ async function browse(url) {
   if (!(await isSafeUrl(url))) {
     return { success: false, error: "Blocked: only public http(s) URLs are allowed." };
   }
+  // Block SSRF via redirects: re-validate each hop's target before following
+  // it. A safe public URL could 302 to an internal/private address.
+  const rejectOnRedirect = async (prev, next) => {
+    if (!(await isSafeUrl(next.url))) {
+      const err = new Error("Redirect blocked: destination is not a safe public URL.");
+      err.code = "ERR_REDIRECT_BLOCKED";
+      throw err;
+    }
+  };
   try {
     const res = await axios.get(url, {
       timeout: 15000,
@@ -56,6 +75,7 @@ async function browse(url) {
         "Accept-Language": "en-US,en;q=0.5",
       },
       maxRedirects: 5,
+      onRedirect: rejectOnRedirect,
     });
 
     const html = res.data;
@@ -131,6 +151,8 @@ async function browse(url) {
         timeout: 10000,
         headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/plain" },
         responseType: "text",
+        maxRedirects: 5,
+        onRedirect: rejectOnRedirect,
       });
       return {
         success: true,

@@ -236,6 +236,30 @@ function renderDownloadsPane() {
     </div>`;
 }
 
+// Health pane — anime source + AI provider probe results.
+function healthRow(item) {
+  const ok = !!item.ok;
+  return `<div class="row"><span class="k">${item.name}</span><span class="v"><span class="badge ${ok ? "b-green" : "b-red"}">${ok ? "healthy" : item.error || "down"}</span>${item.latency ? ` · ${item.latency}ms` : ""}${item.status ? ` · HTTP ${item.status}` : ""}</span></div>`;
+}
+
+function renderHealthPane() {
+  let src = [], prov = [], srcChecked = null, provChecked = null;
+  try { const s = require("./tools/sourceHealth").getHealth(); src = s.results || []; srcChecked = s.lastCheckedAt; } catch (_) {}
+  try { const p = require("./tools/providerHealth").getHealth(); prov = p.results || []; provChecked = p.lastCheckedAt; } catch (_) {}
+  const ts = (t) => (t ? new Date(t).toLocaleTimeString() : "not checked");
+  return `
+    <div class="pane" id="pane-health"><div class="page-title">Health</div><div class="page-sub">sources & AI providers · live probes</div>
+      <div class="card"><div class="h">Anime Sources <span class="badge b-accent">checked ${ts(srcChecked)}</span></div>
+        ${src.length ? src.map(healthRow).join("") : `<div class="empty">Not checked yet. Click "Re-check sources".</div>`}
+        <button class="qbtn" style="margin-top:12px" onclick="checkSources()">↻ Re-check sources</button>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="h">AI Providers <span class="badge b-accent">checked ${ts(provChecked)}</span></div>
+        ${prov.length ? prov.map(healthRow).join("") : `<div class="empty">Not checked yet. Click "Re-check providers".</div>`}
+        <button class="qbtn" style="margin-top:12px" onclick="checkProviders()">↻ Re-check providers</button>
+      </div>
+    </div>`;
+}
+
 function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "") {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -359,6 +383,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="sb-group">System</div>
     <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
     <div class="navitem" data-pane="system"><span class="ico">🛠️</span><span>System</span></div>
+    <div class="navitem" data-pane="health"><span class="ico">❤️</span><span>Health</span></div>
     <div class="navitem" data-pane="admin"><span class="ico">🔐</span><span>Admin</span></div>
     <div class="sb-bottom">
       <div class="sb-online"><span class="dot"></span><span>ARIA online</span></div>
@@ -372,7 +397,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};
-const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],admin:['Admin','access']};
+const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
@@ -405,6 +430,18 @@ async function retryJob(id){
     if(r.ok) setTimeout(refreshDownloads,500);
   }catch(_){}
 }
+async function checkSources(){
+  try{
+    await fetch('/dashboard/api/source-health/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:CSRF})});
+    setTimeout(()=>location.reload(),600);
+  }catch(_){}
+}
+async function checkProviders(){
+  try{
+    await fetch('/dashboard/api/provider-health/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:CSRF})});
+    setTimeout(()=>location.reload(),600);
+  }catch(_){}
+}
 setInterval(refreshDownloads, 8000);
 setInterval(()=>{ location.reload(); }, 120000);
 </script>
@@ -433,6 +470,32 @@ router.post("/api/anime/:id/retry", checkAuth, (req, res) => {
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
+});
+
+// Health endpoints — anime sources + AI providers (auth-protected).
+router.get("/api/source-health", checkAuth, async (req, res) => {
+  try {
+    const { getHealth } = require("./tools/sourceHealth");
+    return res.json(getHealth());
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+});
+router.post("/api/source-health/check", checkAuth, async (req, res) => {
+  try {
+    const { checkAll } = require("./tools/sourceHealth");
+    return res.json({ results: await checkAll() });
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+});
+router.get("/api/provider-health", checkAuth, async (req, res) => {
+  try {
+    const { getHealth } = require("./tools/providerHealth");
+    return res.json(getHealth());
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+});
+router.post("/api/provider-health/check", checkAuth, async (req, res) => {
+  try {
+    const { checkAll } = require("./tools/providerHealth");
+    return res.json({ results: await checkAll() });
+  } catch (e) { return res.status(500).json({ error: e.message }); }
 });
 
 router.get("/", checkAuth, (req, res) => {
@@ -554,6 +617,8 @@ router.get("/", checkAuth, (req, res) => {
         <div class="row"><span class="k">Dashboard</span><span class="badge b-green">secured</span></div>
       </div>
     </div>`;
+
+    content += renderHealthPane();
 
     res.send(renderPage("Home", content, false, false, csrfFor(req)));
   } catch (e) {

@@ -80,9 +80,37 @@ async function fetchManifest() {
   }
 }
 
+// Marketplace IDs flow into filesystem paths and shell commands. Restrict to a
+// safe charset so a hostile/invalid id can't traverse or inject.
+const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
+function validPluginId(pluginId) {
+  return typeof pluginId === "string" && SAFE_ID.test(pluginId);
+}
+
+// Download + hash-verify + write a plugin file to disk. Shared by install and
+// update so both go through the same supply-chain gate.
+async function downloadVerifiedPlugin(pluginId) {
+  if (!validPluginId(pluginId)) return { success: false, error: "Invalid plugin id. Use letters, numbers, -, _." };
+  const url = `${PLUGIN_REPO.base}/plugins/${pluginId}.js`;
+  const res = await axios.get(url, { timeout: 15000 });
+  const v = verifyPluginContent(pluginId, res.data);
+  if (!v.ok) return { success: false, error: v.error };
+
+  const filePath = path.join(PLUGINS_DIR, pluginId + ".js");
+  fs.writeFileSync(filePath, res.data);
+  try {
+    require("child_process").execSync(`node --check "${filePath}"`, { stdio: "pipe" });
+  } catch (e) {
+    fs.unlinkSync(filePath);
+    return { success: false, error: "Plugin has syntax errors. Not installed." };
+  }
+  return { success: true, filePath };
+}
+
 // Install a plugin from the marketplace
 async function installPlugin(pluginId) {
   try {
+    if (!validPluginId(pluginId)) return { success: false, error: "Invalid plugin id. Use letters, numbers, -, _." };
     // Check if already installed
     if (state.installed[pluginId]) return { success: false, error: "Already installed." };
     if (fs.existsSync(path.join(PLUGINS_DIR, pluginId + ".js"))) {
@@ -91,30 +119,34 @@ async function installPlugin(pluginId) {
       return { success: true, installed: true };
     }
 
-    // Download from GitHub
-    const url = `${PLUGIN_REPO.base}/plugins/${pluginId}.js`;
-    const res = await axios.get(url, { timeout: 15000 });
-
-    // Supply-chain check: reject unpinned or hash-mismatched code.
-    const v = verifyPluginContent(pluginId, res.data);
-    if (!v.ok) return { success: false, error: v.error };
-
-    const filePath = path.join(PLUGINS_DIR, pluginId + ".js");
-    fs.writeFileSync(filePath, res.data);
-    
-    // Quick syntax check
-    try {
-      require("child_process").execSync(`node --check "${filePath}"`, { stdio: "pipe" });
-    } catch (e) {
-      fs.unlinkSync(filePath);
-      return { success: false, error: "Plugin has syntax errors. Not installed." };
-    }
-
+    const dl = await downloadVerifiedPlugin(pluginId);
+    if (!dl.success) return dl;
     state.installed[pluginId] = { installedAt: Date.now(), version: 1 };
     saveState();
     return { success: true, installed: true };
   } catch (e) {
     return { success: false, error: `Install failed: ${e.message}` };
+  }
+}
+
+// Update a plugin to its latest pinned version (re-download + verify hash).
+async function updatePlugin(pluginId) {
+  try {
+    if (!validPluginId(pluginId)) return { success: false, error: "Invalid plugin id. Use letters, numbers, -, _." };
+    if (!fs.existsSync(path.join(PLUGINS_DIR, pluginId + ".js")) && !state.installed[pluginId]) {
+      return { success: false, error: `Plugin "${pluginId}" is not installed. Use !install ${pluginId} first.` };
+    }
+    const dl = await downloadVerifiedPlugin(pluginId);
+    if (!dl.success) return dl;
+    state.installed[pluginId] = {
+      installedAt: state.installed[pluginId]?.installedAt || Date.now(),
+      version: (state.installed[pluginId]?.version || 1) + 1,
+      updatedAt: Date.now(),
+    };
+    saveState();
+    return { success: true, installed: true, updated: true };
+  } catch (e) {
+    return { success: false, error: `Update failed: ${e.message}` };
   }
 }
 
@@ -151,4 +183,4 @@ function listInstalled() {
   return plugins;
 }
 
-module.exports = { fetchManifest, installPlugin, setPluginState, isPluginEnabled, listInstalled, verifyPluginContent, sha256, PLUGIN_REPO };
+module.exports = { fetchManifest, installPlugin, updatePlugin, setPluginState, isPluginEnabled, listInstalled, verifyPluginContent, validPluginId, sha256, PLUGIN_REPO };

@@ -22,6 +22,15 @@ const GIT_DIR = path.join(HOME, ".session-sync");
 const REPO = process.env.SESSION_GIT_REPO || "";
 const TOKEN = process.env.GITHUB_TOKEN || "";
 
+// Static askpass helper — reads the token from its own environment, so the
+// secret never appears in the git process argv (which other users/processes
+// could inspect via /proc/<pid>/cmdline). The script file itself holds no
+// secret; the token travels only as an env var passed to the child.
+const ASKPASS_FILE = path.join(HOME, ".session-askpass");
+try {
+  fs.writeFileSync(ASKPASS_FILE, "#!/bin/sh\necho \"$ARIA_SESSION_TOKEN\"\n", { mode: 0o700 });
+} catch (_) {}
+
 function syncEnabled() {
   return !!REPO && !!TOKEN;
 }
@@ -34,6 +43,9 @@ function syncEnabled() {
 // back to plaintext in the live sessions/ dir on restore, so Baileys is
 // untouched. Envelope: [12-byte IV][16-byte authTag][ciphertext].
 function deriveKey() {
+  if (!process.env.SESSION_ENCRYPT_KEY) {
+    warn("⚠️ SESSION_ENCRYPT_KEY not set — deriving session encryption key from GITHUB_TOKEN. Set a dedicated SESSION_ENCRYPT_KEY so rotating GITHUB_TOKEN doesn't make old backups undecryptable.");
+  }
   const secret = process.env.SESSION_ENCRYPT_KEY || TOKEN;
   return crypto.createHash("sha256").update(secret).digest();
 }
@@ -89,7 +101,12 @@ function decryptTree(dir, key) {
 
 function git(args, cwd, timeout = 30000) {
   return new Promise((resolve) => {
-    execFile("git", args, { cwd, timeout, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("git", args, {
+      cwd,
+      timeout,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env, ARIA_SESSION_TOKEN: TOKEN, GIT_ASKPASS: ASKPASS_FILE, GIT_TERMINAL_PROMPT: "0" },
+    }, (err, stdout, stderr) => {
       if (err) resolve({ ok: false, err: (stderr || err.message).trim() });
       else resolve({ ok: true, out: (stdout || "").trim() });
     });
@@ -101,10 +118,15 @@ async function ensureRepo() {
   if (!fs.existsSync(path.join(GIT_DIR, ".git"))) {
     if (fs.existsSync(GIT_DIR)) fs.rmSync(GIT_DIR, { recursive: true, force: true });
     fs.mkdirSync(GIT_DIR, { recursive: true });
-    const url = `https://x-access-token:${TOKEN}@github.com/${REPO}.git`;
+    // No token in the URL: git asks GIT_ASKPASS (which reads the token from
+    // env) for the password, so the secret never lands in argv.
+    const url = `https://x-access-token@github.com/${REPO}.git`;
     const r = await git(["clone", url, "."], GIT_DIR);
     if (!r.ok) return { ok: false, err: r.err };
   }
+  // Normalize the remote to the credential-free URL so later push/pull also
+  // go through askpass (in case a previous run stored the tokenized URL).
+  await git(["remote", "set-url", "origin", `https://x-access-token@github.com/${REPO}.git`], GIT_DIR);
   // Configure identity so commit works
   await git(["config", "user.email", "aria@wabot.local"], GIT_DIR);
   await git(["config", "user.name", "ARIA"], GIT_DIR);
@@ -156,17 +178,30 @@ async function restoreSession() {
   const backed = path.join(GIT_DIR, "sessions");
   if (!fs.existsSync(backed)) return { ok: false, err: "no backed-up session found" };
 
+  // Decrypt into a staging directory (NOT in place in the git working tree).
+  // Decrypting tracked files in-place would leave .session-sync dirty and make
+  // the next `git pull` conflict with modified tracked files.
+  const staging = path.join(HOME, ".session-restore");
+  try {
+    if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
+    fs.mkdirSync(staging, { recursive: true });
+    fs.cpSync(backed, staging, { recursive: true });
+    decryptTree(staging, deriveKey());
+  } catch (e) {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
+    return { ok: false, err: "staging copy failed: " + e.message };
+  }
+
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   try {
-    // Decrypt the pulled copy back to plaintext before it becomes the live
-    // session. Encrypted blobs can't be read by Baileys.
-    decryptTree(backed, deriveKey());
     fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-    fs.cpSync(backed, SESSIONS_DIR, { recursive: true });
+    fs.cpSync(staging, SESSIONS_DIR, { recursive: true });
   } catch (e) {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
     return { ok: false, err: "restore copy failed: " + e.message };
   }
+  try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
   return { ok: true };
 }
 

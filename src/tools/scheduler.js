@@ -190,8 +190,11 @@ function rearmAll() {
 
     // Stop any previously armed job for this schedule first, so reconnect
     // re-arming doesn't stack duplicate timers (which fired messages 2x/3x).
+    // NOTE: for cron tasks, item.task IS the node-cron object (it exposes
+    // .stop() directly) — there is no item.task.cron. Check .stop() on the
+    // task itself, mirroring cancelSchedule().
     if (item.task) {
-      if (item.task.cron && typeof item.task.cron.stop === "function") { try { item.task.cron.stop(); } catch (_) {} }
+      if (typeof item.task.stop === "function") { try { item.task.stop(); } catch (_) {} }
       if (item.task.interval) clearInterval(item.task.interval);
       if (item.task.timeout) clearTimeout(item.task.timeout);
     }

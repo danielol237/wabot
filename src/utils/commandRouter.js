@@ -211,6 +211,13 @@ function registerBuiltinCommands() {
   registerCommand({ name: "clear", aliases: ["reset"], category: "dev", description: "Clear chat session", handler: handleClear, ownerOnly: false });
   registerCommand({ name: "mute", aliases: [], category: "admin", description: "Mute a chat", handler: handleMute, ownerOnly: true });
   registerCommand({ name: "unmute", aliases: [], category: "admin", description: "Unmute a chat", handler: handleUnmute, ownerOnly: true });
+
+  // Plugin marketplace
+  registerCommand({ name: "plugins", aliases: ["pluglist"], category: "admin", description: "List installed plugins", handler: handlePluginsList, ownerOnly: true });
+  registerCommand({ name: "install", aliases: ["pluginstall"], category: "admin", description: "Install a plugin: !install <name>", handler: handlePluginInstall, ownerOnly: true });
+  registerCommand({ name: "update", aliases: ["plugupdate"], category: "admin", description: "Update a plugin: !update <name>", handler: handlePluginUpdate, ownerOnly: true });
+  registerCommand({ name: "enable", aliases: ["plugenable"], category: "admin", description: "Enable a plugin: !enable <name>", handler: handlePluginEnable, ownerOnly: true });
+  registerCommand({ name: "disable", aliases: ["plugdisable"], category: "admin", description: "Disable a plugin: !disable <name>", handler: handlePluginDisable, ownerOnly: true });
 }
 
 // ── Intent detection ──────────────────────────────────────────
@@ -1763,6 +1770,47 @@ async function handleAIResponse(sock, msg, text, ctx) {
 
 // ── Initialize ───────────────────────────────────────────────
 registerBuiltinCommands();
+
+// ── Plugin marketplace command handlers ──────────────────────
+async function handlePluginsList(sock, msg, args, context) {
+  const { listInstalled } = require("../tools/pluginMarket");
+  const list = listInstalled();
+  if (!list.length) return reply(sock, msg, "No plugins installed.");
+  const lines = list.map((p) => `• *${p.id}* — ${p.enabled ? "enabled" : "disabled"}${p.info?.version ? ` (v${p.info.version})` : ""}`);
+  return reply(sock, msg, `*Installed plugins:*\n${lines.join("\n")}`);
+}
+
+async function handlePluginInstall(sock, msg, args, context) {
+  const name = (args || "")[0];
+  if (!name) return reply(sock, msg, "Usage: !install <plugin-name>");
+  const { installPlugin } = require("../tools/pluginMarket");
+  const r = await installPlugin(name);
+  return reply(sock, msg, r.success ? `✅ Installed *${name}*. Restart to load it.` : `❌ ${r.error}`);
+}
+
+async function handlePluginUpdate(sock, msg, args, context) {
+  const name = (args || "")[0];
+  if (!name) return reply(sock, msg, "Usage: !update <plugin-name>");
+  const { updatePlugin } = require("../tools/pluginMarket");
+  const r = await updatePlugin(name);
+  return reply(sock, msg, r.success ? `✅ Updated *${name}*. Restart to load it.` : `❌ ${r.error}`);
+}
+
+async function handlePluginEnable(sock, msg, args, context) {
+  const name = (args || "")[0];
+  if (!name) return reply(sock, msg, "Usage: !enable <plugin-name>");
+  const { setPluginState } = require("../tools/pluginMarket");
+  setPluginState(name, true);
+  return reply(sock, msg, `✅ Enabled *${name}*.`);
+}
+
+async function handlePluginDisable(sock, msg, args, context) {
+  const name = (args || "")[0];
+  if (!name) return reply(sock, msg, "Usage: !disable <plugin-name>");
+  const { setPluginState } = require("../tools/pluginMarket");
+  setPluginState(name, false);
+  return reply(sock, msg, `✅ Disabled *${name}*.`);
+}
 
 module.exports = {
   routeMessage,

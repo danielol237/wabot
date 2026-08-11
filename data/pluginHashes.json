@@ -1,0 +1,8 @@
+{
+  "_comment": "Pinned SHA-256 allowlist for marketplace plugins. This file is the TRUST ANCHOR: it ships in the wabot repo (not the plugin repo). installPlugin/update verify every downloaded file's hash against this before writing it to disk. If a hash is missing, installs fail closed — pin a known-good hash here before allowing a plugin. Regenerate with: node -e \"const c=require('crypto'),fs=require('fs');console.log(c.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'))\" plugins/<name>.js",
+  "plugins": {
+    "enhanced": "228c4687c2e55c6a3d8bd7c9d442c3530a6d746141de860182d5f9bb079ca422",
+    "example": "45ffd02e2dbf233f03b2568a3333086e9fcaae44d15035c484890126f1a4fa3c",
+    "nsfw": "62ecd63d43fb6db6c9729eabb61cce86b05c5a4fec004d255499a36d12f20f8f"
+  }
+}

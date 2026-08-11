@@ -1513,7 +1513,22 @@ async function handleSelfCheck(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "🔬");
   const result = await runSelfCheck(ctx.senderName);
-  await reply(sock, msg, result);
+  // runSelfCheck returns an OBJECT ({success, noIssues, message} or
+  // {success, diagnosis}), but reply() expects a string. Stringify it or the
+  // command reacts 🔬 then silently sends nothing.
+  if (typeof result === "string") {
+    await reply(sock, msg, result);
+  } else if (result && result.noIssues) {
+    await reply(sock, msg, result.message || "✅ All clear.");
+  } else if (result && result.diagnosis) {
+    const d = result.diagnosis;
+    const text = `🔍 *Self-check*\n\n*Issue:* ${d.issue || d.title || "Unknown"}\n\n${d.summary || ""}\n\n_Fix proposal:_ ${d.fix || d.proposedFix || "See pending fix."}`;
+    await reply(sock, msg, text);
+  } else if (result && result.error) {
+    await reply(sock, msg, `⚠️ ${result.error}`);
+  } else {
+    await reply(sock, msg, "✅ Self-check complete — no action needed.");
+  }
 }
 
 async function handleClear(sock, msg, args, ctx) {

@@ -1,23 +1,57 @@
-// ── Vercel static deploy (optional) ─────────────────────────
-// Deploys a built static project to Vercel for a live preview URL.
+// ── Vercel deploy (optional) ────────────────────────────────
+// Deploys a built project to Vercel for a live preview URL.
+// Supports BOTH static sites and build-step projects (package.json).
+// Uses the Vercel CLI via npx (auto-detects framework and runs the build);
+// falls back to the raw REST files-upload for static-only projects.
 // Requires VERCEL_TOKEN in env. If not configured/available, returns
 // success:false so the build continues without a preview (never blocks).
 
 const axios = require("axios");
+const { execFile } = require("child_process");
+const path = require("path");
+const fs = require("fs");
 
 const VERCEL_API = "https://api.vercel.com";
 
-async function deployToVercel(projectDir, projectName) {
-  const token = process.env.VERCEL_TOKEN;
-  if (!token) return { success: false, error: "VERCEL_TOKEN not set" };
-  const { log, error } = require("../utils/logger");
+function hasPackageJson(dir) {
+  return fs.existsSync(path.join(dir, "package.json"));
+}
 
+// ── Primary path: Vercel CLI (handles static + framework builds) ──
+async function deployViaCli(projectDir, projectName, token) {
+  const { log } = require("../utils/logger");
+  return new Promise((resolve) => {
+    const args = [
+      "vercel",
+      "deploy",
+      projectDir,
+      "--prod",
+      "--yes",
+      "--name",
+      (projectName || "aria-project").toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 40),
+      "--token",
+      token,
+    ];
+    execFile("npx", args, { timeout: 120000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const out = (stdout || "") + "\n" + (stderr || "");
+      log("[vercel] CLI deploy output:", out.slice(-600));
+      if (err) return resolve({ success: false, error: "CLI deploy failed: " + (err.message || "error") });
+      // The CLI prints the production URL (e.g. https://xxx.vercel.app) on success.
+      const m = out.match(/(https:\/\/[a-z0-9-]+\.vercel\.app)/i) || out.match(/(https:\/\/[^\s]+\.vercel\.app)/i);
+      if (m) return resolve({ success: true, url: m[1] });
+      // Some CLI versions print the URL to stdout on its own line.
+      const urls = out.split("\n").map((l) => l.trim()).filter((l) => /^https:\/\/.+\..+/.test(l));
+      if (urls.length) return resolve({ success: true, url: urls[urls.length - 1] });
+      return resolve({ success: false, error: "CLI deploy finished but no URL found in output" });
+    });
+  });
+}
+
+// ── Fallback: REST files-upload (static only) ─────────────────────
+async function deployViaApi(projectDir, projectName, token) {
+  const { log, error } = require("../utils/logger");
   try {
-    // Create a deployment. Vercel accepts a tarball or a set of files; for a
-    // small static build we upload a simple file list.
     const files = [];
-    const fs = require("fs");
-    const path = require("path");
     function walk(dir, base) {
       for (const f of fs.readdirSync(dir)) {
         const fp = path.join(dir, f);
@@ -42,6 +76,29 @@ async function deployToVercel(projectDir, projectName) {
     const url = res.data?.url;
     if (url) return { success: true, url: "https://" + url };
     return { success: false, error: "No deployment URL returned" };
+  } catch (err) {
+    log("Vercel API deploy failed (non-fatal):", err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+async function deployToVercel(projectDir, projectName) {
+  const token = process.env.VERCEL_TOKEN;
+  if (!token) return { success: false, error: "VERCEL_TOKEN not set" };
+  const { log } = require("../utils/logger");
+
+  try {
+    if (hasPackageJson(projectDir)) {
+      // Build-step project: the CLI is required to install deps and build.
+      log("[vercel] package.json detected — using CLI for framework build");
+      return await deployViaCli(projectDir, projectName, token);
+    }
+    // Static project: try CLI first (most reliable), fall back to REST API.
+    log("[vercel] static project — deploying");
+    const cli = await deployViaCli(projectDir, projectName, token);
+    if (cli.success) return cli;
+    log("[vercel] CLI deploy skipped/failed, falling back to REST API");
+    return await deployViaApi(projectDir, projectName, token);
   } catch (err) {
     log("Vercel deploy failed (non-fatal):", err.message);
     return { success: false, error: err.message };

@@ -620,11 +620,12 @@ async function finalizeProject(project, projectDir, onProgress) {
     cleanupDir(path.join(projectDir, "node_modules"));
   }
 
-  // Optional live preview via Vercel — only attempted for static projects (no
-  // package.json/build step) since those deploy instantly with zero config.
-  // Entirely skipped if VERCEL_TOKEN isn't set; never blocks the rest of the build.
+  // Optional live preview via Vercel — works for BOTH static projects and
+  // build-step projects (package.json). The CLI auto-detects the framework,
+  // installs deps and runs the build. Entirely skipped if VERCEL_TOKEN isn't
+  // set; never blocks the rest of the build.
   let previewUrl = null;
-  if (!hasPackageJson && process.env.VERCEL_TOKEN) {
+  if (process.env.VERCEL_TOKEN) {
     if (onProgress) await onProgress("🌐 *Deployer:* Setting up a live preview...");
     try {
       const { deployToVercel } = require("./vercelDeploy");

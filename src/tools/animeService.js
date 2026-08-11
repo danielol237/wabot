@@ -292,10 +292,77 @@ async function getEpisodes(entry) {
   return Array.from({ length: Math.min(n, 200) }, (_, i) => ({ number: i + 1, title: `Episode ${i + 1}` }));
 }
 
+// ── Browse with filters (AniList) ─────────────────────────────────
+// genre, status (RELEASING/COMPLETED/NOT_YET_RELEASED), year, type.
+async function browseAnime({ genre, status, year, type, sort = "POPULARITY_DESC", perPage = 24 }) {
+  const args = [];
+  if (genre) args.push(`genre:${JSON.stringify(genre)}`);
+  if (status) args.push(`status:${status}`);
+  if (year) args.push(`seasonYear:${Number(year)}`);
+  if (type) args.push(`format:${type}`);
+  const filterStr = args.join(",");
+  const query = `query($page:Int){Page(page:$page,perPage:${perPage}){media(${filterStr},type:ANIME,sort:${sort}){id
+    title{english romaji native} coverImage{extraLarge large} description genres status
+    seasonYear averageScore episodes format}}}`;
+  const data = await anilist(query, { page: 1 });
+  return fromAnilist(data?.Page);
+}
+
+// ── Random anime (AniList) ────────────────────────────────────────
+async function getRandom() {
+  // Fetch a random page of anime (IDs are sparse, so a random single-ID query
+  // often misses). Pull 20 and pick one at random, retrying a few times.
+  for (let i = 0; i < 3; i++) {
+    const page = Math.floor(Math.random() * 100) + 1;
+    const data = await anilist(
+      `query($page:Int){Page(page:$page,perPage:20){media(type:ANIME,sort:POPULARITY_DESC){id
+        title{english romaji native} coverImage{extraLarge large} description genres status
+        seasonYear averageScore episodes format}}}`,
+      { page }
+    );
+    const items = fromAnilist(data?.Page);
+    if (items.length) return items[Math.floor(Math.random() * items.length)];
+  }
+  return null;
+}
+
+// ── Daily schedule (AniList airingSchedule) ────────────────────────
+// day: 0-6 (0=Sunday). Returns airing anime for the next week, filtered
+// to the requested weekday.
+async function getSchedule(day = new Date().getDay()) {
+  const now = Math.floor(Date.now() / 1000);
+  const dayMs = 24 * 60 * 60;
+  const start = now;
+  const end = now + 7 * dayMs;
+  const data = await anilist(
+    `query($start:Int,$end:Int){Page(perPage:60){airingSchedules(airingAt_greater:$start,airingAt_lesser:$end,sort:TIME){
+      airingAt episode media{id title{english romaji} coverImage{large} format averageScore}}}}`,
+    { start, end }
+  );
+  const airings = data?.Page?.airingSchedules || [];
+  return airings
+    .filter((a) => new Date(a.airingAt * 1000).getDay() === Number(day))
+    .map((a) => ({
+      id: String(a.media.id),
+      title: a.media.title?.english || a.media.title?.romaji || "Untitled",
+      cover: a.media.coverImage?.large || "",
+      episode: a.episode,
+      airingAt: a.airingAt,
+      time: new Date(a.airingAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      rating: a.media.averageScore ? a.media.averageScore / 10 : null,
+      type: a.media.format,
+      provider: "anilist",
+    }))
+    .slice(0, 24);
+}
+
 module.exports = {
   searchAnime,
   getTrending,
   getLatest,
+  browseAnime,
+  getRandom,
+  getSchedule,
   getDetails,
   getEpisodes,
   loadWatchlist,

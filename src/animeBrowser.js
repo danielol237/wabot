@@ -126,8 +126,10 @@ h1{font-size:26px;font-weight:900;margin-bottom:4px}
   </form>
   <nav class="nav-links">
     <a href="/dashboard/anime">Home</a>
+    <a href="/dashboard/anime/browse">Browse</a>
     <a href="/dashboard/anime/trending">Trending</a>
     <a href="/dashboard/anime/latest">Latest</a>
+    <a href="/dashboard/anime/schedule">Schedule</a>
     <a href="/dashboard/anime/watchlist">Watchlist</a>
     <a href="/dashboard/anime/downloads">Downloads</a>
     <a href="/dashboard">← Dashboard</a>
@@ -183,6 +185,42 @@ async function homePage(req) {
     html += `<div class="section-h">❤️ My List</div>${cardGrid(watchlist)}`;
   }
   return layout("Home", { html });
+}
+
+const GENRES = ["Action", "Adventure", "Comedy", "Romance", "Fantasy", "Horror", "Sci-Fi", "Drama", "Mystery", "Slice of Life", "Sports", "Thriller"];
+const STATUSES = [["", "Any"], ["RELEASING", "Airing"], ["COMPLETED", "Completed"], ["NOT_YET_RELEASED", "Upcoming"]];
+const TYPES = [["", "Any"], ["TV", "TV"], ["MOVIE", "Movie"], ["OVA", "OVA"], ["ONA", "ONA"]];
+const YEARS = [2026, 2025, 2024, 2023, 2022, 2021, 2020];
+
+async function browsePage(req) {
+  const { genre = "", status = "", year = "", type = "" } = req.query || {};
+  const items = await service.browseAnime({ genre, status, year, type, perPage: 24 }).catch(() => []);
+  const options = (vals, current) => vals.map(([v, label]) => `<option value="${v}" ${String(v) === String(current) ? "selected" : ""}>${label}</option>`).join("");
+  let html = `<h1>Browse</h1><div class="sub">Filter by genre, status, year and type</div>`;
+  html += `<form method="get" action="/dashboard/anime/browse" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+    <select name="genre" style="background:var(--panel);border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:10px">${options([["", "All genres"], ...GENRES.map((g) => [g, g])], genre)}</select>
+    <select name="status" style="background:var(--panel);border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:10px">${options(STATUSES, status)}</select>
+    <select name="year" style="background:var(--panel);border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:10px">${options([["", "Any year"], ...YEARS.map((y) => [String(y), String(y)])], year)}</select>
+    <select name="type" style="background:var(--panel);border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:10px">${options(TYPES, type)}</select>
+    <button class="watch" style="margin-top:0">Filter</button>
+    <a class="watch" style="margin-top:0;text-decoration:none" href="/dashboard/anime/browse">Reset</a>
+  </form>`;
+  html += cardGrid(items);
+  return layout("Browse", { html });
+}
+
+async function schedulePage(day = new Date().getDay()) {
+  const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const items = await service.getSchedule(day).catch(() => []);
+  let html = `<h1>Schedule — ${DAYS[Number(day)]}</h1><div class="sub">Airings for the next 7 days on this weekday</div>`;
+  html += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px">${DAYS.map((d, i) => `<a href="/dashboard/anime/schedule?day=${i}" style="background:${i === Number(day) ? "var(--accent)" : "var(--panel)"};color:${i === Number(day) ? "#fff" : "var(--muted)"};border:1px solid var(--line);padding:7px 12px;border-radius:9px;font-size:12px;text-decoration:none">${d}</a>`).join("")}</div>`;
+  html += items.length ? `<div class="feed">${items.map((a) => `
+    <a href="/dashboard/anime/anilist/${esc(a.id)}" style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);text-decoration:none;color:inherit">
+      ${a.cover ? `<img src="${esc(a.cover)}" style="width:44px;height:62px;object-fit:cover;border-radius:8px" onerror="this.style.visibility='hidden'" />` : `<div style="width:44px;height:62px;background:var(--panel2);border-radius:8px"></div>`}
+      <div style="flex:1"><div style="font-weight:700">${esc(a.title)}</div><div style="color:var(--muted);font-size:12px">Ep ${a.episode}${a.rating ? " · ★" + a.rating : ""}</div></div>
+      <span style="color:var(--muted);font-size:13px">${esc(a.time)}</span>
+    </a>`).join("")}</div>` : `<div class="empty">No scheduled airings for this day in the next week.</div>`;
+  return layout("Schedule", { html });
 }
 
 async function searchPage(q) {
@@ -319,6 +357,15 @@ router.get("/trending", async (req, res) => { try { res.send(await trendingPage(
 router.get("/latest", async (req, res) => { try { res.send(await latestPage()); } catch (e) { res.status(500).send(esc(e.message)); } });
 router.get("/watchlist", async (req, res) => { try { res.send(await watchlistPage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
 router.get("/downloads", async (req, res) => { try { res.send(await downloadsPage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
+router.get("/browse", async (req, res) => { try { res.send(await browsePage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
+router.get("/schedule", async (req, res) => { try { res.send(await schedulePage(req.query.day ?? new Date().getDay())); } catch (e) { res.status(500).send(esc(e.message)); } });
+router.get("/random", async (req, res) => {
+  try {
+    const a = await service.getRandom();
+    if (!a) return res.redirect("/dashboard/anime/browse?random=failed");
+    return res.redirect(`/dashboard/anime/${encodeURIComponent(a.provider)}/${encodeURIComponent(a.id)}`);
+  } catch (e) { res.status(500).send(esc(e.message)); }
+});
 
 // Serve a finished browser-job file.
 router.get("/file/:id", (req, res) => {

@@ -41,6 +41,28 @@ function checkYtDlp() {
   });
 }
 
+// Probe a single external binary and report availability. Used by the dashboard
+// health endpoint so missing runtime deps (yt-dlp/ffmpeg/docker/python) are
+// visible before a download or code-exec is attempted, not discovered after.
+function checkBinary(cmd, versionArgs = ["--version"]) {
+  return new Promise((resolve) => {
+    execFile(cmd, versionArgs, { timeout: 8000 }, (err) => {
+      resolve(!err);
+    });
+  });
+}
+
+async function getRuntimeDeps() {
+  const [ytDlp, ffmpeg, ffprobe, python, docker] = await Promise.all([
+    checkBinary("yt-dlp"),
+    checkBinary("ffmpeg", ["-version"]),
+    checkBinary("ffprobe", ["-version"]),
+    checkBinary("python3", ["--version"]),
+    checkBinary("docker", ["--version"]),
+  ]);
+  return { ytDlp, ffmpeg, ffprobe, python3: python, docker };
+}
+
 // ── Configuration ─────────────────────────────────────────────────
 const MAX_CONCURRENT_DOWNLOADS = Number(process.env.ANIME_MAX_CONCURRENT || 2);
 // yt-dlp size cap for a single file (keeps the bot from ballooning).
@@ -659,6 +681,7 @@ module.exports = {
   getJob,
   snapshot,
   emitter,
+  getRuntimeDeps,
 };
 
 // Recover any jobs that were queued before a restart, and check yt-dlp.

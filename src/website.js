@@ -17,15 +17,57 @@ function tryLoad(m) { try { return require(m); } catch (_) { return null; } }
 const { checkAuth } = require("./dashboard");
 router.use(["/api/missions", "/api/memory", "/api/media", "/api/household", "/api/alerts", "/api/system"], checkAuth);
 
+// Same stateless CSRF policy as the dashboard, for the state-changing /api
+// endpoints that sit behind dashboard auth. /api/chat stays public + CSRF-free.
+const { csrfOk } = require("./dashboard");
+router.post(["/api/missions", "/api/missions/cancel"], (req, res, next) => {
+  if (!csrfOk(req)) return res.status(403).json({ error: "Invalid or missing CSRF token." });
+  next();
+});
+
 // ── API: live chat with ARIA ─────────────────────────────────
+// Public endpoint — rate-limit by IP so a bot can't burn the AI quota with
+// unlimited /api/chat calls. Enforced in-memory: window, per-IP cap, burst cap,
+// max body size, and a concurrency ceiling.
+const chatLimits = new Map(); // ip -> { count, windowStart }
+const CHAT_WINDOW_MS = 60 * 1000;
+const CHAT_MAX_PER_WINDOW = 12;       // 12 requests / 60s per IP
+const CHAT_MAX_BODY = 4000;           // bytes
+const CHAT_MAX_CONCURRENT = 5;
+let chatInFlight = 0;
+// Periodically drop stale rate-limit buckets so the map doesn't grow forever.
+setInterval(() => {
+  const cutoff = Date.now() - CHAT_WINDOW_MS;
+  for (const [k, v] of chatLimits) if (v.windowStart < cutoff) chatLimits.delete(k);
+}, 5 * 60 * 1000).unref();
+
 router.post("/api/chat", async (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const now = Date.now();
+  const rec = chatLimits.get(ip) || { count: 0, windowStart: now };
+  if (now - rec.windowStart > CHAT_WINDOW_MS) { rec.count = 0; rec.windowStart = now; }
+  rec.count++;
+  chatLimits.set(ip, rec);
+  if (rec.count > CHAT_MAX_PER_WINDOW) {
+    return res.status(429).json({ reply: "Slow down, friend — too many messages. Give me a moment. 🤍" });
+  }
+  if (chatInFlight >= CHAT_MAX_CONCURRENT) {
+    return res.status(429).json({ reply: "I'm swamped right now — try again in a sec." });
+  }
+  if (req.headers["content-length"] && Number(req.headers["content-length"]) > CHAT_MAX_BODY) {
+    return res.status(413).json({ reply: "That message is too long." });
+  }
   try {
     const { message } = req.body || {};
     if (!message || !String(message).trim()) return res.json({ reply: "say something, bestie 🤍" });
+    if (String(message).length > 2000) return res.status(413).json({ reply: "That message is too long." });
     const { getAIResponse } = require("./tools/ai");
+    chatInFlight++;
     const reply = await getAIResponse(String(message), "WebsiteVisitor", []);
+    chatInFlight--;
     res.json({ reply: reply || "..." });
   } catch (e) {
+    chatInFlight = Math.max(0, chatInFlight - 1);
     res.status(500).json({ reply: "error: " + e.message });
   }
 });
@@ -94,12 +136,19 @@ router.get("/api/alerts", (req, res) => {
 });
 
 // ── API: system health ───────────────────────────────────────
-router.get("/api/system", (req, res) => {
+router.get("/api/system", async (req, res) => {
   try {
     const os = require("os");
     const dm = tryLoad("./tools/durableMissions");
     const botAdmin = tryLoad("./tools/botAdmin");
     const errors = botAdmin && botAdmin.getRecentErrors ? botAdmin.getRecentErrors(5) : [];
+    // Runtime dependency health (yt-dlp/ffmpeg/docker/python) so a deploy that
+    // drops a binary is flagged before it breaks downloads/code-exec.
+    let runtimeDeps = null;
+    try {
+      const ajm = tryLoad("./tools/animeJobManager");
+      if (ajm && ajm.getRuntimeDeps) runtimeDeps = await ajm.getRuntimeDeps();
+    } catch (_) {}
     let build = "unknown";
     try {
       const { execSync } = require("child_process");
@@ -116,6 +165,7 @@ router.get("/api/system", (req, res) => {
       missions: dm && dm.getAllMissions ? dm.getAllMissions().length : 0,
       recentErrors: errors.length,
       aiKeys: ["OPENROUTER_API_KEY","GROQ_API_KEY","CEREBRAS_API_KEY","GEMINI_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"].filter((k) => process.env[k]).length,
+      runtimeDeps,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

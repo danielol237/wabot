@@ -16,11 +16,18 @@ const CSRF_SECRET = process.env.DASHBOARD_CSRF_SECRET || process.env.DASHBOARD_P
 // Sessions survive process restarts and are shared across instances by
 // writing to a JSON file. Prune + persist on every change.
 const sessions = new Map();
+function hashToken(t) {
+  return crypto.createHash("sha256").update(String(t)).digest("hex");
+}
 function loadSessions() {
   try {
     const raw = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf8"));
     for (const [k, v] of Object.entries(raw || {})) {
-      if (v && v.expires && v.expires > Date.now()) sessions.set(k, v.expires);
+      // Store only the SHA-256 of the token — the persistent file must not
+      // contain reusable credentials. Keys from older plaintext files are
+      // hashed on load so a leaked file is useless.
+      const key = /^[a-f0-9]{64}$/.test(k) ? k : hashToken(k);
+      if (v && v.expires && v.expires > Date.now()) sessions.set(key, v.expires);
     }
   } catch (_) {}
 }
@@ -60,12 +67,12 @@ function csrfOk(req) {
   return !!given && given === csrfFor(req);
 }
 
-// Guard state-changing POSTs that already have an authenticated session.
-router.post("/logout", (req, res, next) => {
-  if (!csrfOk(req)) return res.status(403).send("Invalid or missing CSRF token.");
-  next();
-});
-router.post("/api/anime/:id/retry", (req, res, next) => {
+// Guard every state-changing POST on the dashboard (logout, anime retry,
+// health checks, etc.) with the same CSRF check — one consistent policy instead
+// of ad-hoc guards. /login is excluded: there's no session yet, and the login
+// throttle already mitigates abuse.
+router.post("*", (req, res, next) => {
+  if (req.path === "/login") return next();
   if (!csrfOk(req)) return res.status(403).json({ error: "Invalid or missing CSRF token." });
   next();
 });
@@ -96,12 +103,13 @@ function checkAuth(req, res, next) {
   const pw = process.env.DASHBOARD_PASSWORD;
   if (!pw) return res.send(renderPage("Locked", "", true));
   const token = req.cookies?.["aria_session"];
-  if (token && sessions.get(token) && sessions.get(token) > Date.now()) return next();
+  const h = hashToken(token);
+  if (token && sessions.get(h) && sessions.get(h) > Date.now()) return next();
   const auth = req.headers.authorization || "";
   if (auth.startsWith("Bearer ")) {
     if (constantTimeEqual(auth.slice(7), pw)) {
       const t = crypto.randomBytes(24).toString("hex");
-      sessions.set(t, Date.now() + SESSION_TTL);
+      sessions.set(hashToken(t), Date.now() + SESSION_TTL);
       persistSessions();
       res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax" });
       return next();
@@ -111,7 +119,7 @@ function checkAuth(req, res, next) {
       const decoded = Buffer.from(auth.slice(6), "base64").toString("utf8");
       if (constantTimeEqual(decoded.split(":")[1] || "", pw)) {
         const t = crypto.randomBytes(24).toString("hex");
-        sessions.set(t, Date.now() + SESSION_TTL);
+        sessions.set(hashToken(t), Date.now() + SESSION_TTL);
         res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax" });
         return next();
       }
@@ -146,7 +154,7 @@ router.post("/login", (req, res) => {
     if (pw && constantTimeEqual(supplied, pw)) {
       loginAttempts.delete(ip);
       const t = crypto.randomBytes(24).toString("hex");
-      sessions.set(t, Date.now() + SESSION_TTL);
+      sessions.set(hashToken(t), Date.now() + SESSION_TTL);
       persistSessions();
       res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax" });
       return res.redirect("/dashboard");
@@ -158,7 +166,7 @@ router.post("/login", (req, res) => {
 
 router.post("/logout", (req, res) => {
   const token = req.cookies?.["aria_session"];
-  if (token) { sessions.delete(token); persistSessions(); }
+  if (token) { sessions.delete(hashToken(token)); persistSessions(); }
   res.clearCookie("aria_session");
   res.redirect("/dashboard");
 });
@@ -695,3 +703,4 @@ router.get("/", checkAuth, (req, res) => {
 
 module.exports = router;
 module.exports.checkAuth = checkAuth;
+module.exports.csrfOk = csrfOk;

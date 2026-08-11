@@ -207,14 +207,24 @@ function snapshot() {
   };
 }
 
+// Quality -> yt-dlp format selector (height-bounded "best").
+const QUALITY_FORMATS = {
+  "360": "best[height<=360][ext=mp4]/best[height<=360]/best[ext=mp4]/best",
+  "480": "best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best",
+  "720": "best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best",
+  "1080": "best[height<=1080][ext=mp4]/best[height<=1080]/best[ext=mp4]/best",
+  "best": "best[ext=mp4]/best[ext=m4a]/best",
+};
+
 // ── Download helper (yt-dlp with header preservation + validation) ──
-function downloadStream(job, url, headers, maxMB) {
+function downloadStream(job, url, headers, maxMB, quality = "best") {
   const id = uuidv4();
   const ext = /\.m3u8/i.test(url) ? "mp4" : "mp4";
   const outputPath = path.join(TEMP_DIR, `${id}.%(ext)s`);
+  const format = QUALITY_FORMATS[quality] || QUALITY_FORMATS["best"];
   return new Promise((resolve) => {
     const args = [
-      "-f", "best[ext=mp4]/best[ext=m4a]/best",
+      "-f", format,
       "--merge-output-format", "mp4",
       "--max-filesize", `${maxMB}M`,
       "-o", outputPath,
@@ -347,8 +357,8 @@ async function runJob(job) {
       step(src.provider, "source", true, src.type + (src.quality !== "unknown" ? " · " + src.quality : ""));
 
       // 4. Download with provider headers preserved.
-      step(src.provider, "download", true, "fetching…");
-      const dl = await downloadStream(job, src.url, src.headers, MAX_DOWNLOAD_MB);
+      step(src.provider, "download", true, `fetching${job.quality && job.quality !== "best" ? " (" + job.quality + "p)" : ""}…`);
+      const dl = await downloadStream(job, src.url, src.headers, MAX_DOWNLOAD_MB, job.quality || "best");
       if (!dl.success) {
         const fe = jobError("DOWNLOAD_FAILED", src.provider, "download", dl.error || "yt-dlp failed", true);
         step(src.provider, "download", false, fe.message);
@@ -432,12 +442,13 @@ function pump() {
 }
 
 // ── Public API ────────────────────────────────────────────────────
-function enqueueAnimeJob({ name, episode, sock, chatId, quotedMsg, preferred }) {
+function enqueueAnimeJob({ name, episode, sock, chatId, quotedMsg, preferred, quality }) {
   const job = {
     id: uuidv4().slice(0, 8),
     name,
     episode,
     preferred: preferred || null,
+    quality: quality || "best",
     sock,
     chatId,
     quotedMsg,
@@ -465,6 +476,7 @@ function retryJob(id) {
     name: old.name,
     episode: old.episode,
     preferred: old.preferred,
+    quality: old.quality,
     sock: old.sock,
     chatId: old.chatId,
     quotedMsg: old.quotedMsg,

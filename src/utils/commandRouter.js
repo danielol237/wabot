@@ -996,18 +996,23 @@ async function handleAnimeEps(sock, msg, args, ctx) {
 
 async function handleAnimePlay(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !animedl <anime name> <episode> — e.g. !animedl solo leveling ep1");
+  if (!args) return reply(sock, msg, "Usage: !animedl <anime name> <episode> [quality] — e.g. !animedl solo leveling ep1 720");
   await react(sock, msg, "⏬");
 
+  // Optional quality token (360/480/720/1080/best) at the end.
+  const qMatch = args.match(/\s(360|480|720|1080|best)\s*$/i);
+  const quality = qMatch ? qMatch[1].toLowerCase() : "best";
+  let baseArgs = qMatch ? args.slice(0, qMatch.index).trim() : args.trim();
+
   // Extract the episode number from ep1 / episode 1 / #1 / ' episode 1 '
-  const epMatch = args.match(/(?:ep|episode|ep\.)?\s*#?\s*(\d{1,4})\s*$/i);
+  const epMatch = baseArgs.match(/(?:ep|episode|ep\.)?\s*#?\s*(\d{1,4})\s*$/i);
   const episode = epMatch ? parseInt(epMatch[1]) : NaN;
   if (!episode || episode < 1) {
-    return reply(sock, msg, "🤨 Which episode? Try: !animedl solo leveling ep1");
+    return reply(sock, msg, "🤨 Which episode? Try: !animedl solo leveling ep1 (or add 720/1080 for quality)");
   }
 
   // Strip the episode token from the name
-  let name = args.replace(/(?:ep|episode)\s*#?\s*\d{1,4}\s*$/i, "").replace(/\s+$/, "").trim();
+  let name = baseArgs.replace(/(?:ep|episode)\s*#?\s*\d{1,4}\s*$/i, "").replace(/\s+$/, "").trim();
   if (!name) return reply(sock, msg, "🤨 What anime? Try: !animedl solo leveling ep1");
 
   // Enqueue as a background job so a heavy download can't block the message
@@ -1018,11 +1023,16 @@ async function handleAnimePlay(sock, msg, args, ctx) {
   const job = enqueueAnimeJob({
     name,
     episode,
+    quality,
     sock,
     chatId: ctx.chatId,
     quotedMsg: msg,
   });
-  await reply(sock, msg, `⏳ *${name}* Ep ${episode} queued (job \`${job.id}\`).\nI'll stream progress here and send the file when it's ready.`);
+  // Track Continue Watching progress for this title.
+  try {
+    require("../tools/animeService").trackProgress({ id: "wa:" + name, provider: "whatsapp", title: name, episode, quality, status: "watching" });
+  } catch (_) {}
+  await reply(sock, msg, `⏳ *${name}* Ep ${episode} queued (job \`${job.id}\`)${quality !== "best" ? " at " + quality + "p" : ""}.\nI'll stream progress here and send the file when it's ready.`);
 }
 
 async function handleTrending(sock, msg, args, ctx) {

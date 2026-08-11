@@ -5,12 +5,70 @@
 const express = require("express");
 const crypto = require("crypto");
 const path = require("path");
+const fs = require("fs");
 const router = express.Router();
 
 const SESSION_TTL = 12 * 60 * 60 * 1000;
+const SESSIONS_FILE = path.join(__dirname, "../data/dashboardSessions.json");
+const CSRF_SECRET = process.env.DASHBOARD_CSRF_SECRET || process.env.DASHBOARD_PASSWORD || "aria-csrf";
 
-// JSON body parsing for the /api routes only (keeps the raw login body intact).
+// ── Persisted sessions ────────────────────────────────────────────
+// Sessions survive process restarts and are shared across instances by
+// writing to a JSON file. Prune + persist on every change.
+const sessions = new Map();
+function loadSessions() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf8"));
+    for (const [k, v] of Object.entries(raw || {})) {
+      if (v && v.expires && v.expires > Date.now()) sessions.set(k, v.expires);
+    }
+  } catch (_) {}
+}
+function persistSessions() {
+  const now = Date.now();
+  const out = {};
+  for (const [k, v] of sessions) {
+    if (v > now) out[k] = { expires: v };
+    else sessions.delete(k);
+  }
+  try { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(out)); } catch (_) {}
+}
+loadSessions();
+
+// Cookie reader — must run BEFORE the CSRF guards (which read req.cookies).
+router.use((req, res, next) => {
+  const raw = req.headers.cookie || "";
+  req.cookies = {};
+  for (const part of raw.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k) req.cookies[k] = decodeURIComponent(v.join("=") || "");
+  }
+  next();
+});
+
+// JSON body parsing for the /api routes (must run before the CSRF guards
+// below, which read req.body). Login stays raw so its form body is untouched.
 router.use("/api", express.json());
+
+// ── CSRF (stateless, derived from the session cookie) ─────────────
+function csrfFor(req) {
+  const token = req.cookies?.["aria_session"] || "";
+  return crypto.createHmac("sha256", CSRF_SECRET).update(token).digest("hex").slice(0, 32);
+}
+function csrfOk(req) {
+  const given = req.body?._csrf || req.query?._csrf || "";
+  return !!given && given === csrfFor(req);
+}
+
+// Guard state-changing POSTs that already have an authenticated session.
+router.post("/logout", (req, res, next) => {
+  if (!csrfOk(req)) return res.status(403).send("Invalid or missing CSRF token.");
+  next();
+});
+router.post("/api/anime/:id/retry", (req, res, next) => {
+  if (!csrfOk(req)) return res.status(403).json({ error: "Invalid or missing CSRF token." });
+  next();
+});
 
 // ── Login rate limiting (#20) ─────────────────────────────────────
 const loginAttempts = new Map(); // ip -> { count, resetAt }
@@ -26,18 +84,6 @@ function recordLoginAttempt(ip) {
   rec.count++;
   loginAttempts.set(ip, rec);
 }
-
-router.use((req, res, next) => {
-  const raw = req.headers.cookie || "";
-  req.cookies = {};
-  for (const part of raw.split(";")) {
-    const [k, ...v] = part.trim().split("=");
-    if (k) req.cookies[k] = decodeURIComponent(v.join("=") || "");
-  }
-  next();
-});
-
-const sessions = new Map();
 
 function constantTimeEqual(a, b) {
   const bufA = Buffer.from(String(a));
@@ -56,6 +102,7 @@ function checkAuth(req, res, next) {
     if (constantTimeEqual(auth.slice(7), pw)) {
       const t = crypto.randomBytes(24).toString("hex");
       sessions.set(t, Date.now() + SESSION_TTL);
+      persistSessions();
       res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax" });
       return next();
     }
@@ -100,6 +147,7 @@ router.post("/login", (req, res) => {
       loginAttempts.delete(ip);
       const t = crypto.randomBytes(24).toString("hex");
       sessions.set(t, Date.now() + SESSION_TTL);
+      persistSessions();
       res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax" });
       return res.redirect("/dashboard");
     }
@@ -110,7 +158,7 @@ router.post("/login", (req, res) => {
 
 router.post("/logout", (req, res) => {
   const token = req.cookies?.["aria_session"];
-  if (token) sessions.delete(token);
+  if (token) { sessions.delete(token); persistSessions(); }
   res.clearCookie("aria_session");
   res.redirect("/dashboard");
 });
@@ -188,7 +236,7 @@ function renderDownloadsPane() {
     </div>`;
 }
 
-function renderPage(title, content, passwordNeeded = false, isLogin = false) {
+function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "") {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -314,7 +362,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="navitem" data-pane="admin"><span class="ico">🔐</span><span>Admin</span></div>
     <div class="sb-bottom">
       <div class="sb-online"><span class="dot"></span><span>ARIA online</span></div>
-      <form method="POST" action="/dashboard/logout"><button class="logout">Leave dashboard</button></form>
+      <form method="POST" action="/dashboard/logout">${csrf ? `<input type="hidden" name="_csrf" value="${csrf}" />` : ""}<button class="logout">Leave dashboard</button></form>
     </div>
   </aside>
   <main class="main">
@@ -323,6 +371,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 </div>
 `}
 <script>
+const CSRF=${JSON.stringify(csrf || "")};
 const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 function showPane(p){
@@ -352,7 +401,7 @@ async function refreshDownloads(){
 }
 async function retryJob(id){
   try{
-    const r=await fetch('/dashboard/api/anime/'+id+'/retry',{method:'POST'});
+    const r=await fetch('/dashboard/api/anime/'+id+'/retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:CSRF})});
     if(r.ok) setTimeout(refreshDownloads,500);
   }catch(_){}
 }
@@ -506,7 +555,7 @@ router.get("/", checkAuth, (req, res) => {
       </div>
     </div>`;
 
-    res.send(renderPage("Home", content));
+    res.send(renderPage("Home", content, false, false, csrfFor(req)));
   } catch (e) {
     res.send(renderPage("Error", `<div class="card"><div class="empty">${e.message}</div></div>`));
   }

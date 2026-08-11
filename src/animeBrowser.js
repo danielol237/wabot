@@ -6,11 +6,46 @@
 
 const express = require("express");
 const path = require("path");
+const crypto = require("crypto");
 const router = express.Router();
 const service = require("./tools/animeService");
 const { enqueueAnimeJob, retryJob, snapshot } = require("./tools/animeJobManager");
 
 router.use(express.urlencoded({ extended: true }));
+
+// Cookie reader (mirrors the dashboard's lightweight approach).
+router.use((req, res, next) => {
+  const raw = req.headers.cookie || "";
+  req.cookies = {};
+  for (const part of raw.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k) req.cookies[k] = decodeURIComponent(v.join("=") || "");
+  }
+  next();
+});
+
+// ── CSRF protection (stateless, derived from the session cookie) ──
+const CSRF_SECRET = process.env.DASHBOARD_CSRF_SECRET || process.env.DASHBOARD_PASSWORD || "aria-csrf";
+function csrfFor(req) {
+  const token = req.cookies?.["aria_session"] || "";
+  return crypto.createHmac("sha256", CSRF_SECRET).update(token).digest("hex").slice(0, 32);
+}
+function csrfField(req) {
+  return `<input type="hidden" name="_csrf" value="${csrfFor(req)}" />`;
+}
+function csrfOk(req) {
+  const given = req.body?._csrf || req.query?._csrf || "";
+  return !!given && given === csrfFor(req);
+}
+// Guard every state-changing POST route.
+router.post("*", (req, res, next) => {
+  if (req.path === "/download" || req.path === "/retry" || req.path === "/watchlist/toggle" || req.path === "/watchlist/remove") {
+    if (!csrfOk(req)) return res.status(403).send("Invalid or missing CSRF token.");
+  }
+  next();
+});
+
+const QUALITY_OPTIONS = ["360", "480", "720", "1080", "best"];
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -119,10 +154,30 @@ function cardGrid(items) {
 
 // ── Pages ────────────────────────────────────────────────────────
 
-async function homePage() {
+// Continue Watching row — resumes from tracked progress with a quality badge.
+function continueGrid(items) {
+  if (!items.length) return `<div class="empty">Nothing in progress. Pick a title and start watching.</div>`;
+  return `<div class="grid">${items.map((a) => `
+    <a class="card" href="/dashboard/anime/${encodeURIComponent(a.provider)}/${encodeURIComponent(a.id)}">
+      ${a.cover ? `<img class="cover" src="${esc(a.cover)}" loading="lazy" onerror="this.style.visibility='hidden'" />` : `<div class="cover"></div>`}
+      <div class="body">
+        <div class="t">${esc(a.title)}</div>
+        <div class="meta">
+          <span class="badge b-prov">${esc(PROVIDER_LABEL[a.provider] || a.provider)}</span>
+          ${a.quality && a.quality !== "best" ? `<span class="badge b-score">${esc(a.quality)}p</span>` : ""}
+        </div>
+        <div class="meta">Ep ${esc(a.episode)} ${a.status === "watching" ? "· ▶ continue" : ""}</div>
+      </div>
+    </a>`).join("")}</div>`;
+}
+
+async function homePage(req) {
   const [trending, latest] = await Promise.all([service.getTrending(), service.getLatest()]);
   const watchlist = service.loadWatchlist();
-  let html = `<div class="section-h">🔥 Trending</div>${cardGrid(trending)}`;
+  const continuing = service.getContinueWatching(8);
+  let html = "";
+  if (continuing.length) html += `<div class="section-h">▶ Continue Watching</div>${continueGrid(continuing)}`;
+  html += `<div class="section-h">🔥 Trending</div>${cardGrid(trending)}`;
   html += `<div class="section-h">🆕 Recently Updated</div>${cardGrid(latest)}`;
   if (watchlist.length) {
     html += `<div class="section-h">❤️ My List</div>${cardGrid(watchlist)}`;
@@ -147,7 +202,7 @@ async function latestPage() {
   return layout("Latest", { html: `<h1>Recently Updated</h1><div class="sub">New episodes</div>` + cardGrid(items) });
 }
 
-async function watchlistPage() {
+async function watchlistPage(req) {
   const list = service.loadWatchlist();
   let html = `<h1>Watchlist</h1><div class="sub">${list.length ? "Saved titles" : "Add titles from any anime page."}</div>`;
   html += list.length
@@ -158,6 +213,7 @@ async function watchlistPage() {
             <div class="body"><div class="t">${esc(a.title)}</div><div class="meta"><span class="badge b-prov">${esc(PROVIDER_LABEL[a.provider] || a.provider)}</span></div></div>
           </a>
           <form method="post" action="/dashboard/anime/watchlist/remove" style="position:absolute;top:8px;right:8px">
+            ${csrfField(req)}
             <input type="hidden" name="id" value="${esc(a.id)}" /><input type="hidden" name="provider" value="${esc(a.provider)}" />
             <button class="badge" style="background:var(--red);color:#fff;border:none;cursor:pointer">✕</button>
           </form>
@@ -166,17 +222,18 @@ async function watchlistPage() {
   return layout("Watchlist", { html });
 }
 
-async function downloadsPage() {
+async function downloadsPage(req) {
   const snap = snapshot();
   const jobCard = (j) => `
     <div class="job">
       <div class="row"><span class="v">${esc(j.name)} — Ep ${j.episode}</span><span class="badge b-${j.status === "done" ? "status" : j.status === "failed" ? "score" : "prov"}">${esc(j.status)}</span></div>
+      ${j.quality && j.quality !== "best" ? `<div class="row" style="margin-top:4px"><span class="k">quality</span><span class="v">${esc(j.quality)}p</span></div>` : ""}
       ${j.current ? `<div class="row" style="margin-top:4px"><span class="k">stage</span><span class="v">${esc(j.current.provider)} · ${esc(j.current.stage)}</span></div>` : ""}
       ${j.result ? `<div class="row" style="margin-top:4px"><span class="k">result</span><span class="v">${(j.result.size / 1048576).toFixed(1)} MB · ${esc(j.result.provider)}</span></div>` : ""}
       ${j.result && j.source === "browser" ? `<a class="watch" style="margin-top:10px" href="/dashboard/anime/file/${esc(j.id)}">⬇️ Download file</a>` : ""}
       ${j.error ? `<div class="row" style="margin-top:4px"><span class="k" style="color:var(--red)">error</span><span class="v" style="color:var(--red)">${esc(j.error.code)}: ${esc(j.error.message)}</span></div>` : ""}
       ${j.steps.length ? `<div class="steps">${j.steps.slice(-10).map((s) => `<div class="${s.ok ? "step-ok" : "step-no"}">${s.ok ? "✓" : "✗"} ${esc(s.provider)} ${esc(s.stage)} — ${esc(s.message)}</div>`).join("")}</div>` : ""}
-      ${j.status === "failed" ? `<form method="post" action="/dashboard/anime/retry" style="margin-top:10px"><input type="hidden" name="id" value="${esc(j.id)}" /><button class="watch">↻ Retry</button></form>` : ""}
+      ${j.status === "failed" ? `<form method="post" action="/dashboard/anime/retry" style="margin-top:10px">${csrfField(req)}<input type="hidden" name="id" value="${esc(j.id)}" /><button class="watch">↻ Retry</button></form>` : ""}
     </div>`;
   const active = [...snap.current, ...snap.queued];
   let html = `<h1>Downloads</h1><div class="sub">Live anime pipeline · active ${active.length} · done ${snap.counts.done} · failed ${snap.counts.failed}</div>`;
@@ -185,7 +242,7 @@ async function downloadsPage() {
   return layout("Downloads", { html });
 }
 
-async function detailPage(provider, id) {
+async function detailPage(provider, id, req) {
   const entry = { provider, id, title: "" };
   // Try to enrich from the watchlist (may have metadata).
   const wl = service.loadWatchlist().find((e) => e.id === id && e.provider === provider);
@@ -193,13 +250,13 @@ async function detailPage(provider, id) {
   const d = await service.getDetails(entry);
   const eps = await service.getEpisodes(entry);
   const inWl = wl ? true : false;
+  // Remember the last quality picked for this title.
+  const prog = service.getContinueWatching(50).find((e) => e.id === id && e.provider === provider);
+  const defaultQuality = prog?.quality || "best";
 
-  const dlAction = (epNum) => {
-    const target = d.provider === "jikan"
-      ? `provider=jikan&id=${encodeURIComponent(d.id)}&title=${encodeURIComponent(d.title)}`
-      : `provider=${encodeURIComponent(provider)}&id=${encodeURIComponent(id)}&title=${encodeURIComponent(d.title)}`;
-    return target;
-  };
+  const qualitySelect = `<select name="quality" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:4px 8px;border-radius:8px;font-size:12px;margin-top:6px">
+    ${QUALITY_OPTIONS.map((q) => `<option value="${q}" ${String(q) === String(defaultQuality) ? "selected" : ""}>${q === "best" ? "Auto (best)" : q + "p"}</option>`).join("")}
+  </select>`;
 
   let html = `<div class="detail">
     ${d.cover ? `<img class="poster" src="${esc(d.cover)}" onerror="this.style.visibility='hidden'" />` : `<div class="poster"></div>`}
@@ -217,6 +274,7 @@ async function detailPage(provider, id) {
       ${d.genres?.length ? `<div class="tags">${d.genres.slice(0, 8).map((g) => `<span class="tag">${esc(g)}</span>`).join("")}</div>` : ""}
       ${d.description ? `<div class="desc">${esc(d.description.slice(0, 800))}</div>` : ""}
       <form method="post" action="/dashboard/anime/watchlist/toggle" style="margin-top:14px">
+        ${csrfField(req)}
         <input type="hidden" name="provider" value="${esc(d.provider)}" />
         <input type="hidden" name="id" value="${esc(d.id)}" />
         <input type="hidden" name="title" value="${esc(d.title)}" />
@@ -232,7 +290,8 @@ async function detailPage(provider, id) {
   html += `<div class="section-h">📺 Episodes${eps.length ? ` (${eps.length})` : ""}</div>`;
   if (eps.length) {
     html += `<div class="epgrid">${eps.map((ep) => `
-      <form method="post" action="/dashboard/anime/download" class="ep">
+      <form method="post" action="/dashboard/anime/download" class="ep" style="display:flex;flex-direction:column">
+        ${csrfField(req)}
         <input type="hidden" name="provider" value="${esc(d.provider)}" />
         <input type="hidden" name="id" value="${esc(d.id)}" />
         <input type="hidden" name="title" value="${esc(d.title)}" />
@@ -241,6 +300,7 @@ async function detailPage(provider, id) {
           <div class="n">${ep.number}</div>
           <div class="e">${esc(ep.title)}</div>
         </button>
+        ${qualitySelect}
       </form>`).join("")}</div>`;
   } else {
     html += `<div class="empty">Couldn't load episodes for this provider. Try another entry.</div>`;
@@ -250,12 +310,12 @@ async function detailPage(provider, id) {
 
 // ── Routes ────────────────────────────────────────────────────────
 
-router.get("/", async (req, res) => { try { res.send(await homePage()); } catch (e) { res.status(500).send(esc(e.message)); } });
+router.get("/", async (req, res) => { try { res.send(await homePage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
 router.get("/search", async (req, res) => { try { res.send(await searchPage(req.query.q || "")); } catch (e) { res.status(500).send(esc(e.message)); } });
 router.get("/trending", async (req, res) => { try { res.send(await trendingPage()); } catch (e) { res.status(500).send(esc(e.message)); } });
 router.get("/latest", async (req, res) => { try { res.send(await latestPage()); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/watchlist", async (req, res) => { try { res.send(await watchlistPage()); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/downloads", async (req, res) => { try { res.send(await downloadsPage()); } catch (e) { res.status(500).send(esc(e.message)); } });
+router.get("/watchlist", async (req, res) => { try { res.send(await watchlistPage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
+router.get("/downloads", async (req, res) => { try { res.send(await downloadsPage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
 
 // Serve a finished browser-job file.
 router.get("/file/:id", (req, res) => {
@@ -272,23 +332,25 @@ router.get("/file/:id", (req, res) => {
 });
 
 router.get("/:provider/:id", async (req, res) => {
-  try { res.send(await detailPage(req.params.provider, req.params.id)); }
+  try { res.send(await detailPage(req.params.provider, req.params.id, req)); }
   catch (e) { res.status(500).send(esc(e.message)); }
 });
 
 // Enqueue a download job (same engine as WhatsApp).
 router.post("/download", async (req, res) => {
   try {
-    const { provider, id, title, episode } = req.body || {};
+    const { provider, id, title, episode, quality } = req.body || {};
     if (!title || !episode) return res.redirect("/dashboard/anime?err=missing");
+    const q = QUALITY_OPTIONS.includes(quality) ? quality : "best";
     const job = enqueueAnimeJob({
       name: title,
       episode: Number(episode) || 1,
       preferred: provider === "jikan" ? null : provider,
+      quality: q,
       sock: null, chatId: null, quotedMsg: null,
     });
-    // Persist the chosen provider+id so the job manager can pin it later;
-    // store it in the job's metadata via the preferred provider hint.
+    // Track Continue Watching progress (with the picked quality).
+    service.trackProgress({ id, provider, title, episode: Number(episode) || 1, quality: q, status: "watching" });
     res.redirect(`/dashboard/anime/downloads?job=${job.id}&ok=1`);
   } catch (e) { res.redirect(`/dashboard/anime?err=${encodeURIComponent(e.message)}`); }
 });

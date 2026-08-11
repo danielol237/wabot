@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 
 const DATA_FILE = path.join(__dirname, "../../data/animeWatchlist.json");
+const PROGRESS_FILE = path.join(__dirname, "../../data/animeProgress.json");
 
 // AniList GraphQL — reliable, keyless fallback for search/trending/latest
 // (Jikan/MAL is frequently rate-limited or 504s, which gutted the browser).
@@ -55,6 +56,47 @@ function removeFromWatchlist(id, provider) {
   const list = loadWatchlist().filter((e) => !(e.id === id && (!provider || e.provider === provider)));
   saveWatchlist(list);
   return list;
+}
+
+// ── Continue Watching (persisted progress) ────────────────────────
+// Tracks the last episode each title was watched/downloaded at, plus the
+// chosen quality, so the browser can offer "Continue Watching" and the
+// bot can remember where you left off.
+function loadProgress() {
+  try { return JSON.parse(fs.readFileSync(PROGRESS_FILE, "utf8")); }
+  catch (_) { return {}; }
+}
+function saveProgress(p) {
+  try { fs.writeFileSync(PROGRESS_FILE, JSON.stringify(p, null, 2)); } catch (_) {}
+}
+
+function trackProgress({ id, provider, title, cover, episode, quality, status }) {
+  const p = loadProgress();
+  const key = provider + ":" + id;
+  const prev = p[key] || {};
+  p[key] = {
+    id, provider, title: title || prev.title, cover: cover || prev.cover,
+    episode: Number(episode) || prev.episode || 1,
+    quality: quality || prev.quality || "best",
+    status: status || "watching",
+    updatedAt: Date.now(),
+  };
+  saveProgress(p);
+  return p[key];
+}
+
+function markCompleted({ id, provider }) {
+  const p = loadProgress();
+  const key = provider + ":" + id;
+  if (p[key]) { p[key].status = "completed"; p[key].updatedAt = Date.now(); saveProgress(p); }
+  return p[key] || null;
+}
+
+function getContinueWatching(limit = 10) {
+  return Object.values(loadProgress())
+    .filter((e) => e.status !== "completed")
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .slice(0, limit);
 }
 
 // ── Search across providers ───────────────────────────────────────
@@ -259,4 +301,7 @@ module.exports = {
   loadWatchlist,
   addToWatchlist,
   removeFromWatchlist,
+  trackProgress,
+  markCompleted,
+  getContinueWatching,
 };

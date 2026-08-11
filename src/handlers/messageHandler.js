@@ -37,6 +37,16 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // ── Build context ──────────────────────────────────────────
   const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins };
 
+  // ── Group message stats ────────────────────────────────────
+  // Count every group message (persisted) so !top/!active/!inactive/!purge
+  // work and survive members leaving/rejoining. Only in groups, and only for
+  // real users (not the bot itself — already filtered above).
+  if (isGroup) {
+    try {
+      require("../tools/groupStats").recordMessage(chatId, senderJid, senderName);
+    } catch (_) {}
+  }
+
   // ── HUMANITY ENGINE ────────────────────────────────────────
   // Track interaction for bond/mood
   trackInteraction(senderJid, text, checkOwner(senderJid));

@@ -109,6 +109,12 @@ function registerBuiltinCommands() {
   registerCommand({ name: "warnings", aliases: ["warns"], category: "group", description: "View warnings", handler: handleWarnings, ownerOnly: false });
   registerCommand({ name: "resetwarns", aliases: ["clearwarns"], category: "group", description: "Reset warnings", handler: handleResetWarns, ownerOnly: false });
 
+  // Group message stats / moderation
+  registerCommand({ name: "top", aliases: ["leaderboard", "topmsgs"], category: "group", description: "Top talkers in this group: !top [N]", handler: handleGroupTop, ownerOnly: false });
+  registerCommand({ name: "active", aliases: ["actives"], category: "group", description: "Active members (>= N msgs): !active [N]", handler: handleGroupActive, ownerOnly: false });
+  registerCommand({ name: "inactive", aliases: ["inactives", "dead"], category: "group", description: "Inactive members (< N msgs): !inactive [N]", handler: handleGroupInactive, ownerOnly: false });
+  registerCommand({ name: "purge", aliases: ["prune"], category: "group", description: "Kick members under N msgs: !purge [N]", handler: handleGroupPurge, ownerOnly: false });
+
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
   registerCommand({ name: "sticker", aliases: ["sticker"], category: "creative", description: "Make a sticker from image", handler: handleStickerCommand, ownerOnly: false });
@@ -558,6 +564,37 @@ async function handleResetWarns(sock, msg, args, ctx) {
   const target = require("./baileysHelpers").getTargetJid(msg);
   resetWarnings(ctx.chatId, target);
   await reply(sock, msg, "✅ Warnings reset.");
+}
+
+// ── Group message stats ─────────────────────────────────────
+async function handleGroupTop(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  const { formatTop } = require("../tools/groupStats");
+  await reply(sock, msg, formatTop(ctx.chatId, args));
+}
+
+async function handleGroupActive(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  const { formatActive } = require("../tools/groupStats");
+  await reply(sock, msg, formatActive(ctx.chatId, args));
+}
+
+async function handleGroupInactive(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  const { formatInactive } = require("../tools/groupStats");
+  await reply(sock, msg, formatInactive(ctx.chatId, args));
+}
+
+async function handleGroupPurge(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  const { purgeInactive, formatPurgeResult } = require("../tools/groupStats");
+  await reply(sock, msg, `👢 Purging members under ${parseInt(args, 10) || 5} messages…`);
+  const result = await purgeInactive(sock, ctx.chatId, args || 5);
+  await reply(sock, msg, formatPurgeResult(result));
 }
 
 // Fun handlers

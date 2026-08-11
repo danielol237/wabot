@@ -591,8 +591,17 @@ async function handleGroupInactive(sock, msg, args, ctx) {
 async function handleGroupPurge(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  // CRITICAL: !purge removes members — only the owner or a real group admin may
+  // issue it. Checking ctx.isGroup alone let any member kick everyone under the
+  // threshold once the bot itself is an admin.
+  const { isOwner } = require("../utils/permissions");
+  const { isSenderAdmin } = require("../tools/groupAdmin");
+  const callerIsOwner = isOwner(ctx.senderJid);
+  const callerIsAdmin = callerIsOwner || await isSenderAdmin(sock, ctx.chatId, ctx.senderJid).catch(() => false);
+  if (!callerIsAdmin) return reply(sock, msg, "❌ Only group admins can use !purge.");
   const { purgeInactive, formatPurgeResult } = require("../tools/groupStats");
-  await reply(sock, msg, `👢 Purging members under ${parseInt(args, 10) || 5} messages…`);
+  const n = parseInt(Array.isArray(args) ? args[0] : args, 10) || 5;
+  await reply(sock, msg, `👢 Purging members under ${n} messages…`);
   const result = await purgeInactive(sock, ctx.chatId, args || 5);
   await reply(sock, msg, formatPurgeResult(result));
 }

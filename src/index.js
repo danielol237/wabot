@@ -63,6 +63,10 @@ const USE_PAIRING_CODE = !!process.env.PHONE_NUMBER;
 const { checkAuth } = require("./dashboard");
 app.use("/preview", checkAuth, express.static(path.join(__dirname, "../data/projects")));
 
+// Anime Browser — first-class web section behind the same dashboard auth.
+const animeBrowserRouter = require("./animeBrowser");
+app.use("/dashboard/anime", checkAuth, animeBrowserRouter);
+
 app.get("/preview", (req, res) => {
   const projectsDir = path.join(__dirname, "../data/projects");
   if (!fs.existsSync(projectsDir)) return res.send("No projects built yet.");

@@ -299,6 +299,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="sb-brand"><div class="sb-logo">◢</div><div class="sb-name">ARIA<small>control room</small></div></div>
     <div class="sb-group">Workspace</div>
     <div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Home</span></div>
+    <a class="navitem" style="text-decoration:none" href="/dashboard/anime"><span class="ico">🎬</span><span>Anime</span></a>
     <div class="navitem" data-pane="missions"><span class="ico">◆</span><span>Missions</span></div>
     <div class="navitem" data-pane="memory"><span class="ico">🧠</span><span>Memory</span></div>
     <div class="navitem" data-pane="media"><span class="ico">🖼️</span><span>Media</span></div>

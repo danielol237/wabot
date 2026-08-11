@@ -160,6 +160,8 @@ function registerBuiltinCommands() {
   registerCommand({ name: "animeinfo", aliases: ["ainfo"], category: "anime", description: "Get anime details", handler: handleAnimeInfo, ownerOnly: false });
   registerCommand({ name: "episodes", aliases: ["eps", "animeeps"], category: "anime", description: "Get anime episodes", handler: handleAnimeEps, ownerOnly: false });
   registerCommand({ name: "animedl", aliases: ["animeplay", "astream", "watch", "dlanime"], category: "anime", description: "Download anime episode and send video", handler: handleAnimePlay, ownerOnly: false });
+  registerCommand({ name: "animebrowser", aliases: ["animeweb"], category: "anime", description: "Open the ARIA anime browser", handler: handleAnimeBrowser, ownerOnly: false });
+  registerCommand({ name: "animelist", aliases: ["animewl"], category: "anime", description: "Your anime watchlist", handler: handleAnimeList, ownerOnly: false });
   registerCommand({ name: "trending", aliases: ["trendinganime"], category: "anime", description: "Trending anime", handler: handleTrending, ownerOnly: false });
   registerCommand({ name: "airing", aliases: ["airinganime"], category: "anime", description: "Airing anime", handler: handleAiring, ownerOnly: false });
   registerCommand({ name: "deathbattle", aliases: ["db", "deathbatle", "fight", "whowins", "animebattle"], category: "anime", description: "Simulate an anime death battle: !deathbattle goku vs saitama", handler: handleDeathBattle, ownerOnly: false });
@@ -1029,6 +1031,21 @@ async function handleTrending(sock, msg, args, ctx) {
   const { getTrending } = require("../tools/animeExpanded");
   const result = await getTrending();
   await reply(sock, msg, typeof result === "string" ? result : JSON.stringify(result));
+}
+
+async function handleAnimeBrowser(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const base = process.env.WEB_URL || "http://localhost:3000";
+  await reply(sock, msg, `🎬 *ARIA Anime Browser*\n\nBrowse, search, watchlist & download — all in one place.\n\n🔗 ${base}/dashboard/anime\n\n_Commands:_\n!anime search <name>\n!animedl <name> <ep#>\n!animelist — your watchlist`);
+}
+
+async function handleAnimeList(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const svc = require("../tools/animeService");
+  const list = svc.loadWatchlist();
+  if (!list.length) return reply(sock, msg, "❤️ Your watchlist is empty.\nAdd titles in the browser at /dashboard/anime, or search with !anime.");
+  const lines = list.slice(0, 15).map((a, i) => `${i + 1}. ${a.title || "?"} ${a.rating ? "· ★" + a.rating : ""}`).join("\n");
+  await reply(sock, msg, `❤️ *Your Anime Watchlist (${list.length})*\n\n${lines}\n\n_Manage it in the web browser._`);
 }
 
 async function handlePSpawn(sock, msg, args, ctx) {

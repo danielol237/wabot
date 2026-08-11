@@ -295,7 +295,12 @@ async function runJob(job) {
   try {
     send(`⏬ *${job.name}* — Ep ${job.episode}\nResolving a source…`);
 
-    for (const ad of PROVIDER_ORDER) {
+    // Honor a preferred provider (from the browser) by trying it first.
+    const ordered = job.preferred
+      ? [...PROVIDER_ORDER].sort((a, b) => (a.name === job.preferred ? -1 : b.name === job.preferred ? 1 : a.priority - b.priority))
+      : PROVIDER_ORDER;
+
+    for (const ad of ordered) {
       // 1. Provider search
       let results = [];
       try {
@@ -352,15 +357,6 @@ async function runJob(job) {
       }
       step(src.provider, "validate", true, `${(dl.size / 1024 / 1024).toFixed(1)} MB`);
 
-      // 5. Size-aware WhatsApp upload.
-      if (dl.size > WHATSAPP_MAX_MB * 1024 * 1024) {
-        const fe = jobError("MEDIA_TOO_LARGE", src.provider, "send", `file is ${(dl.size / 1024 / 1024).toFixed(1)} MB, WhatsApp ceiling is ${WHATSAPP_MAX_MB} MB`, false);
-        step(src.provider, "send", false, fe.message);
-        job.failures.push(fe);
-        fs.unlinkSync(dl.filePath);
-        continue;
-      }
-
       job.result = {
         filePath: dl.filePath,
         size: dl.size,
@@ -370,20 +366,35 @@ async function runJob(job) {
         quality: src.quality,
         title: src.title || job.name,
       };
-      step(src.provider, "send", true, "uploading to WhatsApp…");
-      try {
-        const buffer = fs.readFileSync(dl.filePath);
-        await job.sock.sendMessage(job.chatId, {
-          video: buffer,
-          mimetype: "video/mp4",
-          caption: `🎬 ${job.result.title || job.name} — Ep ${job.episode} · ${src.provider}`,
-        }, { quoted: job.quotedMsg });
-        step(src.provider, "send", true, "delivered ✓");
-      } catch (e) {
-        step(src.provider, "send", false, e?.message || "upload failed");
-        job.failures.push(jobError("UPLOAD_FAILED", src.provider, "send", e?.message || "upload failed", true));
-      } finally {
-        try { fs.unlinkSync(dl.filePath); } catch (_) {}
+
+      // Browser-initiated job: keep the file so the web UI can serve it.
+      if (!job.sock || !job.chatId) {
+        job.source = "browser";
+        step(src.provider, "save", true, `${(dl.size / 1024 / 1024).toFixed(1)} MB ready`);
+      } else {
+        // WhatsApp job: size-aware upload, then clean up.
+        if (dl.size > WHATSAPP_MAX_MB * 1024 * 1024) {
+          const fe = jobError("MEDIA_TOO_LARGE", src.provider, "send", `file is ${(dl.size / 1024 / 1024).toFixed(1)} MB, WhatsApp ceiling is ${WHATSAPP_MAX_MB} MB`, false);
+          step(src.provider, "send", false, fe.message);
+          job.failures.push(fe);
+          fs.unlinkSync(dl.filePath);
+          continue;
+        }
+        step(src.provider, "send", true, "uploading to WhatsApp…");
+        try {
+          const buffer = fs.readFileSync(dl.filePath);
+          await job.sock.sendMessage(job.chatId, {
+            video: buffer,
+            mimetype: "video/mp4",
+            caption: `🎬 ${job.result.title || job.name} — Ep ${job.episode} · ${src.provider}`,
+          }, { quoted: job.quotedMsg });
+          step(src.provider, "send", true, "delivered ✓");
+        } catch (e) {
+          step(src.provider, "send", false, e?.message || "upload failed");
+          job.failures.push(jobError("UPLOAD_FAILED", src.provider, "send", e?.message || "upload failed", true));
+        } finally {
+          try { fs.unlinkSync(dl.filePath); } catch (_) {}
+        }
       }
 
       job.status = "done";
@@ -421,11 +432,12 @@ function pump() {
 }
 
 // ── Public API ────────────────────────────────────────────────────
-function enqueueAnimeJob({ name, episode, sock, chatId, quotedMsg }) {
+function enqueueAnimeJob({ name, episode, sock, chatId, quotedMsg, preferred }) {
   const job = {
     id: uuidv4().slice(0, 8),
     name,
     episode,
+    preferred: preferred || null,
     sock,
     chatId,
     quotedMsg,
@@ -452,6 +464,7 @@ function retryJob(id) {
   const fresh = enqueueAnimeJob({
     name: old.name,
     episode: old.episode,
+    preferred: old.preferred,
     sock: old.sock,
     chatId: old.chatId,
     quotedMsg: old.quotedMsg,

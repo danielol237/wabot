@@ -148,7 +148,7 @@ const adapters = {
       }
       const got = await consumetEpisodeStream(anime.id, episode, providerName);
       if (!got?.url) {
-        throw jobError("SOURCE_NOT_FOUND", "consumet/" + providerName, "extract", "no stream source", true);
+        throw jobError("SOURCE_NOT_FOUND", "consumet/" + providerName, "extract", got?.error || "no stream source", true);
       }
       // Per-provider referer needed for protected HLS streams.
       const refererMap = {
@@ -500,9 +500,14 @@ async function runJob(job) {
       }
       step(src.provider, "source", true, src.type + (src.quality !== "unknown" ? " · " + src.quality : ""));
 
-      // 4. Download with provider headers preserved.
+      // 4. Download with provider headers preserved. For WhatsApp jobs, cap the
+      // download at the WhatsApp ceiling UPFRONT (--max-filesize) so yt-dlp
+      // aborts early instead of fetching a 1.5 GB file we'll then refuse to
+      // send. Browser jobs keep the larger MAX_DOWNLOAD_MB ceiling.
+      const isWhatsAppJob = !!(job.sock && job.chatId);
+      const dlCap = isWhatsAppJob ? WHATSAPP_MAX_MB : MAX_DOWNLOAD_MB;
       step(src.provider, "download", true, `fetching${job.quality && job.quality !== "best" ? " (" + job.quality + "p)" : ""}…`);
-      const dl = await downloadStream(job, src.url, src.headers, MAX_DOWNLOAD_MB, job.quality || "best", onProgress);
+      const dl = await downloadStream(job, src.url, src.headers, dlCap, job.quality || "best", onProgress);
       job.progress = null;
       if (!dl.success) {
         const fe = jobError("DOWNLOAD_FAILED", src.provider, "download", dl.error || "yt-dlp failed", true);

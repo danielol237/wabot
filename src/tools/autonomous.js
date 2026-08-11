@@ -23,6 +23,9 @@ function init(sock) {
 }
 
 function startAutonomousLoop() {
+  // Guard against duplicate loops on reconnect: clear any prior intervals.
+  for (const i of activeIntervals) clearInterval(i);
+  activeIntervals = [];
   // Check every 30-60 minutes if there's been no activity
   const interval = setInterval(async () => {
     try {

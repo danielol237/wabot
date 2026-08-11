@@ -20,10 +20,26 @@ const path = require("path");
 const { execFile, spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const { EventEmitter } = require("events");
-const { log, error } = require("../utils/logger");
+const { log, error, warn } = require("../utils/logger");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 const QUEUE_FILE = path.join(__dirname, "../../data/animeQueue.json");
+
+// yt-dlp is an external binary (not an npm dep). Verify it's present and
+// report clearly so a deploy without it fails loudly instead of silently
+// breaking every download at the yt-dlp step.
+function checkYtDlp() {
+  return new Promise((resolve) => {
+    execFile("yt-dlp", ["--version"], { timeout: 8000 }, (err, stdout) => {
+      if (err) {
+        error("yt-dlp binary NOT available — anime downloads will fail at the download step. Install yt-dlp on the host (e.g. pip install yt-dlp) or add it to the deployment.");
+        return resolve(false);
+      }
+      log(`[anime] yt-dlp ${String(stdout).trim()} ready`);
+      resolve(true);
+    });
+  });
+}
 
 // ── Configuration ─────────────────────────────────────────────────
 const MAX_CONCURRENT_DOWNLOADS = Number(process.env.ANIME_MAX_CONCURRENT || 2);
@@ -527,11 +543,22 @@ async function runJob(job) {
       return job;
     }
 
-    // All providers exhausted.
+    // All providers exhausted. WhatsApp gets a CONCISE message listing the
+    // providers actually tried and why; the full per-step trace stays in
+    // job.steps for the dashboard.
     job.status = "failed";
     job.finishedAt = Date.now();
     job.error = job.failures[job.failures.length - 1] || jobError("SOURCE_NOT_FOUND", "all", "extract", "no provider produced a source", true);
-    send(`❌ *${job.name}* Ep ${job.episode} failed.\n${job.steps.map((s) => `${s.ok ? "✓" : "✗"} ${s.provider} ${s.stage}`).join("\n")}\n\n_${job.error.code}: ${job.error.message}_`);
+    // Map: provider -> last failure message, deduped, only failed providers.
+    const failedByProvider = {};
+    for (const f of job.failures) {
+      const key = f.provider || "unknown";
+      if (!failedByProvider[key]) failedByProvider[key] = f.message || "failed";
+    }
+    const tried = Object.entries(failedByProvider)
+      .map(([p, m]) => `• ${p} — ${m}`)
+      .join("\n");
+    send(`❌ Couldn't download *${job.name}* Ep ${job.episode} (\`${job.id}\`).\n\nSources tried:\n${tried || "• none viable"}\n\n_${job.error.code}. Try again or choose another quality._`);
     emit(job);
     return job;
   } catch (e) {
@@ -559,7 +586,7 @@ function pump() {
 // ── Public API ────────────────────────────────────────────────────
 function enqueueAnimeJob({ name, episode, sock, chatId, quotedMsg, preferred, quality }) {
   const job = {
-    id: uuidv4().slice(0, 8),
+    id: "ANIME-" + uuidv4().slice(0, 8).toUpperCase(),
     name,
     episode,
     preferred: preferred || null,
@@ -614,5 +641,6 @@ module.exports = {
   emitter,
 };
 
-// Recover any jobs that were queued before a restart.
+// Recover any jobs that were queued before a restart, and check yt-dlp.
 loadQueue();
+checkYtDlp();

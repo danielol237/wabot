@@ -381,109 +381,6 @@ async function animepaheGetStreamUrl(animeId, episodeNum) {
 }
 
 // Attempt a download from a resolved stream URL via yt-dlp.
-async function tryDownloadUrl(url) {
-  try {
-    log(`[anime] yt-dlp downloading: ${String(url).slice(0, 60)}`);
-    const dl = await downloadVideo(url);
-    if (dl.success) return dl;
-    return null;
-  } catch (e) { error("[anime] yt-dlp download failed:", e.message); return null; }
-}
-
-// Download a single anime episode to a video file. Tries every available
-// source in order so a dead/moved site doesn't kill the whole download:
-//   1. AnimePahe (if id is a 32-hex MD5 from an AnimePahe search)
-//   2. Gogoanime/Anitaku (resolves a raw m3u8)
-//   3. OmniSave (direct MP4)
-// Returns { success, filePath, size } or { success:false, error }.
-async function downloadAnimeEpisode(subjectId, episode, detailPath = "", title = "") {
-  const errors = [];
-
-  // 0. OmniSave fast path — when the search already gave us a detailPath
-  //    (numeric subjectId + detailPath), this is self-contained and reliable.
-  //    On success we return; on failure we fall through to the other sources.
-  if (detailPath) {
-    try {
-      const dl = await getOmniSaveDownload(subjectId, detailPath, 1, episode || 1);
-      const direct = dl?.downloads?.find((d) => d?.url)?.url || dl?.downloads?.[0]?.url;
-      if (direct) {
-        const got = await tryDownloadUrl(direct);
-        if (got) return got;
-      }
-      errors.push("OmniSave: no download URL");
-    } catch (e) { errors.push("OmniSave: " + e.message); }
-  }
-
-  // 1. Consumet (maintained providers) — reliable when we have a provider id.
-  try {
-    const { consumetEpisodeStream } = require("./animeConsumet");
-    const got = await consumetEpisodeStream(subjectId, episode);
-    if (got && got.url) {
-      const dl = await tryDownloadUrl(got.url);
-      if (dl) return dl;
-    }
-    errors.push(got ? `${got.provider}: download failed` : "Consumet: no source");
-  } catch (e) { errors.push("Consumet: " + e.message); }
-
-  // 2. AnimePahe (works only for ids found via AnimePahe search).
-  if (/^[a-f0-9]{32}$/i.test(String(subjectId))) {
-    try {
-      const pahe = await animepaheGetStreamUrl(subjectId, episode);
-      if (pahe.m3u8) {
-        const dl = await tryDownloadUrl(pahe.m3u8);
-        if (dl) return dl;
-      }
-      errors.push(pahe.error || "AnimePahe resolve failed");
-    } catch (e) { errors.push("AnimePahe: " + e.message); }
-  }
-
-  // 2. Gogoanime/Anitaku — the id from an AnimePahe search is useless here,
-  //    so attempt it when we have a gogo-style slug OR a Jikan numeric id
-  //    (in which case we search Gogo by title to get a slug).
-  const gogoOk = !/^[a-f0-9]{32}$/i.test(String(subjectId));
-  if (gogoOk) {
-    try {
-      const { gogoAnimeStream, searchGogo } = require("./animeGogo");
-      let gogoId = String(subjectId);
-      // For a numeric/Jikan MAL id (or anything that's not a slug), look it
-      // up on Gogoanime by title so we get a working slug.
-      if (/^\d+$/.test(gogoId)) {
-        const g = await searchGogo(title || "");
-        gogoId = g[0]?.id || "";
-      }
-      if (!gogoId) throw new Error("no gogo slug");
-      const gogo = await gogoAnimeStream(gogoId.replace(/^category\//, ""), episode);
-      if (gogo.m3u8) {
-        const dl = await tryDownloadUrl(gogo.m3u8);
-        if (dl) return dl;
-      }
-      errors.push(gogo.error || "Gogoanime resolve failed");
-    } catch (e) { errors.push("Gogoanime: " + e.message); }
-  }
-
-  // 3. OmniSave direct download. Season is 1-indexed (se=1 = season 1).
-  try {
-    let omni = null;
-    if (detailPath) {
-      omni = { detailPath };
-    } else {
-      omni = await searchOmniSaveById(subjectId);
-    }
-    if (omni && omni.detailPath) {
-      const dl = await getOmniSaveDownload(subjectId, omni.detailPath, 1, episode || 1);
-      const direct = dl?.downloads?.find((d) => d?.url)?.url || dl?.downloads?.[0]?.url;
-      if (direct) {
-        const got = await tryDownloadUrl(direct);
-        if (got) return got;
-      }
-    }
-    errors.push("OmniSave: no download URL");
-  } catch (e) { errors.push("OmniSave: " + e.message); }
-
-  return { success: false, error: errors.join(" | ") || "Couldn't resolve a download URL for that episode." };
-}
-
-// Look up a single subject by id from OmniSave so we can get its detailPath.
 async function searchOmniSaveById(subjectId) {
   const token = await getOmniscrapeToken();
   if (!token) return null;
@@ -517,8 +414,6 @@ module.exports = {
   getAnimeEpisodes,
   searchOmniSave,
   getOmniSaveDownload,
-  downloadVideo,
-  downloadAnimeEpisode,
   searchOmniSaveById,
   search,
   animepaheGetStreamUrl,

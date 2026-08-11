@@ -54,6 +54,10 @@ let pairingCodeRequested = false; // prevents re-requesting a new code on every 
 let isReady = false;
 let lastError = null;
 let sock = null;
+// Centralized heartbeat tracking — the interval is attached to a socket for
+// convenience, but we clear the previous one on close/reconnect so repeated
+// reconnects never stack up orphaned ping timers.
+let heartbeatTimer = null;
 
 const USE_PAIRING_CODE = !!process.env.PHONE_NUMBER;
 
@@ -251,8 +255,8 @@ async function startBot() {
       // Baileys can drop the socket without emitting a "close" event on some network
       // conditions (NAT timeout, mobile data flips). A periodic ping forces an actual
       // round-trip and triggers disconnect/reconnect if the socket is actually dead.
-      if (sock._heartbeatInterval) clearInterval(sock._heartbeatInterval);
-      sock._heartbeatInterval = setInterval(async () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = setInterval(async () => {
         try {
           await sock.ws.ping();
         } catch (_) {
@@ -263,6 +267,7 @@ async function startBot() {
 
     if (connection === "close") {
       isReady = false;
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 

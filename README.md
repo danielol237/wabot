@@ -87,6 +87,19 @@ Requires `DASHBOARD_PASSWORD` in .env.
 ### 🔧 Other Commands
 `!search`, `!weather`, `!translate`, `!news`, `!lyrics`, `!sticker`, `!carbon`, `!wallpaper`, `!anime`, `!episodes`, `!trending`, `!remind`, `!poll`, `!say` (TTS), `!kick`, `!promote`, `!tagall`, `!warn`, `!clear`, `!remember`
 
+### 🎬 Anime Downloads — runtime requirements
+Anime downloads (`!animedl`, the web browser) depend on two things that are
+**not npm packages**, so they must exist on the host:
+
+- **`yt-dlp`** — used to download/merge the final video. Install it on the host
+  (`pip install yt-dlp`, or via apt). If it's missing, ARIA logs a clear error
+  at startup and the download step reports `DOWNLOAD_FAILED` instead of silently
+  breaking. Providers like OmniSave return direct MP4 URLs and Gogo/AnimePahe
+  return HLS `.m3u8` — both go through yt-dlp.
+- **`VERCEL_TOKEN`** (optional) — only needed if you want `!build` to auto-deploy
+  a live preview to Vercel. Set it in the host env to enable; omit it and builds
+  still work, they just skip the deploy step.
+
 ## Running on Phone (Termux)
 
 ```bash

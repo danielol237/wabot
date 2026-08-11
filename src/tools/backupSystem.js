@@ -18,7 +18,7 @@ async function createBackup() {
 
   return new Promise((resolve) => {
     // Only zip the data dir and plugin files (as paths relative to HOME)
-    const args = ["-r", outFile, "data/", "plugins/", "-x", "data/pokemon.json"];
+    const args = ["-r", outFile, "data/", "plugins/"];
     execFile("zip", args, { cwd: HOME, timeout: 30000 }, (err) => {
       if (err && !fs.existsSync(outFile)) {
         resolve({ success: false, error: err.message });

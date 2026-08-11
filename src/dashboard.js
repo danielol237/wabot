@@ -174,8 +174,6 @@ function collectData() {
   const botAdmin = tryLoad("./tools/botAdmin");
   const stats = botAdmin ? botAdmin.getStats() : null;
   const errors = botAdmin ? (botAdmin.getRecentErrors ? botAdmin.getRecentErrors(6) : []) : [];
-  const spawn = tryLoad("./tools/pokemonSpawn");
-  const spawnStats = spawn ? spawn.getSpawnStats() : null;
   const durable = tryLoad("./tools/durableMissions");
   const missions = durable && durable.getAllMissions ? durable.getAllMissions() : [];
   const activeMissions = missions.filter((m) => m.status === "running" || m.status === "pending");
@@ -188,10 +186,8 @@ function collectData() {
   try { const hh = tryLoad("./tools/household"); households = hh && hh.listHouseholds ? hh.listHouseholds() : []; } catch (_) {}
   const aiKeys = ["OPENROUTER_API_KEY","GROQ_API_KEY","CEREBRAS_API_KEY","GEMINI_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"];
   const keysSet = aiKeys.filter((k) => process.env[k]).length;
-  let trainers = [];
-  try { const pg = tryLoad("./tools/pokemonGame"); trainers = pg?.state?.trainers ? Object.entries(pg.state.trainers) : []; } catch (_) {}
 
-  return { os, hrs, mins, memMB, stats, errors, spawnStats, missions, activeMissions, memories, mediaMem, households, keysSet, aiKeys, trainers };
+  return { os, hrs, mins, memMB, stats, errors, missions, activeMissions, memories, mediaMem, households, keysSet, aiKeys };
 }
 
 // Anime download job panel — reads live state from the anime job manager.
@@ -406,9 +402,6 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="navitem" data-pane="media"><span class="ico">🖼️</span><span>Media</span></div>
     <div class="navitem" data-pane="downloads"><span class="ico">⬇️</span><span>Downloads</span></div>
     <div class="navitem" data-pane="household"><span class="ico">🏠</span><span>Household</span></div>
-    <div class="sb-group">Gamers</div>
-    <div class="navitem" data-pane="spawns"><span class="ico">⚡</span><span>Spawns</span></div>
-    <div class="navitem" data-pane="trainers"><span class="ico">🎮</span><span>Trainers</span></div>
     <div class="sb-group">System</div>
     <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
     <div class="navitem" data-pane="system"><span class="ico">🛠️</span><span>System</span></div>
@@ -427,7 +420,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};
-const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
+const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
@@ -655,23 +648,6 @@ router.get("/", checkAuth, (req, res) => {
         <div class="row"><span class="k">Tasks</span><span class="v">${h.sharedTasks.length}</span></div>
         ${h.sharedTasks.length ? h.sharedTasks.slice(-5).map(t=>`<div class="feed-item"><div class="feed-ico">${t.done?'✅':'⬜'}</div><div class="feed-body"><div class="m">${t.text}</div></div></div>`).join("") : ""}
       </div>`).join("") : `<div class="card"><div class="empty">No households. In a group: !household create</div></div>`}
-    </div>`;
-
-    content += `
-    <div class="pane" id="pane-spawns"><div class="page-title">Spawns</div><div class="page-sub">wild pokemon</div>
-      <div class="stats">
-        <div class="stat"><div class="n">${d.spawnStats?.enabled?"Active":"Paused"}</div><div class="l">status</div></div>
-        <div class="stat"><div class="n">${d.spawnStats?.remaining||"—"}</div><div class="l">remaining today</div></div>
-        <div class="stat"><div class="n">${d.spawnStats?.usedToday||0}</div><div class="l">used today</div></div>
-        <div class="stat"><div class="n">${d.spawnStats?.dailyLimit||"—"}</div><div class="l">daily limit</div></div>
-      </div>
-    </div>`;
-
-    content += `
-    <div class="pane" id="pane-trainers"><div class="page-title">Trainers</div><div class="page-sub">players</div>
-      <div class="card"><div class="h">Trainers (${d.trainers.length})</div>
-        ${d.trainers.length ? d.trainers.slice(0,15).map(([uid,t])=>`<div class="feed-item"><div class="feed-ico">🎮</div><div class="feed-body"><div class="t">${t.name||uid}</div><div class="m">Lv ${t.level||1} · ${(t.pokedex||[]).length} caught</div></div></div>`).join("") : `<div class="empty">No trainers yet.</div>`}
-      </div>
     </div>`;
 
     content += `

@@ -12,6 +12,7 @@
 const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { log, error, warn } = require("../utils/logger");
 
 const HOME = path.join(__dirname, "../..");
@@ -23,6 +24,67 @@ const TOKEN = process.env.GITHUB_TOKEN || "";
 
 function syncEnabled() {
   return !!REPO && !!TOKEN;
+}
+
+// ── At-rest encryption ────────────────────────────────────────
+// Session files are committed to a (private) git repo. Even private repos can
+// leak — leaked PAT, compromised account, accidental visibility change. So we
+// encrypt each file with AES-256-GCM before committing, using a key derived
+// from SESSION_ENCRYPT_KEY (preferred) or GITHUB_TOKEN. Files are decrypted
+// back to plaintext in the live sessions/ dir on restore, so Baileys is
+// untouched. Envelope: [12-byte IV][16-byte authTag][ciphertext].
+function deriveKey() {
+  const secret = process.env.SESSION_ENCRYPT_KEY || TOKEN;
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
+function encryptBuffer(buf, key) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const enc = Buffer.concat([cipher.update(buf), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), enc]);
+}
+
+function decryptBuffer(buf, key) {
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const data = buf.subarray(28);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(data), decipher.final()]);
+}
+
+function walk(dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(p, out);
+    else out.push(p);
+  }
+  return out;
+}
+
+// Encrypt every file under `dir` in place (used on the git-side copy before
+// commit). Returns list of processed files.
+function encryptTree(dir, key) {
+  const processed = [];
+  for (const p of walk(dir)) {
+    try {
+      fs.writeFileSync(p, encryptBuffer(fs.readFileSync(p), key));
+      processed.push(p);
+    } catch (e) { warn("Encrypt failed for " + p + ": " + e.message); }
+  }
+  return processed;
+}
+
+// Decrypt every file under `dir` in place (used after pulling the git copy
+// before copying into the live sessions dir).
+function decryptTree(dir, key) {
+  for (const p of walk(dir)) {
+    try {
+      fs.writeFileSync(p, decryptBuffer(fs.readFileSync(p), key));
+    } catch (e) { warn("Decrypt failed for " + p + ": " + e.message); }
+  }
 }
 
 function git(args, cwd, timeout = 30000) {
@@ -66,6 +128,9 @@ async function backupSession() {
     return { ok: false, err: "copy failed: " + e.message };
   }
 
+  // Encrypt the git-side copy so the repo never holds plaintext session keys.
+  encryptTree(path.join(GIT_DIR, "sessions"), deriveKey());
+
   await git(["add", "-A"], GIT_DIR);
   const status = await git(["status", "--porcelain"], GIT_DIR);
   if (status.out === "") return { ok: true, changed: false }; // nothing new
@@ -93,6 +158,9 @@ async function restoreSession() {
 
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   try {
+    // Decrypt the pulled copy back to plaintext before it becomes the live
+    // session. Encrypted blobs can't be read by Baileys.
+    decryptTree(backed, deriveKey());
     fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     fs.cpSync(backed, SESSIONS_DIR, { recursive: true });

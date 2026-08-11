@@ -8,9 +8,11 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const { exec } = require("child_process");
+const crypto = require("crypto");
 
 const PLUGINS_DIR = path.join(__dirname, "../../plugins");
 const STATE_FILE = path.join(__dirname, "../../data/pluginState.json");
+const HASHES_FILE = path.join(__dirname, "../../data/pluginHashes.json");
 
 // Official plugin repository (GitHub raw URLs)
 const PLUGIN_REPO = {
@@ -28,6 +30,33 @@ function saveState() {
   try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); } catch (e) {}
 }
 loadState();
+
+// ── Pinned-hash supply-chain verification ─────────────────────
+// The plugin repo (wabot-plugins) is the same trust domain as the code it
+// serves — a manifest hash from there proves nothing if the repo is hit. So
+// we pin known-good SHA-256 hashes HERE, in this repo, and fail closed if a
+// downloaded file doesn't match (or has no pinned hash at all).
+let pinnedHashes = { plugins: {} };
+try {
+  if (fs.existsSync(HASHES_FILE)) pinnedHashes = JSON.parse(fs.readFileSync(HASHES_FILE, "utf8"));
+} catch (e) {}
+
+function sha256(data) {
+  return crypto.createHash("sha256").update(data).digest("hex");
+}
+
+// Returns { ok, error } for a plugin id + raw file contents. Throws nothing.
+function verifyPluginContent(pluginId, data) {
+  const expected = pinnedHashes.plugins && pinnedHashes.plugins[pluginId];
+  if (!expected) {
+    return { ok: false, error: `No pinned SHA-256 for plugin "${pluginId}". It will not be installed until a maintainer pins its hash in data/pluginHashes.json.` };
+  }
+  const actual = sha256(data);
+  if (actual !== expected) {
+    return { ok: false, error: `Plugin "${pluginId}" hash mismatch (got ${actual.slice(0, 12)}…, expected ${expected.slice(0, 12)}…). Refusing to install — the source may have changed or been tampered with.` };
+  }
+  return { ok: true };
+}
 
 // Fetch the plugin manifest from GitHub
 async function fetchManifest() {
@@ -65,7 +94,11 @@ async function installPlugin(pluginId) {
     // Download from GitHub
     const url = `${PLUGIN_REPO.base}/plugins/${pluginId}.js`;
     const res = await axios.get(url, { timeout: 15000 });
-    
+
+    // Supply-chain check: reject unpinned or hash-mismatched code.
+    const v = verifyPluginContent(pluginId, res.data);
+    if (!v.ok) return { success: false, error: v.error };
+
     const filePath = path.join(PLUGINS_DIR, pluginId + ".js");
     fs.writeFileSync(filePath, res.data);
     
@@ -118,4 +151,4 @@ function listInstalled() {
   return plugins;
 }
 
-module.exports = { fetchManifest, installPlugin, setPluginState, isPluginEnabled, listInstalled, PLUGIN_REPO };
+module.exports = { fetchManifest, installPlugin, setPluginState, isPluginEnabled, listInstalled, verifyPluginContent, sha256, PLUGIN_REPO };

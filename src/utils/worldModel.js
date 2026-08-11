@@ -79,6 +79,17 @@ function getEntity(userId, id) {
 // ── Relations ─────────────────────────────────────────────────
 function addRelation(userId, from, to, type, properties = {}, opts = {}) {
   const model = getUserModel(userId);
+  // #20: dedupe identical relations (same from/to/type) — re-extraction would
+  // otherwise grow the relation array unboundedly with duplicate "is_user"
+  // edges. Update the existing edge's timestamp + properties instead.
+  const existing = model.relations.find((r) => r.from === from && r.to === to && r.type === type);
+  if (existing) {
+    existing.ts = Date.now();
+    existing.confidence = Math.max(existing.confidence, opts.confidence ?? 0.7);
+    existing.properties = { ...existing.properties, ...properties };
+    save();
+    return existing.id;
+  }
   const rel = {
     id: uuidv4().slice(0, 8),
     from, to, type,

@@ -228,6 +228,7 @@ async function downloadsPage(req) {
     <div class="job">
       <div class="row"><span class="v">${esc(j.name)} — Ep ${j.episode}</span><span class="badge b-${j.status === "done" ? "status" : j.status === "failed" ? "score" : "prov"}">${esc(j.status)}</span></div>
       ${j.quality && j.quality !== "best" ? `<div class="row" style="margin-top:4px"><span class="k">quality</span><span class="v">${esc(j.quality)}p</span></div>` : ""}
+      ${j.progress ? `<div style="margin-top:8px"><div style="background:var(--panel2);border-radius:6px;height:10px;overflow:hidden"><div style="background:linear-gradient(90deg,var(--accent),var(--accent2));height:100%;width:${Math.min(100, Math.round(j.progress.percent||0))}%"></div></div><div style="color:var(--muted);font-size:11px;margin-top:4px">${Math.round(j.progress.percent||0)}% ${j.progress.speed?"· "+esc(j.progress.speed):""}${j.progress.eta?" · ETA "+esc(j.progress.eta):""}</div></div>` : ""}
       ${j.current ? `<div class="row" style="margin-top:4px"><span class="k">stage</span><span class="v">${esc(j.current.provider)} · ${esc(j.current.stage)}</span></div>` : ""}
       ${j.result ? `<div class="row" style="margin-top:4px"><span class="k">result</span><span class="v">${(j.result.size / 1048576).toFixed(1)} MB · ${esc(j.result.provider)}</span></div>` : ""}
       ${j.result && j.source === "browser" ? `<a class="watch" style="margin-top:10px" href="/dashboard/anime/file/${esc(j.id)}">⬇️ Download file</a>` : ""}
@@ -239,6 +240,8 @@ async function downloadsPage(req) {
   let html = `<h1>Downloads</h1><div class="sub">Live anime pipeline · active ${active.length} · done ${snap.counts.done} · failed ${snap.counts.failed}</div>`;
   html += active.length ? active.map(jobCard).join("") : `<div class="empty">No active downloads.</div>`;
   if (snap.recent.length) { html += `<div class="section-h">Recent</div>` + snap.recent.slice(0, 8).map(jobCard).join(""); }
+  // Auto-refresh only while jobs are active, so progress/speed update live.
+  if (active.length) { html += `<script>setTimeout(()=>location.reload(),4000)</script>`; }
   return layout("Downloads", { html });
 }
 

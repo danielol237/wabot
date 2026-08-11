@@ -17,12 +17,13 @@
 
 const fs = require("fs");
 const path = require("path");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const { EventEmitter } = require("events");
 const { log, error } = require("../utils/logger");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
+const QUEUE_FILE = path.join(__dirname, "../../data/animeQueue.json");
 
 // ── Configuration ─────────────────────────────────────────────────
 const MAX_CONCURRENT_DOWNLOADS = Number(process.env.ANIME_MAX_CONCURRENT || 2);
@@ -190,6 +191,64 @@ const jobs = new Map();       // id -> job
 const queue = [];             // ids awaiting a free worker
 let running = 0;
 
+// ── Queue persistence ─────────────────────────────────────────────
+// Jobs hold a live WhatsApp `sock` that can't be serialized, so we persist
+// only the recoverable metadata of *queued* (not yet started) jobs. On boot,
+// these are re-enqueued as download-to-disk jobs (sock=null) and surface in
+// the dashboard Downloads panel instead of silently vanishing on restart.
+function persistQueue() {
+  try {
+    const out = queue
+      .map((id) => jobs.get(id))
+      .filter(Boolean)
+      .map((j) => ({
+        id: j.id,
+        name: j.name,
+        episode: j.episode,
+        preferred: j.preferred,
+        quality: j.quality,
+        chatId: j.chatId,
+        createdAt: j.createdAt,
+      }));
+    fs.writeFileSync(QUEUE_FILE, JSON.stringify(out));
+  } catch (_) {}
+}
+
+function loadQueue() {
+  let saved = [];
+  try { saved = JSON.parse(fs.readFileSync(QUEUE_FILE, "utf8")); } catch (_) {}
+  if (!Array.isArray(saved)) return;
+  for (const rec of saved) {
+    if (!rec || !rec.name || !rec.episode) continue;
+    if (jobs.has(rec.id)) continue;
+    const job = {
+      id: rec.id,
+      name: rec.name,
+      episode: rec.episode,
+      preferred: rec.preferred || null,
+      quality: rec.quality || "best",
+      sock: null, // no live socket after restart -> download-to-disk
+      chatId: rec.chatId || null,
+      quotedMsg: null,
+      source: "recovered",
+      status: "queued",
+      steps: [],
+      failures: [],
+      current: null,
+      result: null,
+      error: null,
+      createdAt: rec.createdAt || Date.now(),
+      startedAt: null,
+      finishedAt: null,
+    };
+    jobs.set(job.id, job);
+    queue.push(job.id);
+  }
+  // Clean the queue file once recovered so we don't double-recover.
+  try { fs.writeFileSync(QUEUE_FILE, "[]"); } catch (_) {}
+  if (saved.length) log(`[anime] recovered ${saved.length} queued job(s) from disk`);
+}
+
 function snapshot() {
   return {
     current: [...jobs.values()].filter((j) => j.status === "running"),
@@ -216,10 +275,24 @@ const QUALITY_FORMATS = {
   "best": "best[ext=mp4]/best[ext=m4a]/best",
 };
 
+// Parse a yt-dlp `--newline` progress line into { percent, speed, eta }.
+function parseProgress(line) {
+  // [download]  45.3% of 312.00MiB at  4.80MiB/s ETA 00:41
+  const m = line.match(/([\d.]+)%\s+of\s+([\d.]+)(\w+)(?:\s+at\s+([\d.]+)(\w+\/s))?(?:\s+ETA\s+([\d:]+))?/);
+  if (!m) return null;
+  return {
+    percent: parseFloat(m[1]),
+    total: m[2] + m[3],
+    speed: m[4] ? m[4] + m[5] : null,
+    eta: m[6] || null,
+  };
+}
+
 // ── Download helper (yt-dlp with header preservation + validation) ──
-function downloadStream(job, url, headers, maxMB, quality = "best") {
+// Uses spawn so we can read `--newline` progress live and feed it to
+// onProgress (drives the real-time %/speed/ETA updates in WhatsApp + UI).
+function downloadStream(job, url, headers, maxMB, quality = "best", onProgress) {
   const id = uuidv4();
-  const ext = /\.m3u8/i.test(url) ? "mp4" : "mp4";
   const outputPath = path.join(TEMP_DIR, `${id}.%(ext)s`);
   const format = QUALITY_FORMATS[quality] || QUALITY_FORMATS["best"];
   return new Promise((resolve) => {
@@ -227,6 +300,8 @@ function downloadStream(job, url, headers, maxMB, quality = "best") {
       "-f", format,
       "--merge-output-format", "mp4",
       "--max-filesize", `${maxMB}M`,
+      "--newline",
+      "--progress",
       "-o", outputPath,
     ];
     // Preserve the provider's referer/origin/UA into yt-dlp so protected
@@ -242,11 +317,29 @@ function downloadStream(job, url, headers, maxMB, quality = "best") {
     }
     args.push(url);
 
-    execFile("yt-dlp", args, { timeout: 600000 }, (err) => {
+    const proc = spawn("yt-dlp", args, { timeout: 600000 });
+    let errTail = "";
+    const onLine = (line) => {
+      if (!line) return;
+      const p = parseProgress(line);
+      if (p) {
+        job.progress = p;
+        try { onProgress && onProgress(p); } catch (_) {}
+      } else {
+        errTail = (errTail + "\n" + line).slice(-800);
+      }
+    };
+    proc.stdout.on("data", (d) => String(d).split(/\r?\n/).forEach(onLine));
+    proc.stderr.on("data", (d) => String(d).split(/\r?\n/).forEach(onLine));
+
+    proc.on("error", (err) => {
+      cleanup();
+      resolve({ success: false, error: err.message });
+    });
+
+    proc.on("close", (code) => {
       const files = fs.readdirSync(TEMP_DIR).filter((f) => f.startsWith(id));
       const fp = files.length ? path.join(TEMP_DIR, files[0]) : null;
-
-      // Validate: file exists, non-trivial, media-ish.
       if (fp) {
         try {
           const stats = fs.statSync(fp);
@@ -257,12 +350,15 @@ function downloadStream(job, url, headers, maxMB, quality = "best") {
           fs.unlinkSync(fp); // too small / bad container — clean it up
         } catch (_) {}
       }
-      // Failed download — make sure no partials/fragments linger.
+      cleanup();
+      resolve({ success: false, error: (code !== 0 ? "yt-dlp exited " + code + ": " : "") + (errTail.trim().split("\n").pop() || "Download failed.") });
+    });
+
+    function cleanup() {
       for (const f of fs.readdirSync(TEMP_DIR)) {
         if (f.startsWith(id)) { try { fs.unlinkSync(path.join(TEMP_DIR, f)); } catch (_) {} }
       }
-      resolve({ success: false, error: err?.message || "Download failed." });
-    });
+    }
   });
 }
 
@@ -299,6 +395,23 @@ async function runJob(job) {
     job.current = { provider, stage, detail: message };
     log(`[anime:${job.id}] ${provider} ${stage} ${ok ? "OK" : "FAIL"} ${message}`);
     send(`• ${ok ? "✓" : "✗"} ${provider} ${stage}${message ? ": " + message : ""}`);
+    emit(job);
+  };
+
+  // Live download progress — throttled so we don't spam WhatsApp on every
+  // yt-dlp tick. Emits every update (drives the dashboard) but only sends a
+  // WhatsApp update at most once per ~8 seconds or on every 10% step.
+  let lastProgressSent = 0;
+  let lastPct = -1;
+  const onProgress = (p) => {
+    const now = Date.now();
+    const pctStep = Math.floor((p.percent || 0) / 10) * 10;
+    if (now - lastProgressSent > 8000 || pctStep !== lastPct) {
+      lastProgressSent = now;
+      lastPct = pctStep;
+      const bar = "█".repeat(Math.round((p.percent || 0) / 5)) + "░".repeat(20 - Math.round((p.percent || 0) / 5));
+      send(`⬇️ *${job.name}* Ep ${job.episode} — ${Math.round(p.percent || 0)}%\n${bar}\n${p.speed ? "Speed: " + p.speed : ""}${p.speed && p.eta ? " · " : ""}${p.eta ? "ETA: " + p.eta : ""}${p.total ? " · " + p.total : ""}`.trim());
+    }
     emit(job);
   };
 
@@ -358,7 +471,8 @@ async function runJob(job) {
 
       // 4. Download with provider headers preserved.
       step(src.provider, "download", true, `fetching${job.quality && job.quality !== "best" ? " (" + job.quality + "p)" : ""}…`);
-      const dl = await downloadStream(job, src.url, src.headers, MAX_DOWNLOAD_MB, job.quality || "best");
+      const dl = await downloadStream(job, src.url, src.headers, MAX_DOWNLOAD_MB, job.quality || "best", onProgress);
+      job.progress = null;
       if (!dl.success) {
         const fe = jobError("DOWNLOAD_FAILED", src.provider, "download", dl.error || "yt-dlp failed", true);
         step(src.provider, "download", false, fe.message);
@@ -439,6 +553,7 @@ function pump() {
     const job = jobs.get(id);
     if (job) runJob(job).catch(() => {});
   }
+  persistQueue();
 }
 
 // ── Public API ────────────────────────────────────────────────────
@@ -464,6 +579,7 @@ function enqueueAnimeJob({ name, episode, sock, chatId, quotedMsg, preferred, qu
   };
   jobs.set(job.id, job);
   queue.push(job.id);
+  persistQueue();
   emit(job);
   pump();
   return job;
@@ -497,3 +613,6 @@ module.exports = {
   snapshot,
   emitter,
 };
+
+// Recover any jobs that were queued before a restart.
+loadQueue();

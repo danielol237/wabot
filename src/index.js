@@ -19,6 +19,7 @@ const { startTaskPoller } = require("./tools/taskPoller");
 
 const TEMP_DIR = path.join(__dirname, "../temp");
 const SESSIONS_DIR = path.join(__dirname, "../sessions");
+const sessionPersistence = require("./utils/sessionPersistence");
 [TEMP_DIR, SESSIONS_DIR].forEach((dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
@@ -392,7 +393,6 @@ const PORT = process.env.PORT || 3001;
 // restore finishes do we start the socket and listen.
 async function boot() {
   try {
-    const sessionPersistence = require("./utils/sessionPersistence");
     const r = await sessionPersistence.restoreSession();
     if (r?.ok) log("💾 Session restored — keeping existing WhatsApp link.");
     else if (r?.err) warn("Session restore:", r.err);

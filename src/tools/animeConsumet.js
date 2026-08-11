@@ -88,10 +88,19 @@ async function consumetEpisodeStream(animeId, episodeNum, providerName) {
         if (tryId) {
           info = await p.fetchAnimeInfo(tryId, 1);
         } else if (typeof p.search === "function") {
-          const s = await p.search(String(animeId).replace(/[-_]/g, " "));
+          const searchTerm = String(animeId).replace(/[-_]/g, " ");
+          const s = await p.search(searchTerm);
           const res = s?.results || [];
-          const guess = res[0]?.id || res[0]?.id;
-          if (guess) info = await p.fetchAnimeInfo(guess, 1);
+          // #35: don't blindly take res[0] — that can be a different entry
+          // ("One Piece" search may return a film/special first). Pick the
+          // result whose title best matches the requested term.
+          const norm = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+          const target = norm(searchTerm);
+          const guess =
+            res.find((r) => norm(r.title).includes(target) || target.includes(norm(r.title))) ||
+            res.find((r) => norm(r.title) === target) ||
+            null;
+          if (guess?.id) info = await p.fetchAnimeInfo(guess.id, 1);
         }
       } catch (_) {
         continue;

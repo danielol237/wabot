@@ -353,15 +353,18 @@ function downloadStream(job, url, headers, maxMB, quality = "best", onProgress) 
       resolve({ success: false, error: err.message });
     });
 
-    proc.on("close", (code) => {
+    proc.on("close", async (code) => {
       const files = fs.readdirSync(TEMP_DIR).filter((f) => f.startsWith(id));
       const fp = files.length ? path.join(TEMP_DIR, files[0]) : null;
       if (fp) {
         try {
           const stats = fs.statSync(fp);
-          if (stats.size > 64 * 1024) {
+          // #37/#38: only treat as success if yt-dlp exited cleanly (0), the
+          // file is non-trivial, and ffprobe confirms a real video stream. A
+          // non-zero exit with a partial file is NOT a successful download.
+          if (code === 0 && stats.size > 64 * 1024) {
             const ok = /\.(mp4|mkv|webm|m4v)$/i.test(fp) || isLikelyMedia(fp);
-            if (ok) return resolve({ success: true, filePath: fp, size: stats.size });
+            if (ok && await ffprobeOk(fp)) return resolve({ success: true, filePath: fp, size: stats.size });
           }
           fs.unlinkSync(fp); // too small / bad container — clean it up
         } catch (_) {}
@@ -375,6 +378,18 @@ function downloadStream(job, url, headers, maxMB, quality = "best", onProgress) 
         if (f.startsWith(id)) { try { fs.unlinkSync(path.join(TEMP_DIR, f)); } catch (_) {} }
       }
     }
+  });
+}
+
+// Real media validation via ffprobe: confirms the file is a playable media
+// container with a real video stream — not just a partial/corrupt blob that
+// happens to have an .mp4 extension or an ftyp atom.
+function ffprobeOk(fp) {
+  return new Promise((resolve) => {
+    execFile("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_type", "-of", "csv=p=0", fp], { timeout: 15000 }, (err, stdout) => {
+      if (err) return resolve(false);
+      resolve(String(stdout).trim().toLowerCase().startsWith("video"));
+    });
   });
 }
 

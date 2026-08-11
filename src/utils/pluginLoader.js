@@ -18,7 +18,25 @@ function loadPlugins() {
   const loaded = [];
   const files = fs.readdirSync(PLUGINS_DIR).filter((f) => f.endsWith(".js"));
 
+  // Respect the plugin manager's disabled list so !disable <name> actually
+  // stops a plugin from being loaded (previously it was marked disabled in
+  // state but the loader still require()'d every file).
+  let disabled = [];
+  try {
+    const pm = require("../tools/pluginMarket");
+    if (pm && pm.listInstalled) {
+      const installed = pm.listInstalled();
+      disabled = installed.filter((p) => p.enabled === false).map((p) => p.id);
+    }
+  } catch (_) {}
+
   for (const file of files) {
+    const id = file.replace(/\.js$/, "");
+    if (disabled.includes(id)) {
+      const { warn } = require("./logger");
+      warn(`Plugin ${file} is disabled — skipping.`);
+      continue;
+    }
     try {
       const pluginPath = path.join(PLUGINS_DIR, file);
       const plugin = require(pluginPath);

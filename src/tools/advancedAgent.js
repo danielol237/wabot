@@ -48,7 +48,7 @@ async function runAgent(task, senderName, onProgress) {
       const q = step.match(/SEARCH\(([^)]+)\)/i)?.[1];
       if (q && onProgress) onProgress(`🔍 Searching: ${q}`);
       const result = await searchWeb(q);
-      context += `\n[SEARCH: ${q}]\n${result}\n`;
+      context += `\n[SEARCH: ${q}]\n${typeof result === "string" ? result : (result?.output || result?.error || "no result")}\n`;
     }
 
     if (upper.includes("SCRAPE(")) {
@@ -65,7 +65,8 @@ async function runAgent(task, senderName, onProgress) {
         const code = codeMatch[2].trim();
         if (code && onProgress) onProgress(`💻 Running ${lang} code...`);
         const result = await runCode(code, lang);
-        codeOutput += `\n[CODE ${lang} OUTPUT]\n${result}\n`;
+        // runCode returns { success, output } — feed the actual output, not the object.
+        codeOutput += `\n[CODE ${lang} OUTPUT]\n${typeof result === "string" ? result : (result?.output || "no output")}\n`;
         context += codeOutput;
       }
     }

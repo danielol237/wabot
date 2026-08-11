@@ -64,7 +64,10 @@ function parseTimeToCron(timeStr) {
       return { type: "cron", expr: `0 */${num} * * *` };
     }
     if (unit === "day") {
-      return { type: "cron", expr: `0 0 */${num} * *` };
+      // True N-day interval. `0 0 */N * *` is day-of-month (resets each month,
+      // so "every 2 days" can fire on the 1st then 3rd, not 48h apart). Use a
+      // real setInterval so "every 2 days" is a genuine 48-hour cadence.
+      return { type: "interval", seconds: num * 86400 };
     }
   }
 
@@ -184,6 +187,14 @@ function rearmAll() {
     const { chatId, message } = item;
     const parsed = item.parsed;
     let task = null;
+
+    // Stop any previously armed job for this schedule first, so reconnect
+    // re-arming doesn't stack duplicate timers (which fired messages 2x/3x).
+    if (item.task) {
+      if (item.task.cron && typeof item.task.cron.stop === "function") { try { item.task.cron.stop(); } catch (_) {} }
+      if (item.task.interval) clearInterval(item.task.interval);
+      if (item.task.timeout) clearTimeout(item.task.timeout);
+    }
 
     if (parsed?.type === "cron") {
       if (!cron.validate(parsed.expr)) continue;

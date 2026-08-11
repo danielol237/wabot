@@ -40,10 +40,13 @@ Respond ONLY with a numbered list of steps, one per line, like:
 
     if (searchMatch) {
       const result = await searchWeb(searchMatch[1].trim());
-      gatheredInfo += `\n\n[Search: ${searchMatch[1]}]\n${result}`;
+      // searchWeb returns { success, output|error } (or a plain string in the
+      // flaky fallback) — normalize to a string so the model never sees
+      // "[object Object]".
+      gatheredInfo += `\n\n[Search: ${searchMatch[1]}]\n${typeof result === "string" ? result : (result?.output || result?.error || "no result")}`;
     } else if (scrapeMatch) {
       const result = await scrapeUrl(scrapeMatch[1].trim());
-      gatheredInfo += `\n\n[Scraped: ${scrapeMatch[1]}]\n${result}`;
+      gatheredInfo += `\n\n[Scraped: ${scrapeMatch[1]}]\n${typeof result === "string" ? result : (result?.output || result?.error || "no result")}`;
     }
     // THINK steps don't need execution, they're just planning notes
   }

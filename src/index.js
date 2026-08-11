@@ -23,14 +23,6 @@ const SESSIONS_DIR = path.join(__dirname, "../sessions");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-// Restore the WhatsApp session from git BEFORE starting the socket, so the
-// existing login survives Render's ephemeral-disk restarts (no re-scanning QR).
-const sessionPersistence = require("./utils/sessionPersistence");
-sessionPersistence.restoreSession().then((r) => {
-  if (r.ok) log("💾 Session restored — keeping existing WhatsApp link.");
-  else if (r.err) warn("Session restore:", r.err);
-}).catch((e) => warn("Session restore error:", e.message));
-
 // Load plugins once at startup. A broken plugin logs an error and gets
 // skipped — it never prevents the rest of the bot from starting.
 const loadedPlugins = loadPlugins();
@@ -392,13 +384,31 @@ async function startBot() {
   return sock;
 }
 
-startBot().catch((err) => {
-  error("❌ Failed to start bot:", err.message);
-  lastError = err.message;
-});
-
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => log(`🚀 Server on port ${PORT}`));
+
+// Boot: restore the Git-backed WhatsApp session FIRST (await it) so the bot
+// doesn't reach useMultiFileAuthState() with an empty session and force a QR
+// re-scan even though a valid session exists in the backup repo. Only after
+// restore finishes do we start the socket and listen.
+async function boot() {
+  try {
+    const sessionPersistence = require("./utils/sessionPersistence");
+    const r = await sessionPersistence.restoreSession();
+    if (r?.ok) log("💾 Session restored — keeping existing WhatsApp link.");
+    else if (r?.err) warn("Session restore:", r.err);
+  } catch (e) {
+    warn("Session restore error:", e.message);
+  }
+
+  await startBot().catch((err) => {
+    error("❌ Failed to start bot:", err.message);
+    lastError = err.message;
+  });
+
+  app.listen(PORT, () => log(`🚀 Server on port ${PORT}`));
+}
+
+boot();
 
 // Flush memory to disk on shutdown so nothing's lost on a clean restart/deploy
 const { flushNow } = require("./utils/memory");

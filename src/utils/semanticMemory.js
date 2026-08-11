@@ -88,8 +88,10 @@ function retrieveMemories(userId, query, limit = 5) {
     for (const kw of m.keywords) {
       if (queryWords.has(kw)) score += 1;
     }
-    // Recent memories get a small boost
-    score += Math.min(1, (Date.now() - m.ts) / (1000 * 60 * 60 * 24 * 30)) * 0.3;
+    // Recent memories get a small boost (age in days, capped at 30, so
+    // fresher memories score higher — 0 days = full 0.3, 30+ days = 0).
+    const ageDays = (Date.now() - m.ts) / (1000 * 60 * 60 * 24);
+    score += Math.max(0, 1 - ageDays / 30) * 0.3;
     return { m, score };
   });
 

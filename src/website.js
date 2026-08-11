@@ -9,6 +9,14 @@ const path = require("path");
 
 function tryLoad(m) { try { return require(m); } catch (_) { return null; } }
 
+// Protect the sensitive data/mutation endpoints. The live chat stays public
+// (it's the point of the site), but memory, media, household, alerts, system
+// and mission control are behind the same session auth as the dashboard —
+// otherwise any visitor to the public site could read private data and trigger
+// ARIA's mission engine.
+const { checkAuth } = require("./dashboard");
+router.use(["/api/missions", "/api/memory", "/api/media", "/api/household", "/api/alerts", "/api/system"], checkAuth);
+
 // ── API: live chat with ARIA ─────────────────────────────────
 router.post("/api/chat", async (req, res) => {
   try {

@@ -36,6 +36,19 @@ if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -d. -f1 | tr -d 'v')"
   apt install -y -qq nodejs
 fi
 
+# ── Install runtime tools ARIA needs (not npm packages) ──────────
+# yt-dlp (anime/video downloads), ffmpeg (HLS merge + media), python3
+# (code sandbox fallback) and docker (isolated code execution). Without
+# these, anime/code/video features silently fail even though AI+WhatsApp work.
+echo -e "${YELLOW}🎬 Installing yt-dlp, ffmpeg, python3, docker...${NC}"
+apt install -y -qq ffmpeg python3 python3-pip 2>/dev/null || true
+if ! command -v yt-dlp >/dev/null 2>&1; then
+  pip3 install --break-system-packages -q yt-dlp 2>/dev/null || pip3 install -q yt-dlp 2>/dev/null || true
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  apt install -y -qq docker.io 2>/dev/null || true
+fi
+
 # ── Clone repo ─────────────────────────────────────────────
 echo -e "${YELLOW}📥 Cloning ARIA...${NC}"
 cd /opt
@@ -48,7 +61,13 @@ fi
 
 # ── Install npm packages ───────────────────────────────────
 echo -e "${YELLOW}📦 Installing npm packages...${NC}"
-npm install --omit=dev 2>/dev/null || npm install
+# Prefer the lockfile for reproducible installs (npm ci). Fall back to
+# npm install if the lockfile is out of sync.
+if [ -f "package-lock.json" ]; then
+  npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+else
+  npm install --omit=dev
+fi
 
 # ── Setup .env ─────────────────────────────────────────────
 if [ ! -f ".env" ]; then
@@ -66,6 +85,11 @@ pm2 startup 2>/dev/null || true
 
 # ── UFW firewall ───────────────────────────────────────────
 echo -e "${YELLOW}🔒 Configuring firewall...${NC}"
+# ALWAYS allow SSH before enabling the firewall, or the script can lock you
+# out of your own VPS (default-deny inbound would block port 22).
+SSH_PORT=$(grep -E '^Port ' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+SSH_PORT=${SSH_PORT:-22}
+ufw allow "${SSH_PORT}/tcp" 2>/dev/null || true
 ufw allow 3001/tcp 2>/dev/null || true
 ufw --force enable 2>/dev/null || true
 

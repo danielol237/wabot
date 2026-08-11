@@ -2,7 +2,7 @@
 // For MTN Cameroon and Orange Cameroon
 
 const axios = require("axios");
-const { exec } = require("child_process");
+const { execFile } = require("child_process");
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
@@ -142,19 +142,23 @@ async function testHost(host, port) {
 
 // Active test: try to connect through a proxy and check if data flows
 async function activeTest(host, port, testUrl = "http://connectivitycheck.gstatic.com/generate_204") {
-  // Only allow http(s) test URLs to prevent any injection/SSRF via a crafted url.
-  if (!/^https?:\/\//i.test(String(testUrl))) return { working: false, error: "Invalid test URL." };
+  // Only allow http(s) test URLs and only allow host/port from the hardcoded
+  // carrier list — no shell interpolation anywhere (execFile, arg array).
+  let parsed;
+  try { parsed = new URL(String(testUrl)); } catch (_) { return { working: false, error: "Invalid test URL." }; }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { working: false, error: "Invalid test URL." };
+  const safeHost = String(host).replace(/[^0-9a-zA-Z.\-]/g, "");
+  const safePort = String(port).replace(/[^0-9]/g, "");
+  if (!safeHost || !safePort) return { working: false, error: "Invalid host/port." };
   return new Promise((resolve) => {
-    // curl through the proxy — testUrl is validated as http(s), and host/port
-    // come from the hardcoded carrier list.
-    exec(
-      `timeout 10 curl -s -o /dev/null -w "%{http_code}" --proxy http://${host}:${port} ${JSON.stringify(testUrl)} 2>&1`,
+    // execFile with an arg array = no shell, no injection. timeout wraps it.
+    execFile("timeout", ["10", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+      "--proxy", `http://${safeHost}:${safePort}`, parsed.href],
       { timeout: 15000 },
       (err, stdout) => {
         if (err || !stdout) resolve({ working: false, error: "Proxy test failed" });
         else resolve({ working: true, httpCode: stdout.trim(), note: "Proxy responded. Test on actual MTN network to confirm zero-rating." });
-      }
-    );
+      });
   });
 }
 

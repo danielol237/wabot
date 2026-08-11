@@ -313,7 +313,13 @@ async function animepaheGetEpisodeMd5(animeId, episodeNum) {
   // Find session id from a /play/{animeId}/{session} link
   const sessionM = page.match(new RegExp(`/play/${animeId}/([a-f0-9]{32})`));
   const session = sessionM ? sessionM[1] : "";
-  if (!session) return { error: "no session" };
+  if (!session) {
+    // animepahetv.to migrated: the page no longer exposes the legacy
+    // /play/{id}/{session} + allEpisodes structure (episodes now load via a
+    // JS/AJAX endpoint). Report this clearly instead of a dead "no session".
+    const migrated = page.includes("animepahe.se") || page.includes("anisugetv.to");
+    return { error: migrated ? "animepahetv.to migrated — legacy session/play structure removed; use a maintained provider" : "no session" };
+  }
 
   const play = await axios.get(`https://animepahetv.to/play/${animeId}/${session}`, {
     timeout: 15000, headers: { "User-Agent": PAHE_UA, Accept: "text/html" },
@@ -515,4 +521,6 @@ module.exports = {
   downloadAnimeEpisode,
   searchOmniSaveById,
   search,
+  animepaheGetStreamUrl,
+  animepaheGetEpisodeMd5,
 };

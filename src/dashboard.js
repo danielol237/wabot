@@ -9,6 +9,24 @@ const router = express.Router();
 
 const SESSION_TTL = 12 * 60 * 60 * 1000;
 
+// JSON body parsing for the /api routes only (keeps the raw login body intact).
+router.use("/api", express.json());
+
+// ── Login rate limiting (#20) ─────────────────────────────────────
+const loginAttempts = new Map(); // ip -> { count, resetAt }
+function isLoginThrottled(ip) {
+  const now = Date.now();
+  const rec = loginAttempts.get(ip);
+  if (!rec || now > rec.resetAt) return false;
+  return rec.count >= 8; // 8 attempts / 15 min
+}
+function recordLoginAttempt(ip) {
+  const now = Date.now();
+  const rec = loginAttempts.get(ip) || { count: 0, resetAt: now + 15 * 60 * 1000 };
+  rec.count++;
+  loginAttempts.set(ip, rec);
+}
+
 router.use((req, res, next) => {
   const raw = req.headers.cookie || "";
   req.cookies = {};
@@ -70,16 +88,22 @@ function loginForm() {
 
 router.post("/login", (req, res) => {
   const pw = process.env.DASHBOARD_PASSWORD;
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  if (isLoginThrottled(ip)) {
+    return res.status(429).send(renderPage("Login", loginForm() + '<p class="error">Too many attempts. Try again later.</p>', false, true));
+  }
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
     const supplied = new URLSearchParams(body).get("password") || "";
     if (pw && constantTimeEqual(supplied, pw)) {
+      loginAttempts.delete(ip);
       const t = crypto.randomBytes(24).toString("hex");
       sessions.set(t, Date.now() + SESSION_TTL);
       res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax" });
       return res.redirect("/dashboard");
     }
+    recordLoginAttempt(ip);
     return res.status(401).send(renderPage("Login", loginForm() + '<p class="error">Wrong key.</p>', false, true));
   });
 });
@@ -120,6 +144,48 @@ function collectData() {
   try { const pg = tryLoad("./tools/pokemonGame"); trainers = pg?.state?.trainers ? Object.entries(pg.state.trainers) : []; } catch (_) {}
 
   return { os, hrs, mins, memMB, stats, errors, spawnStats, missions, activeMissions, memories, mediaMem, households, keysSet, aiKeys, trainers };
+}
+
+// Anime download job panel — reads live state from the anime job manager.
+function renderDownloadsPane() {
+  let snap;
+  try { snap = require("./tools/animeJobManager").snapshot(); } catch (_) { snap = null; }
+  if (!snap) {
+    return `<div class="pane" id="pane-downloads"><div class="page-title">Downloads</div><div class="page-sub">anime pipeline</div><div class="card"><div class="empty">Job manager unavailable.</div></div></div>`;
+  }
+
+  const statusBadge = (s) =>
+    s === "done" ? '<span class="badge b-green">done</span>'
+    : s === "failed" ? '<span class="badge b-red">failed</span>'
+    : s === "running" ? '<span class="badge b-accent">running</span>'
+    : '<span class="badge b-muted">queued</span>';
+
+  const jobCard = (j) => `
+    <div class="card" data-job="${j.id}">
+      <div class="h"><span>${j.name} — Ep ${j.episode}</span>${statusBadge(j.status)}</div>
+      ${j.current ? `<div class="row"><span class="k">stage</span><span class="v">${j.current.provider} · ${j.current.stage}</span></div>` : ""}
+      ${j.steps.length ? `<div class="feed" style="margin-top:6px">${j.steps.slice(-8).map((s)=>`<div class="feed-item"><div class="feed-ico" style="color:${s.ok?"var(--green)":"var(--red)"}">${s.ok?"✓":"✗"}</div><div class="feed-body"><div class="m">${s.provider} ${s.stage}</div><div class="s">${s.message||""}</div></div></div>`).join("")}</div>` : ""}
+      ${j.result ? `<div class="row"><span class="k">file</span><span class="v">${(j.result.size/1024/1024).toFixed(1)} MB · ${j.result.provider}</span></div>` : ""}
+      ${j.error ? `<div class="row"><span class="k" style="color:var(--red)">error</span><span class="v" style="color:var(--red)">${j.error.code}: ${j.error.message}</span></div>` : ""}
+      ${j.status === "failed" ? `<button class="qbtn" style="margin-top:10px" onclick="retryJob('${j.id}')">↻ Retry</button>` : ""}
+    </div>`;
+
+  const active = [...snap.current, ...snap.queued];
+  return `
+    <div class="pane" id="pane-downloads"><div class="page-title">Downloads</div><div class="page-sub">anime pipeline · live</div>
+      <div class="stats">
+        <div class="stat"><div class="n">${active.length}</div><div class="l">active / queued</div></div>
+        <div class="stat"><div class="n">${snap.counts.done}</div><div class="l">completed</div></div>
+        <div class="stat"><div class="n">${snap.counts.failed}</div><div class="l">failed</div></div>
+        <div class="stat"><div class="n">${snap.counts.running}</div><div class="l">downloading now</div></div>
+      </div>
+      <div class="grid2" id="downloads-active">
+        ${active.length ? active.map(jobCard).join("") : `<div class="card"><div class="empty">No downloads running. Send !animedl in chat.</div></div>`}
+      </div>
+      <div class="card" style="margin-top:16px"><div class="h">Recent</div>
+        ${snap.recent.length ? snap.recent.map(jobCard).join("") : `<div class="empty">No finished jobs yet.</div>`}
+      </div>
+    </div>`;
 }
 
 function renderPage(title, content, passwordNeeded = false, isLogin = false) {
@@ -236,6 +302,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="navitem" data-pane="missions"><span class="ico">◆</span><span>Missions</span></div>
     <div class="navitem" data-pane="memory"><span class="ico">🧠</span><span>Memory</span></div>
     <div class="navitem" data-pane="media"><span class="ico">🖼️</span><span>Media</span></div>
+    <div class="navitem" data-pane="downloads"><span class="ico">⬇️</span><span>Downloads</span></div>
     <div class="navitem" data-pane="household"><span class="ico">🏠</span><span>Household</span></div>
     <div class="sb-group">Gamers</div>
     <div class="navitem" data-pane="spawns"><span class="ico">⚡</span><span>Spawns</span></div>
@@ -255,7 +322,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 </div>
 `}
 <script>
-const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],admin:['Admin','access']};
+const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
@@ -266,13 +333,57 @@ function showPane(p){
 }
 navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
 showPane('home');
-setInterval(()=>{ location.reload(); }, 30000);
+// Live downloads panel — refresh just this pane via the JSON API (no full reload).
+async function refreshDownloads(){
+  const pane=document.getElementById('pane-downloads');
+  if(!pane || !pane.classList.contains('show')) return;
+  try{
+    const r=await fetch('/dashboard/api/anime',{headers:{'Accept':'application/json'}});
+    if(!r.ok) return;
+    const snap=await r.json();
+    const active=[...snap.current,...snap.queued];
+    const counts=snap.counts||{};
+    document.querySelectorAll('#pane-downloads .stat .n').forEach((el,i)=>{
+      const vals=[active.length,counts.done,counts.failed,counts.running];
+      if(i<vals.length) el.textContent=vals[i];
+    });
+  }catch(_){}
+}
+async function retryJob(id){
+  try{
+    const r=await fetch('/dashboard/api/anime/'+id+'/retry',{method:'POST'});
+    if(r.ok) setTimeout(refreshDownloads,500);
+  }catch(_){}
+}
+setInterval(refreshDownloads, 8000);
+setInterval(()=>{ location.reload(); }, 120000);
 </script>
 </body>
 </html>`;
 }
 
 // ── Routes ───────────────────────────────────────────────────
+
+// Anime job API — live state for the dashboard (auth-protected).
+router.get("/api/anime", checkAuth, (req, res) => {
+  try {
+    const { snapshot } = require("./tools/animeJobManager");
+    return res.json(snapshot());
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/api/anime/:id/retry", checkAuth, (req, res) => {
+  try {
+    const { retryJob } = require("./tools/animeJobManager");
+    const fresh = retryJob(req.params.id);
+    if (!fresh) return res.status(404).json({ error: "job not found or not retryable" });
+    return res.json({ ok: true, id: fresh.id });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
 
 router.get("/", checkAuth, (req, res) => {
   try {
@@ -383,6 +494,8 @@ router.get("/", checkAuth, (req, res) => {
         ${d.aiKeys.map(k=>`<div class="row"><span class="k mono">${k}</span><span class="badge ${process.env[k]?"b-green":"b-muted"}">${process.env[k]?"on":"off"}</span></div>`).join("")}
       </div>
     </div>`;
+
+    content += renderDownloadsPane();
 
     content += `
     <div class="pane" id="pane-admin"><div class="page-title">Admin</div><div class="page-sub">access</div>

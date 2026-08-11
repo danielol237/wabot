@@ -1008,57 +1008,19 @@ async function handleAnimePlay(sock, msg, args, ctx) {
   let name = args.replace(/(?:ep|episode)\s*#?\s*\d{1,4}\s*$/i, "").replace(/\s+$/, "").trim();
   if (!name) return reply(sock, msg, "🤨 What anime? Try: !animedl solo leveling ep1");
 
-  await reply(sock, msg, `🔎 Looking up "${name}"...`);
-  try {
-    // Resolve the anime id across sources so a dead source doesn't block us.
-    let results = [];
-    let source = "";
-    // 1. OmniSave — self-contained direct-MP4 source, confirmed working.
-    if (!results.length) { try { results = await searchOmniSave(name); if (results.length) source = "omnisave"; } catch (_) {} }
-    // 2. Consumet (maintained provider).
-    if (!results.length) {
-      try {
-        const { consumetSearch } = require("./animeConsumet");
-        const c = await consumetSearch(name);
-        if (c.results.length) { results = c.results; source = c.source; }
-      } catch (_) {}
-    }
-    // 3. AnimePahe (MD5 id) — its search page still works.
-    if (!results.length) { try { results = await searchAnimePahe(name); if (results.length) source = "animepahe"; } catch (_) {} }
-    // 4. Jikan (MAL numeric id) — reliable metadata.
-    if (!results.length) { try { results = await searchAnime(name); if (results.length) source = "jikan"; } catch (_) {} }
-    // 5. Gogoanime (slug id).
-    if (!results.length) {
-      try {
-        const { searchGogo } = require("./animeGogo");
-        const g = await searchGogo(name);
-        if (g.length) { results = g; source = "gogoanime"; }
-      } catch (_) {}
-    }
-    if (!results.length) {
-      return reply(sock, msg, `❌ Couldn't find an anime named "${name}". Try a more exact title.`);
-    }
-    const id = results[0].id;
-    const shown = results[0].title || name;
-    // OmniSave gives us a subjectId + detailPath that the downloader needs.
-    const detailPath = results[0].detailPath || "";
-
-    await reply(sock, msg, `⏬ Downloading ep ${episode} of *${shown}*... this can take a bit.`);
-    const result = await downloadAnimeEpisode(id, episode, detailPath, shown);
-    if (!result || !result.success) {
-      return reply(sock, msg, `❌ Download failed: ${result?.error || "couldn't resolve a source"}`);
-    }
-    const fs = require("fs");
-    const buffer = fs.readFileSync(result.filePath);
-    await sock.sendMessage(ctx.chatId, {
-      video: buffer,
-      mimetype: "video/mp4",
-      caption: `🎬 ${shown} — Ep ${episode}`,
-    }, { quoted: msg });
-    try { fs.unlinkSync(result.filePath); } catch (_) {}
-  } catch (err) {
-    await reply(sock, msg, `❌ Download error: ${err.message}`);
-  }
+  // Enqueue as a background job so a heavy download can't block the message
+  // queue. The job manager resolves the source (provider-by-provider, each
+  // with its own ID), downloads, validates, cleans up and sends the file back
+  // to this chat — reporting per-step telemetry as it goes.
+  const { enqueueAnimeJob } = require("../tools/animeJobManager");
+  const job = enqueueAnimeJob({
+    name,
+    episode,
+    sock,
+    chatId: ctx.chatId,
+    quotedMsg: msg,
+  });
+  await reply(sock, msg, `⏳ *${name}* Ep ${episode} queued (job \`${job.id}\`).\nI'll stream progress here and send the file when it's ready.`);
 }
 
 async function handleTrending(sock, msg, args, ctx) {

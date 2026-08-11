@@ -3,6 +3,7 @@
 // In dev outputs readable format (pino-pretty optional).
 
 const pino = require("pino");
+const logStream = require("./logStream");
 
 let transport;
 try {
@@ -24,18 +25,22 @@ const logger = pino({
 // Drop-in replacements for console.log/error/warn
 function log(...args) {
   logger.info(args.map(a => (typeof a === "object" ? JSON.stringify(a) : a)).join(" "));
+  logStream.push("info", args.map(a => (typeof a === "object" ? JSON.stringify(a) : a)).join(" "));
 }
 
 function error(...args) {
   logger.error(args.map(a => (typeof a === "object" ? JSON.stringify(a) : a)).join(" "));
+  logStream.push("error", args.map(a => (typeof a === "object" ? JSON.stringify(a) : a)).join(" "));
 }
 
 function warn(...args) {
   logger.warn(args.map(a => (typeof a === "object" ? JSON.stringify(a) : a)).join(" "));
+  logStream.push("warn", args.map(a => (typeof a === "object" ? JSON.stringify(a) : a)).join(" "));
 }
 
 function debug(...args) {
   logger.debug(args.map(a => (typeof a === "object" ? JSON.stringify(a) : a)).join(" "));
+  logStream.push("debug", args.map(a => (typeof a === "object" ? JSON.stringify(a) : a)).join(" "));
 }
 
 module.exports = { logger, log, error, warn, debug };

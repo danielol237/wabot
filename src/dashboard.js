@@ -260,6 +260,35 @@ function renderHealthPane() {
     </div>`;
 }
 
+// Logs pane — live console fed by the SSE stream, with severity filter + search.
+function renderLogsPane() {
+  let logs = [];
+  try { logs = require("./utils/logStream").getRecent(80); } catch (_) {}
+  const fmtTime = (t) => new Date(t).toLocaleTimeString();
+  const levelBadge = (lvl) => ({
+    error: '<span class="badge b-red">ERROR</span>',
+    warn: '<span class="badge b-amber">WARN</span>',
+    debug: '<span class="badge b-muted">DEBUG</span>',
+  }[lvl] || '<span class="badge b-accent">INFO</span>');
+  return `
+    <div class="pane" id="pane-logs"><div class="page-title">Logs</div><div class="page-sub">live stream · severity + search</div>
+      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+        <select id="log-level" onchange="filterLogs()" style="background:var(--panel);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:10px;font-size:13px">
+          <option value="">All levels</option>
+          <option value="error">Errors</option>
+          <option value="warn">Warnings</option>
+          <option value="info">Info</option>
+          <option value="debug">Debug</option>
+        </select>
+        <input id="log-search" placeholder="Search logs…" oninput="filterLogs()" style="flex:1;min-width:180px;background:var(--panel);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:10px;font-size:13px;outline:none" />
+        <span style="color:var(--faint);font-size:11px" id="log-status">● live</span>
+      </div>
+      <div class="card" id="log-console" style="max-height:62vh;overflow:auto;font-family:ui-monospace,Consolas,monospace;font-size:11.5px">
+        ${logs.map((e) => `<div class="log-line" data-level="${e.level}" data-msg="${e.message.toLowerCase().replace(/"/g, "&quot;")}" style="padding:3px 0;border-bottom:1px solid var(--line);color:var(--muted)"><span style="color:var(--faint)">${fmtTime(e.ts)}</span> ${levelBadge(e.level)} <span>${e.message.replace(/</g, "&lt;").slice(0, 500)}</span></div>`).join("") || `<div class="empty">No logs yet.</div>`}
+      </div>
+    </div>`;
+}
+
 function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "") {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -384,6 +413,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
     <div class="navitem" data-pane="system"><span class="ico">🛠️</span><span>System</span></div>
     <div class="navitem" data-pane="health"><span class="ico">❤️</span><span>Health</span></div>
+    <div class="navitem" data-pane="logs"><span class="ico">📜</span><span>Logs</span></div>
     <div class="navitem" data-pane="admin"><span class="ico">🔐</span><span>Admin</span></div>
     <div class="sb-bottom">
       <div class="sb-online"><span class="dot"></span><span>ARIA online</span></div>
@@ -397,7 +427,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};
-const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],admin:['Admin','access']};
+const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],spawns:['Spawns','wild pokemon'],trainers:['Trainers','players'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
@@ -442,6 +472,44 @@ async function checkProviders(){
     setTimeout(()=>location.reload(),600);
   }catch(_){}
 }
+// Live log console — SSE stream + client-side filter.
+const fmtT=(t)=>new Date(t).toLocaleTimeString();
+const lvlBadge=(l)=>l==='error'?'<span class="badge b-red">ERROR</span>':l==='warn'?'<span class="badge b-amber">WARN</span>':l==='debug'?'<span class="badge b-muted">DEBUG</span>':'<span class="badge b-accent">INFO</span>';
+function logLine(e){
+  return '<div class="log-line" data-level="'+e.level+'" data-msg="'+String(e.message).toLowerCase().replace(/"/g,'&quot;')+'" style="padding:3px 0;border-bottom:1px solid var(--line);color:var(--muted)"><span style="color:var(--faint)">'+fmtT(e.ts)+'</span> '+lvlBadge(e.level)+' <span>'+String(e.message).replace(/</g,'&lt;').slice(0,500)+'</span></div>';
+}
+function filterLogs(){
+  const lvl=document.getElementById('log-level').value;
+  const q=(document.getElementById('log-search').value||'').toLowerCase();
+  document.querySelectorAll('#log-console .log-line').forEach(el=>{
+    const show=(!lvl||el.dataset.level===lvl)&&(!q||el.dataset.msg.includes(q));
+    el.style.display=show?'':'none';
+  });
+}
+let evtSource=null;
+function startLogStream(){
+  if(evtSource) return;
+  try{
+    evtSource=new EventSource('/dashboard/api/logs/stream');
+    evtSource.onmessage=(ev)=>{
+      const consoleEl=document.getElementById('log-console');
+      if(!consoleEl) return;
+      try{
+        const e=JSON.parse(ev.data);
+        consoleEl.insertAdjacentHTML('beforeend',logLine(e));
+        while(consoleEl.children.length>300) consoleEl.removeChild(consoleEl.firstChild);
+        const lvl=document.getElementById('log-level').value;
+        const q=(document.getElementById('log-search').value||'').toLowerCase();
+        const line=consoleEl.lastChild;
+        if((lvl&&line.dataset.level!==lvl)||(q&&!line.dataset.msg.includes(q))) line.style.display='none';
+        consoleEl.scrollTop=consoleEl.scrollHeight;
+      }catch(_){}
+    };
+    evtSource.onerror=()=>{ document.getElementById('log-status')&&(document.getElementById('log-status').textContent='● reconnecting'); };
+    evtSource.onopen=()=>{ document.getElementById('log-status')&&(document.getElementById('log-status').textContent='● live'); };
+  }catch(_){}
+}
+document.addEventListener('click',()=>{ if(document.getElementById('pane-logs')&&document.getElementById('pane-logs').classList.contains('show')) startLogStream(); });
 setInterval(refreshDownloads, 8000);
 setInterval(()=>{ location.reload(); }, 120000);
 </script>
@@ -496,6 +564,28 @@ router.post("/api/provider-health/check", checkAuth, async (req, res) => {
     const { checkAll } = require("./tools/providerHealth");
     return res.json({ results: await checkAll() });
   } catch (e) { return res.status(500).json({ error: e.message }); }
+});
+
+// Live log console — JSON history + SSE stream (auth via session cookie).
+router.get("/api/logs", checkAuth, (req, res) => {
+  try {
+    const { getRecent } = require("./utils/logStream");
+    return res.json({ logs: getRecent(200, { level: req.query.level, search: req.query.search }) });
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+});
+router.get("/api/logs/stream", checkAuth, (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+  res.write(": connected\n\n");
+
+  const { subscribe } = require("./utils/logStream");
+  const unsubscribe = subscribe((entry) => {
+    res.write(`data: ${JSON.stringify(entry)}\n\n`);
+  });
+  const heartbeat = setInterval(() => res.write(": ping\n\n"), 25000);
+  req.on("close", () => { clearInterval(heartbeat); unsubscribe(); });
 });
 
 router.get("/", checkAuth, (req, res) => {
@@ -619,6 +709,7 @@ router.get("/", checkAuth, (req, res) => {
     </div>`;
 
     content += renderHealthPane();
+    content += renderLogsPane();
 
     res.send(renderPage("Home", content, false, false, csrfFor(req)));
   } catch (e) {

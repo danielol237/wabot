@@ -124,6 +124,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "duel", aliases: ["vs", "challenge"], category: "utility", description: "AI-vs-human duel: !duel <problem>", handler: handleDuel, ownerOnly: false });
   registerCommand({ name: "submit", aliases: ["mycode"], category: "utility", description: "Submit your duel solution: !submit <code>", handler: handleSubmit, ownerOnly: false });
   registerCommand({ name: "explain", aliases: ["teach", "teachback"], category: "utility", description: "Teach-it-back: explain a concept, ARIA grades + finds misconceptions", handler: handleExplain, ownerOnly: false });
+  registerCommand({ name: "recall", aliases: ["reviewdue", "spaced"], category: "utility", description: "Recall engine: shows which skills are due for review", handler: handleRecall, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -655,6 +656,13 @@ async function handleSubmit(sock, msg, args, ctx) {
 async function handleExplain(sock, msg, args, ctx) {
   const { handleExplainCommand } = require("../tools/academy/teachBack");
   await handleExplainCommand(sock, msg, args, ctx);
+}
+
+async function handleRecall(sock, msg, args, ctx) {
+  const { reply } = require("../utils/baileysHelpers");
+  const { recallReport } = require("../tools/academy/forgettingEngine");
+  const uid = (ctx.senderJid || "").split("@")[0];
+  return reply(sock, msg, recallReport(uid));
 }
 
 // Fun handlers

@@ -1960,6 +1960,33 @@ async function handleAIResponse(sock, msg, text, ctx) {
     return intentHandlers[intent](sock, msg, text, ctx);
   }
 
+  // ── Live research: if the message asks for current/up-to-date info, run a
+  //    web search and feed the real results into the AI prompt instead of letting
+  //    her answer from stale training memory (which produces the lazy canned
+  //    replies people hate). Only triggers on clearly-research-y phrasing.
+  let researchContext = "";
+  const wantsLiveInfo =
+    /(research|look up|lookup|google it|search (the )?web|what('| i)?s the latest|current (price|score|news|status|situation)|breaking|as of (now|today|this year)|up to date|latest (on|info|news|price)|happening now|is it real|is that true|verify|fact[- ]check|make research|do (some|a) research)/i.test(text);
+  if (wantsLiveInfo && (process.env.TAVILY_API_KEY || process.env.BRAVE_API_KEY)) {
+    try {
+      const { searchWeb } = require("../tools/webSearch");
+      await react(sock, msg, "🔍");
+      // Extract a clean search query: strip command-y words, keep the meat.
+      const query = text
+        .replace(/^(aria\s*)?(make|do|run|google|search)[^ ]*\s+(a|some|the|research about|research on)?\s*/i, "")
+        .replace(/\b(make research|do research|research about|research on|look up|google it|search the web|before spitting)\b/gi, "")
+        .replace(/\b(nigha|nigga|bro|dude|man|please|pls)\b/gi, "")
+        .trim()
+        .slice(0, 120);
+      const result = await searchWeb(query || text.slice(0, 120));
+      if (result && typeof result === "string") {
+        researchContext = `\n\n[Live research results — use these as your source of truth; they are current and verified from the web. Quote real facts, names, numbers and dates, don't guess.]\n${result}`;
+      }
+    } catch (e) {
+      researchContext = "";
+    }
+  }
+
   // AI chat response
   const userContext = getUserContext(ctx.senderJid);
   const memory = getMemory(ctx.chatId);
@@ -2002,7 +2029,7 @@ async function handleAIResponse(sock, msg, text, ctx) {
   const personalizationContext = "\n\n[Personalization] Learn their name if they give it, match their communication style naturally, and remember important things they share.\n";
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: userContext + ownerContext + moodContext + personaContext + toneContext + semanticContext + mediaContext + worldContext + personalizationContext,
+    userContext: userContext + ownerContext + moodContext + personaContext + toneContext + semanticContext + mediaContext + worldContext + personalizationContext + researchContext,
     preferences,
     facts,
   });

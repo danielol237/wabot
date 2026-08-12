@@ -32,11 +32,14 @@ router.use((req, res, next) => {
 });
 
 // ── Config (env) ────────────────────────────────────────────────
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+// Strip any scheme/URL wrapper that may have been pasted around the values
+// (e.g. someone pastes the full URL "https://5090...apps.googleusercontent.com"
+// into the Client ID field). Google rejects an invalid_client otherwise.
+const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || "").replace(/^https?:\/\//i, "").trim();
+const GOOGLE_CLIENT_SECRET = String(process.env.GOOGLE_CLIENT_SECRET || "").replace(/^https?:\/\//i, "").trim();
 const SESSION_SECRET = process.env.PORTAL_SESSION_SECRET || process.env.DASHBOARD_CSRF_SECRET || "aria-portal-secret";
 // Public URL of this bot, used for the OAuth redirect URI.
-const BASE_URL = process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || "";
+const BASE_URL = String(process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
 
 // ── Learner accounts store (JSON file) ──────────────────────────
 const STATE_FILE = path.join(__dirname, "../../data/learnerAccounts.json");

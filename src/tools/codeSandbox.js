@@ -60,6 +60,13 @@ async function runSandboxed(code, lang, opts = {}) {
     "--tmpfs", "/tmp:size=32m",
     "--memory", memLimit,
     "--cpus", cpuLimit,
+    // ── Abuse hardening (fork-bomb / process-exhaustion / privilege-escape) ──
+    "--pids-limit", "64",                       // hard cap on processes (no fork bomb)
+    "--cap-drop", "ALL",                        // no Linux capabilities
+    "--security-opt", "no-new-privileges",      // can't escalate via setuid/execve
+    "--ulimit", "nproc=64:64",                  // per-user process limit
+    "--ulimit", "nofile=64:64",                 // file-descriptor limit
+    "--stop-timeout", "3",
     "-v", `${filePath}:/work/main.${ext}:ro`,
     "-w", "/work",
     SANDBOX_IMAGE,
@@ -83,6 +90,9 @@ async function runSandboxed(code, lang, opts = {}) {
 }
 
 // ── Fallback: timeout-only (UNSANDBOXED — unsafe, avoid) ──────
+// Only reachable via an EXPLICIT allowUnsafe:true opt-in. Default-safe: by
+// default untrusted/learner code is BLOCKED, never silently run on the host
+// process that holds WhatsApp/GitHub/DB credentials.
 function runUnsafe(code, lang, opts = {}) {
   const id = uuidv4();
   const ext = lang === "python" || lang === "py" ? "py"
@@ -109,11 +119,17 @@ function runUnsafe(code, lang, opts = {}) {
 async function runCode(code, lang = "js", opts = {}) {
   const available = await checkDocker();
   if (!available) {
-    if (opts.strict) {
-      return { success: false, output: "❌ Sandbox unavailable (no Docker). Code blocked for safety.", sandboxed: false, blocked: true };
+    // DEFAULT-SAFE: if the caller didn't explicitly pass allowUnsafe:true,
+    // untrusted code is blocked rather than run unsandboxed. The only way to
+    // reach runUnsafe now is an explicit, trusted opt-in.
+    if (opts.allowUnsafe) {
+      warn("Docker unavailable — code run UNSANDBOXED via explicit allowUnsafe opt-in.");
+      return runUnsafe(code, lang, opts);
     }
-    warn("Docker not available — running code UNSANDBOXED (timeout only).");
-    return runUnsafe(code, lang, opts);
+    const reason = opts.strict
+      ? "❌ Sandbox unavailable (no Docker). Code blocked for safety."
+      : "❌ Sandbox unavailable (no Docker). Code blocked — no unsandboxed fallback for untrusted code.";
+    return { success: false, output: reason, sandboxed: false, blocked: true };
   }
   return runSandboxed(code, lang, opts);
 }

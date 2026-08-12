@@ -52,7 +52,8 @@ function learner(uid) {
   if (!model.learners[uid]) {
     model.learners[uid] = {
       attempts: [],       // { ts, track, level, lessonId, sectionType, correct, skill }
-      mastery: {},        // { [track]: { [level]: percent } }
+      evidence: [],       // { ts, track, level, type, correct, score, skill, detail }
+      mastery: {},        // { [track]: { [level]: percent } }  ← computed, not hand-set
       skills: {},         // { [skill]: { correct, total, confidence } }
       misconceptions: {}, // { [skill]: count }
       xp: 0,
@@ -107,10 +108,25 @@ function addXp(uid, amt, reason) {
   return null;
 }
 
+// Record a piece of assessment evidence (quiz/challenge/project/recall).
+// `type` ∈ "quiz" | "challenge" | "project" | "recall". `correct` is a bool
+// (or null for scored-only evidence); `score` is 0-100 when available.
+// This is the raw input the Evidence Engine uses to compute defensible mastery.
+function recordEvidence(uid, { track, level, type, correct, score, skill, detail }) {
+  const l = learner(uid);
+  l.evidence = l.evidence || [];
+  l.evidence.push({ ts: Date.now(), track, level, type, correct, score, skill, detail });
+  if (l.evidence.length > 600) l.evidence = l.evidence.slice(-600);
+  save();
+}
+
+// setMastery is now only a low-level setter used by the Evidence Engine after
+// computing mastery from evidence. Direct callers must go through the engine
+// so mastery is always defensible.
 function setMastery(uid, track, level, percent) {
   const l = learner(uid);
   l.mastery[track] = l.mastery[track] || {};
-  l.mastery[track][level] = percent;
+  l.mastery[track][level] = Math.max(0, Math.min(100, Math.round(percent)));
   save();
 }
 
@@ -158,15 +174,20 @@ function skillConfidence(uid, skill) {
   return s ? s.confidence : undefined;
 }
 
+// Evidence for a given track+level, most recent first.
+function evidenceFor(uid, track, level) {
+  return (learner(uid).evidence || [])
+    .filter((e) => e.track === track && (!level || e.level === level))
+    .slice()
+    .reverse();
+}
+
 // Mastery must reflect DEMONSTRATED competence (assessments passed), not XP.
-// Separate from the gamification XP counter. A learner's level is gated by
-// mastery, never by XP farming.
+// The Evidence Engine computes this; this thin helper just returns the last
+// computed value. It does NOT grant mastery — reaching the end of a lesson is
+// never evidence on its own.
 function computeMastery(uid, track, level) {
-  // Placeholder — the orchestrator sets mastery on completion. This helper
-  // recomputes a % from passed assessments if we had per-lesson assessment
-  // records keyed to the track/level. Kept minimal; real gating lives in
-  // setMastery + the orchestrator's level-completion path.
   return getMastery(uid, track, level);
 }
 
-module.exports = { recordAttempt, addXp, setMastery, getMastery, getStats, getAllLearners, skillProfile, skillConfidence, computeMastery, learner, LEVELS, tierFor };
+module.exports = { recordAttempt, recordEvidence, addXp, setMastery, getMastery, evidenceFor, getStats, getAllLearners, skillProfile, skillConfidence, computeMastery, learner, LEVELS, tierFor };

@@ -1,13 +1,22 @@
 // ── ARIA Academy — Project / Capstone Workspace ──────────────────
-// Tracks-level projects: mini projects, advanced projects, and capstones
-// that produce engineering ability, not just XP. Each project has an
-// objective, acceptance criteria, and (for graded ones) a rubric the learner
-// walks through. Mastery is awarded on demonstrating the project, separate
-// from XP.
+// Tracks-level projects that produce demonstrated competence, not just XP.
+// A project is NOT completed by typing "done" — the learner must SUBMIT
+// their work, ARIA grades it against the acceptance criteria (rubric), and
+// the resulting score is recorded as EVIDENCE. Mastery then derives from
+// that evidence via the Evidence Engine — never from saying you finished.
+//
+// Flow: !project <track> <level>  →  view objective + criteria
+//       !project submit <work>    →  ARIA grades against rubric → evidence
+//
+// Grading: AI semantic rubric evaluation when the provider is available,
+// with a deterministic keyword-based fallback as a guardrail. Either way
+// the result is a defensible 0-100 rubric score, not a free pass.
 
 const fs = require("fs");
 const path = require("path");
-const { addXp, setMastery, getMastery } = require("./learnerModel");
+const { getAIResponse } = require("../ai");
+const { addXp, setMastery } = require("./learnerModel");
+const { recomputeMastery, recordEvidenceProject } = require("./evidenceEngine");
 const { levelUpText } = require("./xpSystem");
 
 const FILE = path.join(__dirname, "../../../data/academyProjects.json");
@@ -21,7 +30,7 @@ function save() { try { fs.writeFileSync(FILE, JSON.stringify(state)); } catch (
 load();
 
 // Project definitions per track+level. Each project:
-//   { id, title, objective, criteria: [..], grade: "pass/fail" | "rubric" }
+//   { id, title, objective, criteria: [..], skill }
 const PROJECTS = {
   backend: {
     intermediate: [
@@ -104,12 +113,64 @@ const PROJECTS = {
   },
 };
 
-// Start a project session for a track+level.
+// ── Rubric grading ────────────────────────────────────────────
+const RUBRIC_PROMPT = `You are a strict senior engineer grading a student's project submission against a rubric. Return ONLY JSON:
+{
+  "score": 0-100,
+  "criteria_scores": [ { "criterion": "...", "met": true|false, "note": "one-line justification" } ],
+  "verdict": "pass" | "needs-work",
+  "feedback": "2-3 sentences, honest and specific."
+}
+Grade on demonstrated evidence, not claims. If the submission is vague or just says 'done', give a low score.`;
+
+// Deterministic fallback: match submission text against criteria keywords.
+function keywordGrade(submission, criteria) {
+  const a = String(submission || "").toLowerCase();
+  const hits = criteria.filter((c) => c.toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length > 3 && a.includes(w)));
+  const ratio = hits.length / criteria.length;
+  return Math.round(ratio * 100);
+}
+
+// Grade a project submission against its rubric.
+async function gradeProject(submission, proj) {
+  const criteria = proj.criteria || [];
+  // AI semantic path
+  try {
+    const res = await getAIResponse(
+      `Project: ${proj.title}\nObjective: ${proj.objective}\nAcceptance criteria:\n${criteria.map((c) => "- " + c).join("\n")}\n\nStudent submission:\n"${String(submission).slice(0, 4000)}"`,
+      "Project Grader", [], RUBRIC_PROMPT
+    );
+    const cleaned = res.trim().replace(/```json|```/gi, "").trim();
+    const m = cleaned.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(m ? m[0] : cleaned);
+    const score = Math.max(0, Math.min(100, Number(parsed.score) || 0));
+    return {
+      score,
+      verdict: score >= 75 ? "pass" : "needs-work",
+      criteriaScores: Array.isArray(parsed.criteria_scores) ? parsed.criteria_scores : [],
+      feedback: parsed.feedback || "",
+      ai: true,
+    };
+  } catch (e) {
+    // Deterministic guardrail fallback.
+    const score = keywordGrade(submission, criteria);
+    return {
+      score,
+      verdict: score >= 75 ? "pass" : "needs-work",
+      criteriaScores: criteria.map((c) => ({ criterion: c, met: undefined })),
+      feedback: `Graded by automated criteria check (AI grader offline): ${score}/100. Submit more detail for a semantic review.`,
+      ai: false,
+    };
+  }
+}
+
+// ── Flow ─────────────────────────────────────────────────────
 function startProject(chatId, uid, track, level) {
   const list = PROJECTS[track]?.[level] || [];
   if (!list.length) return { text: `No project yet for this track/level. Complete the lessons first.` };
   state.users[uid] = state.users[uid] || {};
   state.users[uid].current = { track, level, projectIdx: 0, chatId, step: "objective" };
+  state.users[uid].submissions = state.users[uid].submissions || [];
   save();
   return projectView(uid);
 }
@@ -120,46 +181,69 @@ function projectView(uid) {
   const proj = PROJECTS[u.current.track]?.[u.current.level]?.[u.current.projectIdx];
   if (!proj) return { text: "Project not found." };
   return {
-    text: `🏗️ *Project: ${proj.title}*\n\n${proj.objective}\n\n*Acceptance criteria:*\n${proj.criteria.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n\nReply with *done* when you've completed it (or *skip* to defer).`,
+    text: `🏗️ *Project: ${proj.title}*\n\n${proj.objective}\n\n*Acceptance criteria:*\n${proj.criteria.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n\nSubmit your work to be graded against these:\n\`!project submit <describe what you built / paste code or architecture>\`\n\n_You can also reply directly with your work._`,
     proj,
   };
 }
 
-// Mark a project complete — awards a mastery boost (competence) + XP.
-function completeProject(uid, chatId) {
+// Submit project work → graded against rubric → recorded as evidence.
+async function submitProject(uid, chatId, work) {
   const u = state.users[uid];
-  if (!u?.current) return { text: "No active project." };
+  if (!u?.current) return { text: "No active project. Start one with !project <track> <level>." };
   const proj = PROJECTS[u.current.track]?.[u.current.level]?.[u.current.projectIdx];
   if (!proj) return { text: "Project not found." };
-  u.completed = u.completed || [];
-  if (!u.completed.some((p) => p.id === proj.id)) u.completed.push({ id: proj.id, at: Date.now() });
-  // Mastery reflects demonstrated competence — boost it on project completion.
+  if (!work || !String(work).trim()) return { text: "Submit your actual work — describe or paste what you built." };
+
+  const g = await gradeProject(work, proj);
   const track = u.current.track, level = u.current.level;
-  const base = getMastery(uid, track, level);
-  setMastery(uid, track, level, Math.min(100, base + 15));
-  const up = addXp(uid, 80, "Project");
+
+  // Record the graded project as evidence; mastery derives from the score.
+  const ev = recordEvidenceProject(uid, { track, level, score: g.score, skill: proj.skill, detail: proj.title });
+  const mastery = recomputeMastery(uid, track, level);
+
+  // XP proportional to demonstrated quality (no full reward for a bad pass).
+  const xp = g.score >= 75 ? 80 : g.score >= 50 ? 40 : 15;
+  const up = addXp(uid, xp, "Project");
+
+  // Submission history (audit trail).
+  u.submissions.push({ id: proj.id, at: Date.now(), score: g.score, verdict: g.verdict, work: String(work).slice(0, 500) });
+  u.completed = u.completed || [];
+  if (!u.completed.some((p) => p.id === proj.id)) u.completed.push({ id: proj.id, score: g.score, at: Date.now() });
   delete u.current;
   save();
-  return { text: `🏆 Project complete! You demonstrated real skill — mastery on ${track} boosted and +80 XP.${levelUpText(up)}` };
+
+  const critLines = (g.criteriaScores || []).map((c) => `• ${c.criterion} ${c.met === true ? "✅" : c.met === false ? "❌" : ""} ${c.note ? "— " + c.note : ""}`).join("\n");
+  const status = g.verdict === "pass" ? "✅ Pass" : "🟡 Needs work — resubmit after improving.";
+  return {
+    text: `🏗️ *Project graded — ${proj.title}*\n\n*Score:* ${g.score}/100 (${status})\n\n${critLines}\n\n*Feedback:* ${g.feedback}\n\nMastery for ${track}/${level} is now *${mastery}%* (evidence-derived). +${xp} XP${levelUpText(up)}\n\n${g.verdict === "pass" ? "Demonstrated competence — locked in." : "Take the feedback, improve, and resubmit with !project <track> <level>."}`,
+    score: g.score,
+    verdict: g.verdict,
+    mastery,
+  };
 }
 
 function hasActiveProject(uid) {
   return !!(state.users[uid]?.current);
 }
 
-function handleProjectReply(chatId, uid, input) {
+// Handle replies: a direct message during an active project is a submission.
+async function handleProjectReply(chatId, uid, input) {
   if (!hasActiveProject(uid)) return null;
-  const u = state.users[uid];
-  if (/done|complete/i.test(input)) {
-    const r = completeProject(uid, chatId);
-    return r;
-  }
   if (/skip|later/i.test(input)) {
-    delete u.current;
+    delete state.users[uid].current;
     save();
     return { text: "Project deferred. You can come back with !project <track> <level>." };
   }
-  return null;
+  // Any other meaningful reply = the learner's submission of their work.
+  return submitProject(uid, chatId, input);
 }
 
-module.exports = { PROJECTS, startProject, projectView, completeProject, hasActiveProject, handleProjectReply };
+// Submission history view.
+function submissionHistory(uid) {
+  const u = state.users[uid];
+  const subs = u?.submissions || [];
+  if (!subs.length) return { text: "No project submissions yet." };
+  return { text: "📜 *Project history*\n" + subs.slice(-10).map((s) => `• ${s.id} — ${s.score}/100 (${s.verdict}) ${new Date(s.at).toLocaleDateString()}`).join("\n") };
+}
+
+module.exports = { PROJECTS, startProject, projectView, submitProject, hasActiveProject, handleProjectReply, submissionHistory };

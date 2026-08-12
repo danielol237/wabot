@@ -154,6 +154,14 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
       }
     } catch (_) {}
     try {
+      // Standalone project submission (no academy session required).
+      const pw = require("../tools/academy/projectWorkspace");
+      if (pw.hasActiveProject(senderJid.split("@")[0])) {
+        const out = await pw.handleProjectReply(chatId, senderJid.split("@")[0], text.trim());
+        if (out) { await react(sock, msg, "🏗️"); return reply(sock, msg, out.text); }
+      }
+    } catch (_) {}
+    try {
       const { hasActiveFlow, handleReply } = require("../tools/academy/academyOrchestrator");
       if (hasActiveFlow(chatId)) {
         const out = await handleReply(chatId, senderJid.split("@")[0], text.trim());

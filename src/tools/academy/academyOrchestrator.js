@@ -10,6 +10,7 @@ const path = require("path");
 const { lessonAt, allTrackOverviews, levelLessons, CURRICULUM_VERSION, LEVEL_DEFS } = require("./curriculumEngine");
 const { gradeQuiz, gradeChallenge, XP_QUIZ, XP_CHALLENGE } = require("./assessmentEngine");
 const { addXp, setMastery, getMastery, getStats } = require("./learnerModel");
+const { recomputeMastery, evidenceReport } = require("./evidenceEngine");
 const { levelUpText } = require("./xpSystem");
 const { recommend } = require("./adaptiveTutor");
 const { startProject, projectView, hasActiveProject, handleProjectReply } = require("./projectWorkspace");
@@ -103,14 +104,19 @@ function nextSection(chatId) {
     save();
     return renderLesson(chatId, 0);
   }
-  // Track level complete.
+  // Track level complete. Mastery is COMPUTED from demonstrated assessment
+  // evidence (quizzes/challenges/projects) — never granted just for reaching
+  // the end. "Finished the lessons" ≠ "mastered."
   const level = LEVEL_DEFS[st.level];
-  const mastery = 100; // reached the end
-  setMastery(st.uid, st.track, st.level, mastery);
+  const mastery = recomputeMastery(st.uid, st.track, st.level);
   delete state.chats[chatId];
   save();
   const rec = recommend(st.uid, { currentTrack: st.track, currentLevel: st.level });
-  return { text: `🎉 You finished *${allTrackOverviews().find((t) => t.id === st.track).name} — ${level} ${st.level}*! Mastery 100%.\n\n${rec.reason}\n\nRun !academy to pick your next path.`, completed: true, mastery: 100 };
+  const passed = mastery >= 80;
+  const status = passed
+    ? `Mastery ${mastery}% — you've demonstrated competence. ✅`
+    : `Mastery ${mastery}%. You've finished the lessons, but mastery comes from passing the assessments (${mastery}%). Go back and pass the quizzes/challenges to lock it in.`;
+  return { text: `🎉 You finished *${allTrackOverviews().find((t) => t.id === st.track).name} — ${level} ${st.level}*!\n\n${status}\n\n${rec.reason}\n\nRun !academy to pick your next path.`, completed: true, mastery };
 }
 
 // Main reply handler. Returns { text } or null if not this user's flow.
@@ -130,14 +136,15 @@ async function handleReply(chatId, uid, input) {
     const levels = Object.keys(LEVEL_DEFS);
     if (!Number.isFinite(n) || n < 1 || n > levels.length) return { text: `Reply with a number 1-${levels.length}.` };
     st.level = levels[n - 1]; st.lessonIdx = 0; st.sectionIdx = 0; st.step = "lesson";
-    addXp(st.uid, 25); // starting a lesson
+    // No XP for entering a level — XP must reward activity, not menu navigation.
     save();
     return renderLesson(chatId, 0);
   }
 
   if (st.step === "lesson") {
     // If a project is active in this chat, route replies to it first.
-    const pReply = handleProjectReply(chatId, st.uid, input);
+    // (Project submissions are graded — async.)
+    const pReply = await handleProjectReply(chatId, st.uid, input);
     if (pReply) return pReply;
     const { lesson } = lessonAt(st.track, st.level, st.lessonIdx);
     const sections = lesson.sections || [];
@@ -204,7 +211,13 @@ async function handleAcademyCommand(sock, msg, args, ctx) {
   if (arg === "me" || arg === "stats") {
     const s = getStats(uid);
     const r = recommend(uid);
-    return reply(sock, msg, `📊 *Your academy stats*\nXP: *${s.xp}* · streak ${s.streak} · ${s.attempts} attempts\n\n🎯 ${r.reason}`);
+    return reply(sock, msg, `📊 *Your academy stats*\nXP: *${s.xp}* · streak ${s.streak} · ${s.attempts} attempts\n\n🎯 ${r.reason}\n\n_Use \`!evidence <track> <level>\` to see the evidence behind any mastery._`);
+  }
+  if (arg === "evidence" || arg === "why") {
+    const track = (Array.isArray(args) ? args[1] : "") || "";
+    const level = (Array.isArray(args) ? args[2] : "") || "";
+    if (!track || !level) return reply(sock, msg, "Usage: !academy evidence <track> <level>\nExample: !academy evidence backend intermediate");
+    return reply(sock, msg, evidenceReport(uid, track, level));
   }
   return reply(sock, msg, startFlow(ctx.chatId, uid));
 }
@@ -223,10 +236,25 @@ async function handleAcademyRun(sock, msg, args, ctx) {
 async function handleProjectCommand(sock, msg, args, ctx) {
   const { reply } = require("../../utils/baileysHelpers");
   const uid = (ctx.senderJid || "").split("@")[0];
-  const parts = (Array.isArray(args) ? args : String(args || "").split(/\s+/)).map((x) => x.toLowerCase());
+  const parts = (Array.isArray(args) ? args : String(args || "").split(/\s+/)).map((x) => String(x).toLowerCase());
+  const { submitProject, submissionHistory } = require("./projectWorkspace");
+  const overviews = allTrackOverviews();
+
+  // !project history
+  if (parts[0] === "history" || parts[0] === "log") {
+    const h = submissionHistory(uid);
+    return reply(sock, msg, h.text);
+  }
+  // !project submit <work>
+  if (parts[0] === "submit") {
+    const work = (Array.isArray(args) ? args.slice(1) : []).join(" ").trim();
+    if (!work) return reply(sock, msg, "Submit your actual work: !project submit <what you built / code / architecture>");
+    const r = await submitProject(uid, ctx.chatId, work);
+    return reply(sock, msg, r.text);
+  }
+
   const track = parts[0];
   const level = parts[1];
-  const overviews = allTrackOverviews();
   const match = overviews.find((t) => t.id === track || t.name.toLowerCase() === track);
   if (!match || !level) return reply(sock, msg, "Usage: !project <track> <level>\nExample: !project backend intermediate");
   const r = startProject(ctx.chatId, uid, match.id, level);

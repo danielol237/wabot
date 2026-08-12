@@ -2,7 +2,7 @@
 // Grades quiz answers and coding challenges, and records every attempt to
 // the Learner Model. Pure logic — no chat, no state of its own.
 
-const { recordAttempt } = require("./learnerModel");
+const { recordAttempt, recordEvidence } = require("./learnerModel");
 const { runCode } = require("../codeSandbox");
 
 const XP_QUIZ = 15;
@@ -14,6 +14,8 @@ function gradeQuiz(uid, { track, level, lessonId, skill }, question, selectedLet
   const correct = !!question && a === String(question.answer).toUpperCase();
   const xp = correct ? XP_QUIZ : 0;
   recordAttempt(uid, { track, level, lessonId, sectionType: "quiz", correct, skill });
+  // Record evidence for the Evidence Engine (defensible mastery).
+  recordEvidence(uid, { track, level, type: "quiz", correct, score: correct ? 100 : 0, skill, detail: lessonId });
   return {
     correct,
     xp,
@@ -47,6 +49,8 @@ async function gradeChallenge(uid, { track, level, lessonId, skill }, code, chal
   }
   const xp = correct ? XP_CHALLENGE : 0;
   recordAttempt(uid, { track, level, lessonId, sectionType: "coding_challenge", correct, skill });
+  // Evidence for the Evidence Engine.
+  recordEvidence(uid, { track, level, type: "challenge", correct, score: correct ? 100 : 0, skill, detail: lessonId });
   return { correct, xp, output, expected: String(challenge.expected ?? "").trim() };
 }
 

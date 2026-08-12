@@ -30,13 +30,38 @@ load();
 function nid(prefix) { state.lastId += 1; return prefix + state.lastId; }
 
 // ── Track definitions (mirror DNA clusters) ─────────────────────
+// Single-cluster tracks: { cluster }. Composite tracks use a UNIFORM
+// `clusters: [[name, weight], ...]` array so every system (backlog weighting,
+// capacity, incident difficulty) agrees on the same definition.
 const TRACKS = {
   "frontend":  { label: "Frontend", emoji: "🎨", cluster: "Frontend / React" },
   "backend":   { label: "Backend", emoji: "⚙️", cluster: "Backend / Node" },
-  "fullstack": { label: "Full-Stack", emoji: "🦾", cluster: "Frontend / React" }, // uses both, but simpler: avg of front+back
+  "fullstack": { label: "Full-Stack", emoji: "🦾", clusters: [["Frontend / React", 0.5], ["Backend / Node", 0.5]] },
   "devops":    { label: "DevOps", emoji: "☁️", cluster: "DevOps / Cloud" },
   "data":      { label: "Data", emoji: "📊", cluster: "Databases" },
 };
+
+// Resolve a track to a list of [clusterName, weight] (uniform across systems).
+function trackClusters(track) {
+  const t = TRACKS[track];
+  if (!t) return [];
+  if (Array.isArray(t.clusters)) return t.clusters;
+  return [[t.cluster, 1]];
+}
+
+// Weighted learner confidence (0-100) in a track across its cluster(s).
+// Composite tracks (e.g. fullstack) blend their clusters by weight, so the
+// SAME definition drives backlog generation, capacity, and incidents.
+function trackConfidence(uid, track) {
+  const cls = trackClusters(track);
+  if (!cls.length) return 0;
+  let num = 0, den = 0;
+  for (const [name, w] of cls) {
+    num += clusterConfidence(uid, name).score * w;
+    den += w;
+  }
+  return den ? num / den : 0;
+}
 
 // Engineer roles we can hire (fill skill gaps the learner lacks).
 const HIRABLES = [
@@ -48,11 +73,7 @@ const HIRABLES = [
 ];
 
 const PROJECT_TEMPLATES = {
-  frontend: [
-    { name: "Marketing landing page", value: 18000, rep: 3, complexity: 1.2 },
-    { name: "Customer dashboard UI", value: 35000, rep: 6, complexity: 2.2 },
-    { name: "Design system + component lib", value: 50000, rep: 9, complexity: 3.2 },
-  ],
+  // frontend defined once below (single authoritative source, no dup)
   backend: [
     { name: "REST API for a mobile app", value: 22000, rep: 4, complexity: 1.4 },
     { name: "Payment webhook service", value: 42000, rep: 8, complexity: 2.5 },
@@ -123,11 +144,7 @@ function foundCompany(uid, name) {
 // Backlog is weighted toward the learner's strongest tracks (they're a real
 // engineer there), with a couple of stretch tracks.
 function generateBacklog(uid) {
-  const dna = engineeringDNA(uid);
-  const scored = Object.entries(TRACKS).map(([k, t]) => {
-    const conf = clusterConfidence(uid, t.cluster).score;
-    return { key: k, conf };
-  }).sort((a, b) => b.conf - a.conf);
+  const scored = Object.keys(TRACKS).map((k) => ({ key: k, conf: trackConfidence(uid, k) })).sort((a, b) => b.conf - a.conf);
   const pool = [];
   // Strongest two tracks get most projects.
   const strong = scored.slice(0, 2).map((s) => s.key);
@@ -148,17 +165,9 @@ function intro(c, uid) {
 // Engineers add capacity. Incidents stall progress.
 function capacityFor(c, track) {
   let cap = 0;
-  // Learner's personal skill capacity
-  const cluster = TRACKS[track].cluster;
-  const conf = clusterConfidence(c.founder, cluster).score; // 0..100
-  cap += conf / 100; // 0..1
-  // For fullstack, average front+back personal capacity
-  if (track === "fullstack") {
-    const f = clusterConfidence(c.founder, "Frontend / React").score / 100;
-    const b = clusterConfidence(c.founder, "Backend / Node").score / 100;
-    cap = (f + b) / 2;
-  }
-  // Engineers
+  // Learner's personal skill capacity — uniform multi-cluster confidence.
+  cap += trackConfidence(c.founder, track) / 100; // 0..1
+  // Engineers add capacity in their track (fullstack covers all tracks).
   for (const e of c.engineers) if (e.role === track || e.role === "fullstack") cap += 0.7;
   return cap;
 }
@@ -299,7 +308,7 @@ function resolveIncident(uid, idx, fix) {
   const a = String(fix || "").toLowerCase();
   const tokens = inc.tokens.filter((t) => a.includes(t));
   // Skill in this track boosts the chance of recognizing the right fix.
-  const conf = clusterConfidence(c.founder, TRACKS[inc.track].cluster).score; // 0..100
+  const conf = trackConfidence(c.founder, inc.track); // 0..100
   const skillBoost = conf / 100; // 0..1
   const recognized = tokens.length >= 1 || (skillBoost >= 0.5 && tokens.length >= 1);
   if (!recognized) {

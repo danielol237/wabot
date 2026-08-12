@@ -146,13 +146,18 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // normal AI chat so the adaptive learning system can advance the session.
   if (!isCommand && !hasMedia(msg) && !hasVoiceNote(msg)) {
     try {
+      // Production incident simulator takes priority (free-form diagnosis/fix).
+      const incident = require("../tools/academy/incidentSimulator");
+      if (incident.hasActiveFlow(chatId)) {
+        const out = incident.handleReply(chatId, senderJid.split("@")[0], text.trim());
+        if (out) { await react(sock, msg, "🚨"); return reply(sock, msg, out.text); }
+      }
+    } catch (_) {}
+    try {
       const { hasActiveFlow, handleReply } = require("../tools/academy/academyOrchestrator");
       if (hasActiveFlow(chatId)) {
         const out = await handleReply(chatId, senderJid.split("@")[0], text.trim());
-        if (out) {
-          await react(sock, msg, "📚");
-          return reply(sock, msg, out.text);
-        }
+        if (out) { await react(sock, msg, "📚"); return reply(sock, msg, out.text); }
       }
     } catch (_) {}
   }

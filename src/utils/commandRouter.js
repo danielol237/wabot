@@ -119,6 +119,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "academy", aliases: ["study", "learn", "school"], category: "utility", description: "Adaptive coding academy: pick a track + level", handler: handleAcademy, ownerOnly: false });
   registerCommand({ name: "run", aliases: ["execute", "practice"], category: "utility", description: "Run code for a challenge: !run <code>", handler: handleAcademyRun, ownerOnly: false });
   registerCommand({ name: "project", aliases: ["capstone", "build"], category: "utility", description: "Start a track project: !project <track> <level>", handler: handleProject, ownerOnly: false });
+  registerCommand({ name: "incident", aliases: ["oncall", "sre"], category: "utility", description: "Production incident simulator: diagnose + fix", handler: handleIncident, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -625,6 +626,11 @@ async function handleAcademyRun(sock, msg, args, ctx) {
 async function handleProject(sock, msg, args, ctx) {
   const { handleProjectCommand } = require("../tools/academy/academyOrchestrator");
   await handleProjectCommand(sock, msg, args, ctx);
+}
+
+async function handleIncident(sock, msg, args, ctx) {
+  const { handleIncidentCommand } = require("../tools/academy/incidentSimulator");
+  await handleIncidentCommand(sock, msg, args, ctx);
 }
 
 // Fun handlers

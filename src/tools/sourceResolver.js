@@ -161,18 +161,27 @@ async function discoverCandidates(title, episode) {
 
 // ── Quality Router ─────────────────────────────────────────────
 // Score candidates: prefer validated, higher quality, healthier provider.
+// Uses ffprobe-reported height/codec when available (not just the claimed
+// quality label) so a 720p stream with real dimensions scores properly.
 function qualityRank(candidates, validations, preference) {
   const scored = candidates.map((c) => {
     const v = validations[c.url] || {};
     let s = 0;
     if (v.ok) s += 100;               // validated & playable
-    const height = c.quality === "1080" ? 1080 : c.quality === "720" ? 720 : c.quality === "480" ? 480 : c.quality === "360" ? 360 : 0;
+    // Real ffprobe height beats the claimed label when we have it.
+    const realHeight = v.height || 0;
+    const claimed = c.quality === "1080" ? 1080 : c.quality === "720" ? 720 : c.quality === "480" ? 480 : c.quality === "360" ? 360 : 0;
+    const height = realHeight || claimed;
     s += Math.min(50, height / 24);    // quality (up to ~45 for 1080)
+    // Prefer real video codecs (h264/h265) over edge or unknown codecs.
+    const codec = String(v.codec || "").toLowerCase();
+    if (codec === "h264" || codec === "h265" || codec === "hevc") s += 8;
+    else if (codec && codec !== "none") s += 3;
     const prov = rep.status(c.provider);
     s += prov.score * 0.3;             // provider reputation
     if (preference && c.provider === preference) s += 30; // user preference
     if (c.type === "mp4") s += 5;      // direct file slightly preferred over hls
-    return { candidate: c, validation: v, score: s };
+    return { candidate: c, validation: v, score: s, height, codec: v.codec || null, duration: v.duration || null };
   }).sort((a, b) => b.score - a.score);
   return scored;
 }
@@ -228,7 +237,9 @@ async function resolveEpisode(title, episode, { preference, quality } = {}) {
     quality: selected.candidate.quality,
     headers: selected.candidate.headers,
     title: selected.candidate.title || title,
-    height: selected.validation.height,
+    height: selected.height,
+    codec: selected.codec,
+    duration: selected.duration,
     score: Math.round(selected.score),
   };
   rep.record(selected.candidate.provider, "download", true, {});

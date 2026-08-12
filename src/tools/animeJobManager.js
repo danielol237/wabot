@@ -519,7 +519,16 @@ async function runJob(job) {
     }
 
     const src = report.selected;
-    step("resolver", "selected", true, `${"" + (src.provider)} · ${src.type}${src.height ? ` · ${src.height}p` : ""} · score ${src.score}`);
+    step("resolver", "selected", true, `${src.provider} · ${src.type}${src.height ? ` · ${src.height}p` : ""}${src.codec ? ` · ${src.codec}` : ""}${src.duration ? ` · ${Number(src.duration).toFixed(0)}s` : ""} · score ${src.score}`);
+    // Persist the last resolver report on the job for the dashboard Sources pane.
+    job.resolver = {
+      canonical: report.canonical,
+      confidence: report.confidence,
+      candidates: (report.candidates || []).map((c) => ({ provider: c.provider, type: c.type, quality: c.quality, url: c.url })),
+      diagnostics: report.diagnostics,
+      validation: report.validation,
+      selected: { provider: src.provider, type: src.type, height: src.height, codec: src.codec, duration: src.duration, score: src.score },
+    };
 
     // ── DOWNLOAD the validated candidate ──
     const isWhatsAppJob = !!(job.sock && job.chatId);

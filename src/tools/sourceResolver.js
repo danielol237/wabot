@@ -26,6 +26,17 @@ const axios = require("axios");
 
 function normalize(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
 
+// Parse a season number from a title/name like "solo leveling season 2",
+// "attack on titan s4", "one piece part 3". Returns 1 if none found.
+function parseSeason(title) {
+  const t = String(title || "");
+  let m = t.match(/(?:season|s)\s*(\d{1,2})/i);
+  if (m) return parseInt(m[1], 10) || 1;
+  m = t.match(/\bpart\s*(\d{1,2})\b/i);
+  if (m) return parseInt(m[1], 10) || 1;
+  return 1;
+}
+
 async function anilistSearch(title) {
   try {
     const r = await axios.post(ANILIST_URL, {
@@ -99,7 +110,7 @@ const DISCOVERERS = [
     provider: "omnisave",
     // Circuit breaker: skip when open.
     enabled: () => rep.usable("omnisave"),
-    async discover(title, episode) {
+    async discover(title, episode, season) {
       const { searchOmniSave, searchOmniSaveById, getOmniSaveDownload } = require("./animeDownload");
       const list = await searchOmniSave(title);
       if (!list.length) return { candidates: [], noResults: true };
@@ -107,7 +118,10 @@ const DISCOVERERS = [
       let detailPath = anime.detailPath;
       if (!detailPath) { const d = await searchOmniSaveById(anime.subjectId); detailPath = d?.detailPath || ""; }
       if (!detailPath) return { candidates: [], error: "no detailPath" };
-      const dl = await getOmniSaveDownload(anime.subjectId, detailPath, 1, episode || 1);
+      // Use the parsed season from the request (e.g. "solo leveling s2 ep1"),
+      // defaulting to 1. The old hardcoded 1 silently grabbed season 1 even for
+      // "season 2 ep 1" requests.
+      const dl = await getOmniSaveDownload(anime.subjectId, detailPath, season || 1, episode || 1);
       const url = dl?.downloads?.find((d) => d?.url)?.url || dl?.downloads?.[0]?.url;
       if (!url) return { candidates: [], error: "no usable URL (VIP-locked?)" };
       return { candidates: [{ provider: "omnisave", url, type: /m3u8/i.test(url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0" }, title: anime.title }] };
@@ -157,13 +171,13 @@ const DISCOVERERS = [
 ];
 
 // Discover candidates from all enabled providers CONCURRENTLY (resolver race).
-async function discoverCandidates(title, episode) {
+async function discoverCandidates(title, episode, season) {
   const results = await Promise.all(
     DISCOVERERS.filter((d) => !d.enabled || d.enabled())
       .map(async (d) => {
         const start = Date.now();
         try {
-          const out = await d.discover(title, episode);
+          const out = await d.discover(title, episode, season);
           // Record provider outcome for reputation.
           if (out.noResults) rep.record(d.provider, "no-results", false, {});
           else if (out.error) rep.record(d.provider, "resolve", false, { error: out.error });
@@ -248,7 +262,8 @@ async function resolveEpisode(title, episode, { preference, quality } = {}) {
   }
 
   // 2. Concurrent source discovery.
-  const disc = await discoverCandidates(title, episode);
+  const season = parseSeason(title);
+  const disc = await discoverCandidates(title, episode, season);
   report.diagnostics = disc.diagnostics;
   report.candidates = disc.candidates;
   if (!disc.candidates.length) {
@@ -314,4 +329,4 @@ function reputationReport() {
   return rep.all();
 }
 
-module.exports = { resolveEpisode, resolveCanonical, discoverCandidates, reputationReport, DISCOVERERS };
+module.exports = { resolveEpisode, resolveCanonical, discoverCandidates, parseSeason, reputationReport, DISCOVERERS };

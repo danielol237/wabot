@@ -139,3 +139,12 @@ test("resolver: AniList unavailable must NOT block provider discovery (regressio
   assert.ok(sr.DISCOVERERS.some((d) => d.provider === "animepahe"), "animepahe is a discoverer");
   assert.ok(sr.DISCOVERERS.length >= 4, "all 4 providers in one pipeline");
 });
+
+test("resolver: parseSeason extracts season from title (fixes omnisave hardcoded s1)", () => {
+  const { parseSeason } = require("../src/tools/sourceResolver");
+  assert.strictEqual(parseSeason("solo leveling season 2"), 2);
+  assert.strictEqual(parseSeason("attack on titan s4"), 4);
+  assert.strictEqual(parseSeason("one piece"), 1);
+  assert.strictEqual(parseSeason("solo leveling ep1"), 1);
+  assert.strictEqual(parseSeason("demon slayer part 3"), 3);
+});

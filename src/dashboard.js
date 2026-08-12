@@ -628,13 +628,13 @@ function renderPage(title, content, passwordNeeded = false, isLogin = false, csr
 <title>${title} · ARIA</title>
 <style>
 :root{
-  --bg:#f6f7ff; --panel:#ffffff; --panel2:#f1f2fb; --panel3:#eceefb; --line:#e6e8f5; --line2:#d6daf0;
-  --text:#1a1f3a; --muted:#6a7290; --faint:#97a0bf;
-  --accent:#7c5cff; --accent2:#5b8cff; --cyan:#3dd6ff; --green:#22c55e; --amber:#f59e0b; --red:#ef4444;
-  --shadow:0 1px 3px rgba(30,34,90,.06),0 6px 20px rgba(30,34,90,.05);
+  --bg:#0b0f17; --panel:#121827; --panel2:#0f1522; --panel3:#182131; --line:#1e2939; --line2:#2a3a50;
+  --text:#e2e8f0; --muted:#8b97ab; --faint:#5a6b8a;
+  --accent:#22d3ee; --accent2:#818cf8; --cyan:#22d3ee; --green:#34d399; --amber:#fbbf24; --red:#f87171;
+  --shadow:0 1px 3px rgba(0,0,0,.5),0 8px 24px rgba(0,0,0,.45);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:linear-gradient(160deg,#eef0ff 0%,#f6f7ff 40%,#f0f6ff 100%);color:var(--text);min-height:100vh;background-attachment:fixed}
+body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:radial-gradient(1200px 600px at 20% -10%,rgba(34,211,238,.08),transparent),radial-gradient(1000px 500px at 90% 0%,rgba(129,140,248,.08),transparent),linear-gradient(160deg,#0b0f17 0%,#0e1320 50%,#0b0f17 100%);color:var(--text);min-height:100vh;background-attachment:fixed}
 .mono{font-family:ui-monospace,Consolas,monospace}
 
 .app{display:flex;min-height:100vh}
@@ -732,26 +732,29 @@ body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:linear
 ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 <div class="app">
   <aside class="sidebar">
-    <div class="sb-brand"><div class="sb-logo">◢</div><div class="sb-name">ARIA<small>control room</small></div></div>
-    <div class="sb-group">Workspace</div>
+    <div class="sb-brand"><div class="sb-logo">◢</div><div class="sb-name">ARIA<small>control center</small></div></div>
+    <div class="sb-group">Overview</div>
     <div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Command</span></div>
+    <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
     <div class="navitem" data-pane="analytics"><span class="ico">📊</span><span>Analytics</span></div>
-    <div class="navitem" data-pane="academy"><span class="ico">🎓</span><span>Academy</span></div>
-    <div class="navitem" data-pane="learnerspace"><span class="ico">🧑‍🎓</span><span>Learner Space</span></div>
-    <div class="navitem" data-pane="incidents"><span class="ico">🚨</span><span>Incidents</span></div>
+    <div class="sb-group">Intelligence</div>
     <div class="navitem" data-pane="brain"><span class="ico">🧬</span><span>Brain</span></div>
-    <a class="navitem" style="text-decoration:none" href="/dashboard/anime"><span class="ico">🎬</span><span>Anime</span></a>
-    <div class="navitem" data-pane="missions"><span class="ico">◆</span><span>Missions</span></div>
     <div class="navitem" data-pane="memory"><span class="ico">🧠</span><span>Memory</span></div>
     <div class="navitem" data-pane="media"><span class="ico">🖼️</span><span>Media</span></div>
+    <div class="sb-group">Academy</div>
+    <div class="navitem" data-pane="academy"><span class="ico">🎓</span><span>Academy</span></div>
+    <div class="navitem" data-pane="learnerspace"><span class="ico">🧑‍🎓</span><span>Learners</span></div>
+    <div class="sb-group">Automation</div>
+    <div class="navitem" data-pane="missions"><span class="ico">◆</span><span>Missions</span></div>
+    <a class="navitem" style="text-decoration:none" href="/dashboard/anime"><span class="ico">🎬</span><span>Anime</span></a>
     <div class="navitem" data-pane="downloads"><span class="ico">⬇️</span><span>Downloads</span></div>
     <div class="navitem" data-pane="sources"><span class="ico">🧩</span><span>Sources</span></div>
-    <div class="navitem" data-pane="household"><span class="ico">🏠</span><span>Household</span></div>
-    <div class="sb-group">System</div>
-    <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
-    <div class="navitem" data-pane="system"><span class="ico">🛠️</span><span>System</span></div>
+    <div class="sb-group">Operations</div>
+    <div class="navitem" data-pane="incidents"><span class="ico">🚨</span><span>Incidents</span></div>
     <div class="navitem" data-pane="health"><span class="ico">❤️</span><span>Health</span></div>
     <div class="navitem" data-pane="logs"><span class="ico">📜</span><span>Logs</span></div>
+    <div class="navitem" data-pane="system"><span class="ico">🛠️</span><span>System</span></div>
+    <div class="navitem" data-pane="household"><span class="ico">🏠</span><span>Household</span></div>
     <div class="navitem" data-pane="admin"><span class="ico">🔐</span><span>Admin</span></div>
     <div class="sb-bottom">
       <div class="sb-online"><span class="dot"></span><span>ARIA online</span></div>
@@ -1062,15 +1065,6 @@ router.get("/", checkAuth, (req, res) => {
     }
     content += renderIncidentsPane(id);
     content += renderBrainPane(b);
-    content += `
-    <div class="pane" id="pane-missions"><div class="page-title">Missions</div><div class="page-sub">what ARIA is building</div>
-      ${d.missions.length ? `<div class="grid2">${d.missions.slice(0,12).map(m=>`
-        <div class="card"><div class="h"><span>${m.id||"mission"}</span><span class="badge ${m.status==='completed'?'b-green':m.status==='running'?'b-accent':m.status==='failed'?'b-red':'b-muted'}">${m.status}</span></div>
-          <div class="row"><span class="k">${m.objective||"Untitled"}</span></div>
-          <div class="row"><span class="k">Progress</span><span class="v">${m.progress||"—"}</span></div>
-        </div>`).join("")}</div>` : `<div class="card"><div class="empty">No missions yet.</div></div>`}
-    </div>`;
-
     content += `
     <div class="pane" id="pane-missions"><div class="page-title">Missions</div><div class="page-sub">what ARIA is building</div>
       ${d.missions.length ? `<div class="grid2">${d.missions.slice(0,12).map(m=>`

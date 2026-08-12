@@ -15,21 +15,50 @@ const ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"; // "Rachel" default
 // ── Transcription ─────────────────────────────────────────────
 
 async function transcribeVoice(audioBuffer, mimetype = "audio/ogg") {
-  if (!groq) return { success: false, error: "No Groq API key configured." };
-
   const id = uuidv4();
   const ext = mimetype.includes("ogg") ? "ogg" : mimetype.includes("mp3") ? "mp3" : "m4a";
   const filePath = path.join(TEMP_DIR, `${id}.${ext}`);
 
+  // Primary: Groq Whisper (needs GROQ_API_KEY).
+  if (groq) {
+    try {
+      fs.writeFileSync(filePath, audioBuffer);
+      const transcription = await groq.audio.transcriptions.create({
+        file: fs.createReadStream(filePath),
+        model: "whisper-large-v3",
+      });
+      return { success: true, text: transcription.text, provider: "groq" };
+    } catch (err) {
+      error("Groq transcription error:", err.message);
+    } finally {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+  }
+
+  // Fallback: free Google Web Speech STT (no key) via gstt.py.
+  // Removes the hard dependency on GROQ_API_KEY so voice notes work out of the box.
+  return await freeSpeechToText(audioBuffer, mimetype);
+}
+
+// Free, no-key speech-to-text via the legacy Google Web Speech endpoint.
+async function freeSpeechToText(audioBuffer, mimetype = "audio/ogg") {
+  const { execFile } = require("child_process");
+  const id = uuidv4();
+  const ext = mimetype.includes("ogg") ? "ogg" : mimetype.includes("mp3") ? "mp3" : "m4a";
+  const filePath = path.join(TEMP_DIR, `${id}.${ext}`);
+  const script = path.join(__dirname, "gstt.py");
   try {
     fs.writeFileSync(filePath, audioBuffer);
-    const transcription = await groq.audio.transcriptions.create({
-      file: fs.createReadStream(filePath),
-      model: "whisper-large-v3",
+    const out = await new Promise((resolve) => {
+      execFile("python3", [script, filePath, "--lang", "en-US"], { timeout: 30000 }, (err, stdout, stderr) => {
+        resolve({ err, stdout: String(stdout || ""), stderr: String(stderr || "") });
+      });
     });
-    return { success: true, text: transcription.text };
+    const m = String(out.stdout).match(/^TRANSCRIPT:\s*(.+)$/m);
+    if (m) return { success: true, text: m[1].trim(), provider: "free" };
+    return { success: false, error: "No speech detected in audio." };
   } catch (err) {
-    error("Transcription error:", err.message);
+    error("Free STT error:", err.message);
     return { success: false, error: err.message };
   } finally {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);

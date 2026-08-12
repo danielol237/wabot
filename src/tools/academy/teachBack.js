@@ -11,6 +11,7 @@ const fs = require("fs");
 const path = require("path");
 const { getAIResponse } = require("../ai");
 const { addXp, recordAttempt } = require("./learnerModel");
+const { levelUpText } = require("./xpSystem");
 
 const STATE_FILE = path.join(__dirname, "../../../data/explainState.json");
 let state = { chats: {} };
@@ -88,13 +89,13 @@ async function submitExplanation(chatId, uid, explanation) {
   // Record to learner model.
   const xp = grade.offline ? 0 : grade.correct ? 50 : grade.score >= 70 ? 30 : 10;
   if (!grade.offline) recordAttempt(uid, { track: "teach", level: "explain", lessonId: st.topic, sectionType: "explain", correct: grade.correct, skill: st.topic });
-  if (xp) addXp(uid, xp);
+  const up = xp ? addXp(uid, xp, "Teach-back") : null;
   delete state.chats[chatId];
   save();
-  return { topic: st.topic, explanation, grade, xp, text: formatGrade(st, grade, xp) };
+  return { topic: st.topic, explanation, grade, xp, up, text: formatGrade(st, grade, xp, up) };
 }
 
-function formatGrade(st, g, xp) {
+function formatGrade(st, g, xp, up) {
   if (g.offline) {
     return `🧑‍🏫 *Teach-it-back — ${st.topic}*\n\n${g.feedback}\n\n(no XP this round)`;
   }
@@ -102,7 +103,7 @@ function formatGrade(st, g, xp) {
     ? g.misconceptions.map((m) => `• *${m.severity?.toUpperCase()}* You said: "${m.idea}" → actually: ${m.truth}`).join("\n")
     : "None detected — clean mental model. 🎯";
   const strengths = (g.strengths && g.strengths.length) ? g.strengths.map((s) => `• ${s}`).join("\n") : "(none noted)";
-  return `🧑‍🏫 *Teach-it-back — ${st.topic}*\n\n*Score:* ${g.score}/100 (${g.grade})\n\n*Misconceptions:*\n${miscon}\n\n*What you got right:*\n${strengths}\n\n*Feedback:* ${g.feedback}\n\n+${xp} XP\n\nReply !explain <topic> for another, or !explain for a random one.`;
+  return `🧑‍🏫 *Teach-it-back — ${st.topic}*\n\n*Score:* ${g.score}/100 (${g.grade})\n\n*Misconceptions:*\n${miscon}\n\n*What you got right:*\n${strengths}\n\n*Feedback:* ${g.feedback}\n\n+${xp} XP${levelUpText(up)}\n\nReply !explain <topic> for another, or !explain for a random one.`;
 }
 
 async function handleExplainCommand(sock, msg, args, ctx) {

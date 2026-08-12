@@ -8,6 +8,7 @@
 const fs = require("fs");
 const path = require("path");
 const { addXp, setMastery, getMastery } = require("./learnerModel");
+const { levelUpText } = require("./xpSystem");
 
 const FILE = path.join(__dirname, "../../../data/academyProjects.json");
 let state = { users: {} };
@@ -136,10 +137,10 @@ function completeProject(uid, chatId) {
   const track = u.current.track, level = u.current.level;
   const base = getMastery(uid, track, level);
   setMastery(uid, track, level, Math.min(100, base + 15));
-  addXp(uid, 80);
+  const up = addXp(uid, 80, "Project");
   delete u.current;
   save();
-  return { text: `🏆 Project complete! You demonstrated real skill — mastery on ${track} boosted and +80 XP.` };
+  return { text: `🏆 Project complete! You demonstrated real skill — mastery on ${track} boosted and +80 XP.${levelUpText(up)}` };
 }
 
 function hasActiveProject(uid) {

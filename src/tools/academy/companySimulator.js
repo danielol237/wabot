@@ -18,6 +18,7 @@
 const fs = require("fs");
 const path = require("path");
 const { addXp, recordAttempt, skillConfidence } = require("./learnerModel");
+const { levelUpText } = require("./xpSystem");
 const { clusterConfidence, engineeringDNA, CAREERS } = require("./engineeringDNA");
 const { CLUSTERS } = require("./engineeringDNA");
 
@@ -311,9 +312,9 @@ function resolveIncident(uid, idx, fix) {
   c.resolvedIncidents += 1;
   c.reputation += 4;
   recordAttempt(uid, { track: "company", level: "incident", lessonId: inc.id, sectionType: "incident", correct: true, skill: inc.track });
-  addXp(uid, 25);
+  const up = addXp(uid, 25, "Company incident");
   save();
-  return { ok: true, text: `✅ Incident resolved: *${inc.title}*. +4 reputation (now ${c.reputation}), +25 XP. Projects can resume.` };
+  return { ok: true, text: `✅ Incident resolved: *${inc.title}*. +4 reputation (now ${c.reputation}), +25 XP${levelUpText(up)}. Projects can resume.` };
 }
 
 // ── Status ──────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ const path = require("path");
 const { getAIResponse } = require("../ai");
 const { runCode } = require("../codeSandbox");
 const { addXp, recordAttempt } = require("./learnerModel");
+const { levelUpText } = require("./xpSystem");
 
 const STATE_FILE = path.join(__dirname, "../../../data/duelState.json");
 let state = { chats: {} };
@@ -85,16 +86,16 @@ async function submitHuman(chatId, uid, humanCode) {
   // Record + XP: small reward for participating, bigger for winning.
   recordAttempt(uid, { track: "duel", level: "challenge", lessonId: "duel", sectionType: "duel", correct: verdict.winner === "human" });
   const xp = verdict.winner === "human" ? 100 : verdict.winner === "tie" ? 50 : 25;
-  addXp(uid, xp);
+  const up = addXp(uid, xp, "Duel");
   save();
 
-  return { verdict, ariaCode, humanCode, xp, text: formatVerdict(st, verdict, xp) };
+  return { verdict, ariaCode, humanCode, xp, text: formatVerdict(st, verdict, xp, up) };
 }
 
-function formatVerdict(st, v, xp) {
+function formatVerdict(st, v, xp, up) {
   const bd = (v.breakdown || []).map((d) => `• ${d.dimension}: human ${d.human}/10 vs aria ${d.aria}/10 — ${d.note}`).join("\n");
   const winner = v.winner === "human" ? "🏆 YOU WIN" : v.winner === "aria" ? "🤖 I win this one" : "🤝 Tie";
-  return `⚔️ *Duel result*\n\n*${winner}*\n\n*Scores:* Human ${v.score?.human}/100 · ARIA ${v.score?.aria}/100\n\n*Breakdown:*\n${bd || "(none)"}\n\n*Assessment:* ${v.assessment}\n\n+${xp} XP\n\n---\n*MY solution:*\n\`\`\`\n${String(st.ariaCode).slice(0, 1500)}\n\`\`\`\n\n*YOUR solution:*\n\`\`\`\n${String(st.humanCode).slice(0, 1500)}\n\`\`\`\n\nReply !duel <problem> to run another.`;
+  return `⚔️ *Duel result*\n\n*${winner}*\n\n*Scores:* Human ${v.score?.human}/100 · ARIA ${v.score?.aria}/100\n\n*Breakdown:*\n${bd || "(none)"}\n\n*Assessment:* ${v.assessment}\n\n+${xp} XP${levelUpText(up)}\n\n---\n*MY solution:*\n\`\`\`\n${String(st.ariaCode).slice(0, 1500)}\n\`\`\`\n\n*YOUR solution:*\n\`\`\`\n${String(st.humanCode).slice(0, 1500)}\n\`\`\`\n\nReply !duel <problem> to run another.`;
 }
 
 // Command: !duel <problem>

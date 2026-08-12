@@ -5,33 +5,10 @@
 //   • Per-activity XP breakdown (where your points came from)
 //   • Global leaderboard (!leaderboard / !lb) ranked by XP
 
-const { getStats, getAllLearners, learner } = require("./learnerModel");
-
-// Level tiers: cumulative XP to reach each rank. Derived from the curve
-// level(xp) = floor(sqrt(xp/120)) + 1, but expressed as named tiers so the
-// progress bar reads nicely.
-const LEVELS = [
-  { level: 1,  xp: 0,    title: "Rookie" },
-  { level: 2,  xp: 120,  title: "Apprentice" },
-  { level: 3,  xp: 300,  title: "Developer" },
-  { level: 4,  xp: 540,  title: "Junior Engineer" },
-  { level: 5,  xp: 900,  title: "Engineer" },
-  { level: 6,  xp: 1400, title: "Senior Engineer" },
-  { level: 7,  xp: 2100, title: "Staff Engineer" },
-  { level: 8,  xp: 3000, title: "Principal Engineer" },
-  { level: 9,  xp: 4200, title: "Distinguished Engineer" },
-  { level: 10, xp: 6000, title: "Architect" },
-];
+const { getStats, getAllLearners, LEVELS, tierFor } = require("./learnerModel");
 
 // Deterministic avatar emoji per rank (stable, no collision issues).
 const RANK_EMOJI = ["🥚", "🌱", "⚙️", "🧩", "🛠️", "🚀", "🏗️", "👑", "💎", "🌟"];
-
-// Resolve the level tier for a given XP total.
-function tierFor(xp) {
-  let current = LEVELS[0];
-  for (const t of LEVELS) if (xp >= t.xp) current = t;
-  return current;
-}
 
 function nextTierFor(xp) {
   return LEVELS.find((t) => t.xp > xp) || null;
@@ -109,4 +86,12 @@ function leaderboardView(scopeUids, selfUid) {
   return lines.join("\n");
 }
 
-module.exports = { LEVELS, tierFor, xpView, leaderboardView, xpBreakdown };
+// Build a level-up celebration line. Callers that just granted XP can append
+// this when addXp returns { leveledUp: true }.
+function levelUpText(up) {
+  if (!up || !up.leveledUp) return "";
+  const emoji = RANK_EMOJI[(up.after - 1)] || "🌟";
+  return `\n\n🎉 *LEVEL UP!* You're now ${emoji} *Level ${up.after} — ${up.title}*`;
+}
+
+module.exports = { LEVELS, tierFor, xpView, leaderboardView, xpBreakdown, levelUpText, RANK_EMOJI };

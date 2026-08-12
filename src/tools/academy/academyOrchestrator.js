@@ -10,6 +10,7 @@ const path = require("path");
 const { lessonAt, allTrackOverviews, levelLessons, CURRICULUM_VERSION, LEVEL_DEFS } = require("./curriculumEngine");
 const { gradeQuiz, gradeChallenge, XP_QUIZ, XP_CHALLENGE } = require("./assessmentEngine");
 const { addXp, setMastery, getMastery, getStats } = require("./learnerModel");
+const { levelUpText } = require("./xpSystem");
 const { recommend } = require("./adaptiveTutor");
 const { startProject, projectView, hasActiveProject, handleProjectReply } = require("./projectWorkspace");
 
@@ -147,9 +148,9 @@ async function handleReply(chatId, uid, input) {
       const g = gradeQuiz(st.uid, {
         track: st.track, level: st.level, lessonId: lesson.id, skill: lesson.skill,
       }, section, input.trim());
-      if (g.correct) addXp(st.uid, g.xp);
+      const up = g.correct ? addXp(st.uid, g.xp, "Quiz") : null;
       const exp = g.correct ? `✅ Correct! +${g.xp} XP` : `❌ ${g.explanation || "Try again."}`;
-      return { text: `${exp}\n\n▸ reply *next* to continue` };
+      return { text: `${exp}${levelUpText(up)}\n\n▸ reply *next* to continue` };
     }
 
     if (/next|continue/i.test(input)) return nextSection(chatId);
@@ -182,9 +183,9 @@ async function handleRun(chatId, uid, code) {
   const g = await gradeChallenge(st.uid, {
     track: st.track, level: st.level, lessonId: lesson.id, skill: lesson.skill,
   }, code, section);
-  if (g.correct) addXp(st.uid, g.xp);
+  const up = g.correct ? addXp(st.uid, g.xp, "Coding challenge") : null;
   return {
-    text: `${g.correct ? `✅ Correct! +${g.xp} XP` : "❌ Not quite."}\n\n${g.correct ? "" : `Expected:\n\`\`\`\n${g.expected}\n\`\`\`\nGot:\n\`\`\`\n${g.output || "(no output)"}\n\`\`\`\n`}▸ reply *next*`,
+    text: `${g.correct ? `✅ Correct! +${g.xp} XP` : "❌ Not quite."}${levelUpText(up)}\n\n${g.correct ? "" : `Expected:\n\`\`\`\n${g.expected}\n\`\`\`\nGot:\n\`\`\`\n${g.output || "(no output)"}\n\`\`\`\n`}▸ reply *next*`,
   };
 }
 

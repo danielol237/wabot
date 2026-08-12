@@ -18,6 +18,7 @@
 const fs = require("fs");
 const path = require("path");
 const { addXp, recordAttempt } = require("./learnerModel");
+const { levelUpText } = require("./xpSystem");
 
 const STATE_FILE = path.join(__dirname, "../../../data/incidentState.json");
 
@@ -315,11 +316,11 @@ function handleReply(chatId, uid, input) {
     let xp = 0;
     if (dg.correct) xp += 40;
     if (fx.correct) xp += 60;
-    if (xp) addXp(uid, xp);
+    const up = xp ? addXp(uid, xp, "Incident") : null;
 
     const root = dg.correct ? "✅" : "❌";
     const fix = fx.correct ? "✅" : "❌";
-    const verdict = `🚨 *Incident resolved — debrief*\n\n*Diagnosis:* ${root} ${dg.correct ? "Correct!" : "Missed."}\n_Actual root cause:_ ${inc.rootCause}\n\n*Fix:* ${fix} ${fx.correct ? "Correct!" : "Missed."}\n_Right fix:_ ${inc.correctFix}\n\n*Time:* ${elapsedMin} min\n*XP earned:* +${xp}\n\nPlausible wrong answers: ${inc.distractors.join(" · ")}\n\nReply *again* for a new incident, or *done* to stop.`;
+    const verdict = `🚨 *Incident resolved — debrief*\n\n*Diagnosis:* ${root} ${dg.correct ? "Correct!" : "Missed."}\n_Actual root cause:_ ${inc.rootCause}\n\n*Fix:* ${fix} ${fx.correct ? "Correct!" : "Missed."}\n_Right fix:_ ${inc.correctFix}\n\n*Time:* ${elapsedMin} min\n*XP earned:* +${xp}${levelUpText(up)}\n\nPlausible wrong answers: ${inc.distractors.join(" · ")}\n\nReply *again* for a new incident, or *done* to stop.`;
 
     delete state.chats[chatId];
     save();

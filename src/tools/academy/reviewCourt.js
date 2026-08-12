@@ -107,6 +107,7 @@ function gradeChecklist(issues, fixList) {
 const fs = require("fs");
 const path = require("path");
 const { addXp } = require("./learnerModel");
+const { levelUpText } = require("./xpSystem");
 const STATE_FILE = path.join(__dirname, "../../../data/reviewState.json");
 let state = { chats: {} };
 function load() { try { if (fs.existsSync(STATE_FILE)) state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) || { chats: {} }; } catch (_) { state = { chats: {} }; } }
@@ -131,11 +132,11 @@ async function submitFixes(chatId, uid, fixes) {
   const st = state.chats[chatId];
   if (!st || st.uid !== uid) return null;
   const grade = gradeFixes(st.issues, fixes);
-  if (grade.passed) addXp(uid, 80);
+  const up = grade.passed ? addXp(uid, 80, "Review pass") : null;
   const missLines = grade.missed.length ? grade.missed.map((m) => `• ${m.title}`).join("\n") : "none";
   delete state.chats[chatId];
   save();
-  return { text: `⚖️ *Regrade*\n\n${grade.feedback}\n\n*Score:* ${grade.score}/100\n\n${grade.passed ? "✅ Review passed! +80 XP" : "❌ Not yet — still missing:\n" + missLines}\n\nReply !review <code> to resubmit.`, grade };
+  return { text: `⚖️ *Regrade*\n\n${grade.feedback}\n\n*Score:* ${grade.score}/100\n\n${grade.passed ? "✅ Review passed! +80 XP" : "❌ Not yet — still missing:\n" + missLines}${levelUpText(up)}\n\nReply !review <code> to resubmit.`, grade };
 }
 
 function handleReply(chatId, uid, input) {

@@ -15,6 +15,28 @@ const path = require("path");
 
 const FILE = path.join(__dirname, "../../../data/learnerModel.json");
 
+// XP level tiers — single source of truth (shared with xpSystem.js).
+// XP is GAMIFICATION; mastery (demonstrated competence) is separate.
+const LEVELS = [
+  { level: 1,  xp: 0,    title: "Rookie" },
+  { level: 2,  xp: 120,  title: "Apprentice" },
+  { level: 3,  xp: 300,  title: "Developer" },
+  { level: 4,  xp: 540,  title: "Junior Engineer" },
+  { level: 5,  xp: 900,  title: "Engineer" },
+  { level: 6,  xp: 1400, title: "Senior Engineer" },
+  { level: 7,  xp: 2100, title: "Staff Engineer" },
+  { level: 8,  xp: 3000, title: "Principal Engineer" },
+  { level: 9,  xp: 4200, title: "Distinguished Engineer" },
+  { level: 10, xp: 6000, title: "Architect" },
+];
+
+// Resolve the level tier for a given XP total.
+function tierFor(xp) {
+  let current = LEVELS[0];
+  for (const t of LEVELS) if (xp >= t.xp) current = t;
+  return current;
+}
+
 let model = { learners: {} };
 
 function load() {
@@ -64,7 +86,9 @@ function recordAttempt(uid, { track, level, lessonId, sectionType, correct, skil
 // breakdown view) and update streak.
 function addXp(uid, amt, reason) {
   const l = learner(uid);
+  const before = tierFor(l.xp || 0).level;
   l.xp = (l.xp || 0) + amt;
+  const after = tierFor(l.xp).level;
   if (reason && amt) {
     l.xpLog = l.xpLog || [];
     l.xpLog.push({ ts: Date.now(), amt, reason });
@@ -78,6 +102,9 @@ function addXp(uid, amt, reason) {
   } else l.streak = 1;
   l.lastStudy = today;
   save();
+  // Level-up celebration. Return null unless the learner crossed a tier.
+  if (after > before) return { leveledUp: true, before, after, title: tierFor(l.xp).title };
+  return null;
 }
 
 function setMastery(uid, track, level, percent) {
@@ -142,4 +169,4 @@ function computeMastery(uid, track, level) {
   return getMastery(uid, track, level);
 }
 
-module.exports = { recordAttempt, addXp, setMastery, getMastery, getStats, getAllLearners, skillProfile, skillConfidence, computeMastery, learner };
+module.exports = { recordAttempt, addXp, setMastery, getMastery, getStats, getAllLearners, skillProfile, skillConfidence, computeMastery, learner, LEVELS, tierFor };

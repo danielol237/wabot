@@ -130,6 +130,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "company", aliases: ["startup", "ceo"], category: "utility", description: "Company simulator: run a software company on your real skills", handler: handleCompany, ownerOnly: false });
   registerCommand({ name: "level", aliases: ["xp", "rank"], category: "utility", description: "Your XP level, title, progress & breakdown", handler: handleLevel, ownerOnly: false });
   registerCommand({ name: "academyboard", aliases: ["lb", "aleaderboard"], category: "utility", description: "Global academy leaderboard by XP", handler: handleAcademyLeaderboard, ownerOnly: false });
+  registerCommand({ name: "digest", aliases: ["learning", "weekly"], category: "utility", description: "Your weekly learning digest: !digest", handler: handleLearningDigest, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -731,6 +732,15 @@ async function handleAcademyLeaderboard(sock, msg, args, ctx) {
   }
   const scopeNote = scopeUids ? "_This group_" : "_Global_ (DMs not in this group)";
   return reply(sock, msg, scopeNote + "\n\n" + leaderboardView(scopeUids, selfUid));
+}
+
+async function handleLearningDigest(sock, msg, args, ctx) {
+  const { reply } = require("../utils/baileysHelpers");
+  const { buildDigest, digestView } = require("../tools/academy/learningDigest");
+  const uid = (ctx.senderJid || "").split("@")[0];
+  const days = parseInt((Array.isArray(args) ? args[0] : args) || "7", 10) || 7;
+  const d = buildDigest(uid, { days });
+  return reply(sock, msg, digestView(d, uid));
 }
 
 // Fun handlers

@@ -115,9 +115,9 @@ function registerBuiltinCommands() {
   registerCommand({ name: "inactive", aliases: ["inactives", "dead"], category: "group", description: "Inactive members (< N msgs): !inactive [N]", handler: handleGroupInactive, ownerOnly: false });
   registerCommand({ name: "purge", aliases: ["prune"], category: "group", description: "Kick members under N msgs: !purge [N]", handler: handleGroupPurge, ownerOnly: false });
 
-  // Study
-  registerCommand({ name: "study", aliases: ["learn"], category: "utility", description: "Interactive study: pick a language + level", handler: handleStudy, ownerOnly: false });
-  registerCommand({ name: "run", aliases: ["execute", "practice"], category: "utility", description: "Run code for a study exercise: !run <code>", handler: handleStudyRun, ownerOnly: false });
+  // Academy (adaptive learning system)
+  registerCommand({ name: "academy", aliases: ["study", "learn", "school"], category: "utility", description: "Adaptive coding academy: pick a track + level", handler: handleAcademy, ownerOnly: false });
+  registerCommand({ name: "run", aliases: ["execute", "practice"], category: "utility", description: "Run code for a challenge: !run <code>", handler: handleAcademyRun, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -610,21 +610,15 @@ async function handleGroupPurge(sock, msg, args, ctx) {
   await reply(sock, msg, formatPurgeResult(result));
 }
 
-// ── Study ────────────────────────────────────────────────────
-async function handleStudy(sock, msg, args, ctx) {
-  const { handleStudyCommand } = require("../tools/studySystem");
-  await handleStudyCommand(sock, msg, args, ctx);
+// ── Academy (adaptive learning) ─────────────────────────────
+async function handleAcademy(sock, msg, args, ctx) {
+  const { handleAcademyCommand } = require("../tools/academy/academyOrchestrator");
+  await handleAcademyCommand(sock, msg, args, ctx);
 }
 
-async function handleStudyRun(sock, msg, args, ctx) {
-  const { reply } = require("./baileysHelpers");
-  const { runExercise, hasActiveFlow } = require("../tools/studySystem");
-  if (!hasActiveFlow(ctx.chatId)) return reply(sock, msg, "Start a study session first with !study, then use !run <code> on a lesson with an exercise.");
-  const uid = (ctx.senderJid || "").split("@")[0];
-  const code = (Array.isArray(args) ? args.join(" ") : args || "").trim();
-  if (!code) return reply(sock, msg, "Usage: !run <code>\nExample: !run for i in range(1,6): print(i)");
-  const result = await runExercise(ctx.chatId, uid, code);
-  return reply(sock, msg, result ? result.text : "No active exercise here.");
+async function handleAcademyRun(sock, msg, args, ctx) {
+  const { handleAcademyRun } = require("../tools/academy/academyOrchestrator");
+  await handleAcademyRun(sock, msg, args, ctx);
 }
 
 // Fun handlers

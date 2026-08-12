@@ -141,13 +141,12 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   }
 
   // ── NAME TRIGGER or PREFIX COMMAND ────────────────────────
-  // Active study flow: if the chat is mid-!study and this is a plain reply
-  // (number / next / prev / back / done), intercept before normal AI chat so
-  // the study system can advance the session.
+  // Active academy flow: if the chat is mid-!academy and this is a plain
+  // reply (number / next / prev / back / done / quiz letter), intercept before
+  // normal AI chat so the adaptive learning system can advance the session.
   if (!isCommand && !hasMedia(msg) && !hasVoiceNote(msg)) {
     try {
-      const { hasActiveFlow } = require("../tools/studySystem");
-      const { handleReply } = require("../tools/studySystem");
+      const { hasActiveFlow, handleReply } = require("../tools/academy/academyOrchestrator");
       if (hasActiveFlow(chatId)) {
         const out = await handleReply(chatId, senderJid.split("@")[0], text.trim());
         if (out) {

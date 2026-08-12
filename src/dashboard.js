@@ -294,32 +294,30 @@ function renderLogsPane() {
 }
 
 function renderStudyPane() {
-  let overview = [], userStats = { xp: 0, streak: 0 }, ownerProgress = [];
+  let overview = [], userStats = { xp: 0, streak: 0, attempts: 0 };
   try {
-    const ss = require("./tools/studySystem");
-    overview = ss.getCurriculumOverview();
+    const ce = require("./tools/academy/curriculumEngine");
+    overview = ce.allTrackOverviews();
     const owner = (process.env.OWNER_NUMBER || "237650284057").split("@")[0];
-    userStats = ss.getUserStats(owner);
-    ownerProgress = ss.getCurriculumOverview().map((l) => ({
-      ...l, levels: ss.getUserLangProgress(owner, l.id),
-    }));
+    const lm = require("./tools/academy/learnerModel");
+    userStats = lm.getStats(owner);
   } catch (_) {}
   const totalLessons = overview.reduce((s, l) => s + l.totalLessons, 0);
-  return `<div class="pane" id="pane-study"><div class="page-title">Study</div><div class="page-sub">ARIA coding academy</div>
+  return `<div class="pane" id="pane-study"><div class="page-title">Academy</div><div class="page-sub">adaptive coding academy · ${overview.length} tracks</div>
     <div class="card"><div class="h">Your progress</div>
       <div class="row"><span class="k">Total XP</span><span class="v">${userStats.xp}</span></div>
       <div class="row"><span class="k">Streak</span><span class="v">${userStats.streak} day${userStats.streak === 1 ? "" : "s"}</span></div>
-      ${ownerProgress.map((l) => `<div class="feed-item"><div class="feed-ico">🎓</div><div class="feed-body"><div class="t">${l.name}</div><div class="s">${l.levels.map((lv) => `${lv.emoji}${lv.label} ${lv.mastery}%`).join(" · ")}</div></div></div>`).join("") || `<div class="empty">No study progress yet. Run !study in a chat.</div>`}
+      <div class="row"><span class="k">Attempts</span><span class="v">${userStats.attempts}</span></div>
+      <div class="feed-item" style="margin-top:8px"><div class="feed-ico">🎓</div><div class="feed-body"><div class="m">Run <b>!academy</b> in a chat — pick a track + level, work through composable lessons (explain → example → quiz → coding challenge), and ARIA adapts to your weak spots.</div></div></div>
     </div>
-    <div class="card"><div class="h">Curriculum (${totalLessons} lessons)</div>
+    <div class="card"><div class="h">Tracks (${totalLessons} lessons)</div>
       <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
         ${overview.map((l) => `<div class="mini-card" style="border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel2)">
-          <div style="font-weight:700;margin-bottom:2px">${l.name}</div>
+          <div style="font-weight:700;margin-bottom:2px">${l.emoji} ${l.name}</div>
           <div style="color:var(--muted);font-size:12px">${l.tagline}</div>
           <div style="color:var(--faint);font-size:11px;margin-top:6px">${l.levels} levels · ${l.totalLessons} lessons</div>
         </div>`).join("")}
       </div>
-      <div class="feed-item" style="margin-top:8px"><div class="feed-ico">📱</div><div class="feed-body"><div class="m">Use <b>!study</b> in a chat — pick a language, then a level, and ARIA walks you through lessons with quizzes + coding exercises for XP.</div></div></div>
     </div>
   </div>`;
 }

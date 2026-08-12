@@ -141,6 +141,23 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   }
 
   // ── NAME TRIGGER or PREFIX COMMAND ────────────────────────
+  // Active study flow: if the chat is mid-!study and this is a plain reply
+  // (number / next / prev / back / done), intercept before normal AI chat so
+  // the study system can advance the session.
+  if (!isCommand && !hasMedia(msg) && !hasVoiceNote(msg)) {
+    try {
+      const { hasActiveFlow } = require("../tools/studySystem");
+      const { handleReply } = require("../tools/studySystem");
+      if (hasActiveFlow(chatId)) {
+        const out = handleReply(chatId, senderJid.split("@")[0], text.trim());
+        if (out) {
+          await react(sock, msg, "📚");
+          return reply(sock, msg, out);
+        }
+      }
+    } catch (_) {}
+  }
+
   return routeMessage(sock, msg, context);
 }
 

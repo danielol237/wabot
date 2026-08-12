@@ -115,6 +115,9 @@ function registerBuiltinCommands() {
   registerCommand({ name: "inactive", aliases: ["inactives", "dead"], category: "group", description: "Inactive members (< N msgs): !inactive [N]", handler: handleGroupInactive, ownerOnly: false });
   registerCommand({ name: "purge", aliases: ["prune"], category: "group", description: "Kick members under N msgs: !purge [N]", handler: handleGroupPurge, ownerOnly: false });
 
+  // Study
+  registerCommand({ name: "study", aliases: ["learn"], category: "utility", description: "Interactive study: pick a language + level", handler: handleStudy, ownerOnly: false });
+
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
   registerCommand({ name: "sticker", aliases: ["sticker"], category: "creative", description: "Make a sticker from image", handler: handleStickerCommand, ownerOnly: false });
@@ -604,6 +607,12 @@ async function handleGroupPurge(sock, msg, args, ctx) {
   await reply(sock, msg, `👢 Purging members under ${n} messages…`);
   const result = await purgeInactive(sock, ctx.chatId, args || 5);
   await reply(sock, msg, formatPurgeResult(result));
+}
+
+// ── Study ────────────────────────────────────────────────────
+async function handleStudy(sock, msg, args, ctx) {
+  const { handleStudyCommand } = require("../tools/studySystem");
+  await handleStudyCommand(sock, msg, args, ctx);
 }
 
 // Fun handlers

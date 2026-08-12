@@ -293,6 +293,24 @@ function renderLogsPane() {
     </div>`;
 }
 
+function renderStudyPane() {
+  let overview = [];
+  try { overview = require("./tools/studySystem").getCurriculumOverview(); } catch (_) {}
+  return `<div class="pane" id="pane-study"><div class="page-title">Study</div><div class="page-sub">ARIA curriculum · 8 languages</div>
+    <div class="card"><div class="h">Curricula</div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+        ${overview.map((l) => `<div class="mini-card" style="border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel2)">
+          <div style="font-weight:700;margin-bottom:2px">${l.name}</div>
+          <div style="color:var(--muted);font-size:12px">${l.tagline}</div>
+          <div style="color:var(--faint);font-size:11px;margin-top:6px">${l.levels} levels · ${l.totalLessons} lessons</div>
+        </div>`).join("")}
+      </div>
+      <div class="row" style="margin-top:14px"><span class="k">Total lessons</span><span class="v">${overview.reduce((s, l) => s + l.totalLessons, 0)}</span></div>
+      <div class="feed-item" style="margin-top:8px"><div class="feed-ico">📱</div><div class="feed-body"><div class="m">Use <b>!study</b> in a chat — pick a language, then a level (🌱 beginner → 👑 pro), and ARIA walks you through each lesson.</div></div></div>
+    </div>
+  </div>`;
+}
+
 function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "") {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -410,6 +428,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="navitem" data-pane="media"><span class="ico">🖼️</span><span>Media</span></div>
     <div class="navitem" data-pane="downloads"><span class="ico">⬇️</span><span>Downloads</span></div>
     <div class="navitem" data-pane="household"><span class="ico">🏠</span><span>Household</span></div>
+    <div class="navitem" data-pane="study"><span class="ico">🎓</span><span>Study</span></div>
     <div class="sb-group">System</div>
     <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
     <div class="navitem" data-pane="system"><span class="ico">🛠️</span><span>System</span></div>
@@ -428,7 +447,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};
-const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
+const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],study:['Study','curriculum'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
@@ -667,6 +686,8 @@ router.get("/", checkAuth, (req, res) => {
         <div class="row"><span class="k">Started</span><span class="v">${new Date(Date.now()-process.uptime()*1000).toLocaleString()}</span></div>
       </div>
     </div>`;
+
+    content += renderStudyPane();
 
     content += `
     <div class="pane" id="pane-system"><div class="page-title">System</div><div class="page-sub">health</div>

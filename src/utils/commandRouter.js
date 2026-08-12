@@ -94,9 +94,12 @@ function registerBuiltinCommands() {
   registerCommand({ name: "admin", aliases: ["setadmin"], category: "admin", description: "Add/remove bot admin", handler: handleAdmin, ownerOnly: true });
   registerCommand({ name: "ban", aliases: [], category: "admin", description: "Ban a user", handler: handleBan, ownerOnly: true });
   registerCommand({ name: "unban", aliases: [], category: "admin", description: "Unban a user", handler: handleUnban, ownerOnly: true });
+  registerCommand({ name: "nsfw", aliases: ["adultmode", "mature"], category: "admin", description: "Toggle NSFW mode (owner only): !nsfw on/off", handler: handleNsfw, ownerOnly: true });
 
   // Group admin
   registerCommand({ name: "kick", aliases: ["remove"], category: "group", description: "Kick a member", handler: handleKick, ownerOnly: false });
+  registerCommand({ name: "close", aliases: ["lockgroup", "closegc"], category: "group", description: "Close the group so only admins can message (GC admins + bot admin)", handler: handleClose, ownerOnly: false });
+  registerCommand({ name: "open", aliases: ["unlockgroup", "opengc"], category: "group", description: "Reopen the group so everyone can message (GC admins + bot admin)", handler: handleOpen, ownerOnly: false });
   registerCommand({ name: "add", aliases: ["invite", "addmember"], category: "group", description: "Add a member to the group by number: !add <number>", handler: handleAddMember, ownerOnly: false });
   registerCommand({ name: "promote", aliases: ["prom"], category: "group", description: "Promote a member to admin", handler: handlePromote, ownerOnly: false });
   registerCommand({ name: "demote", aliases: ["dem"], category: "group", description: "Demote an admin", handler: handleDemote, ownerOnly: false });
@@ -502,6 +505,68 @@ async function handleKick(sock, msg, args, ctx) {
   await react(sock, msg, "👢");
   if (result?.success === false) await reply(sock, msg, `❌ Kick failed: ${result.error}`);
   else await reply(sock, msg, "👢 User kicked.");
+}
+
+// ── !close — GC admins / bot admin tell ARIA to close the group ──
+// Locks the group so only admins can send messages (announcement mode).
+async function handleClose(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { isOwner } = require("../utils/permissions");
+  const { isBotAdmin } = require("../tools/groupAdmin");
+  if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  // Owner/bot-admin bypasses the group-admin check (already enforced upstream,
+  // but double-safe here).
+  const senderAdmin = await isBotAdmin(sock, ctx.chatId).catch(() => false);
+  if (!isOwner(ctx.senderJid) && !senderAdmin) {
+    return reply(sock, msg, "❌ Only a group admin or the bot admin can close the group.");
+  }
+  try {
+    // announcement mode = closed to non-admins
+    await sock.groupSettingUpdate(ctx.chatId, "announcement");
+    await react(sock, msg, "🔒");
+    await reply(sock, msg, "🔒 Group closed — only admins can send messages now.");
+  } catch (e) {
+    await reply(sock, msg, `❌ Couldn't close the group: ${e.message}`);
+  }
+}
+
+// ── !open — reopen a closed group (admin only) ──
+async function handleOpen(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { isOwner } = require("../utils/permissions");
+  const { isBotAdmin } = require("../tools/groupAdmin");
+  if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  const senderAdmin = await isBotAdmin(sock, ctx.chatId).catch(() => false);
+  if (!isOwner(ctx.senderJid) && !senderAdmin) {
+    return reply(sock, msg, "❌ Only a group admin or the bot admin can open the group.");
+  }
+  try {
+    await sock.groupSettingUpdate(ctx.chatId, "not_announcement");
+    await react(sock, msg, "🔓");
+    await reply(sock, msg, "🔓 Group opened — everyone can send messages again.");
+  } catch (e) {
+    await reply(sock, msg, `❌ Couldn't open the group: ${e.message}`);
+  }
+}
+
+// ── !nsfw — owner-only toggle for NSFW mode ──
+async function handleNsfw(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const { isNsfwEnabled, setNsfw } = require("../utils/botSettings");
+  const arg = String(Array.isArray(args) ? args[0] : args || "").toLowerCase();
+  if (arg === "on" || arg === "true" || arg === "enable" || arg === "1") {
+    setNsfw(true);
+    await react(sock, msg, "🔞");
+    return reply(sock, msg, "🔞 NSFW mode ON — adult content enabled.");
+  }
+  if (arg === "off" || arg === "false" || arg === "disable" || arg === "0") {
+    setNsfw(false);
+    await react(sock, msg, "🙂");
+    return reply(sock, msg, "🙂 NSFW mode OFF.");
+  }
+  // No/invalid arg → show current state + usage
+  const state = isNsfwEnabled() ? "ON" : "OFF";
+  return reply(sock, msg, `🔞 NSFW mode is currently *${state}*.\nUse *!nsfw on* or *!nsfw off* (owner only).`);
 }
 
 async function handleAddMember(sock, msg, args, ctx) {

@@ -45,7 +45,10 @@ function skillMemory(uid) {
   for (const key of Object.keys(map)) {
     map[key].confidence = Math.round((map[key].correct / map[key].total) * 100);
     map[key].strength = decayedStrength(map[key]);
-    map[key].due = map[key].strength < 40;
+    // "Due" = a skill that was GENUINELY known (conf >= RECALL_MIN_CONF) but
+    // has since decayed below the recall threshold. A never-mastered skill
+    // (low confidence) is WEAK, not RUSTY — that's the weak-skill branch's job.
+    map[key].due = map[key].confidence >= RECALL_MIN_CONF && map[key].strength < RECALL_THRESHOLD;
     map[key].daysSince = Math.floor((Date.now() - map[key].lastAt) / 86400000);
   }
   return Object.values(map);
@@ -65,6 +68,13 @@ function healthySkills(uid) {
     .filter((s) => !s.due)
     .sort((a, b) => b.strength - a.strength);
 }
+
+// A skill only "rusts" if it was once genuinely known. Weak skills (below
+// this) are never-mastered, not decaying — handled by the weak-skill branch.
+const RECALL_MIN_CONF = 60;
+const RECALL_THRESHOLD = 40;
+module.exports.RECALL_MIN_CONF = RECALL_MIN_CONF;
+module.exports.RECALL_THRESHOLD = RECALL_THRESHOLD;
 
 // Overall recall health: % of known skills currently above the recall threshold.
 function recallHealth(uid) {

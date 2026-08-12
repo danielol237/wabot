@@ -8,9 +8,14 @@
 //   2. Weak skill with no deeper prerequisite → drill that skill directly.
 //   3. No weak skills → continue current path, or start.
 //   4. A level is masterable (path complete) → recommend the next level.
+//   5. NEW — recall engine: skills that were once strong but have DECAYED
+//      into rust get drilled FIRST, before any new material. Keeping a known
+//      skill fresh beats adding a new shaky one. This is the spaced-repetition
+//      layer, separate from the weak-skill (never-mastered) logic.
 
 const { skillProfile, skillConfidence, getMastery } = require("./learnerModel");
 const { diagnose, hasSkill } = require("./skillGraph");
+const { dueForRecall } = require("./forgettingEngine");
 
 // Mastery threshold required to consider a level "passed" — driven by
 // demonstrated competence, never by XP.
@@ -20,6 +25,22 @@ const MASTERY_THRESHOLD = 80;
 // Returns a recommendation object the study UI can render.
 function recommend(uid, { currentTrack, currentLevel, currentSkill } = {}) {
   const { weak, strong, misconceptions } = skillProfile(uid);
+
+  // 0. RECALL FIRST — a skill that has decayed into rust is the highest
+  //    priority. Drilling it now (before full forgetting) is higher-leverage
+  //    than learning brand-new material. Confident-but-rusty > brand-new.
+  const due = dueForRecall(uid, 1);
+  if (due.length) {
+    const rusty = due[0];
+    const days = Math.max(1, Math.floor((Date.now() - rusty.lastAt) / 86400000));
+    return {
+      type: "recall",
+      reason: `You haven't touched *${rusty.skill}* in ~${days}d and it's fading (${Math.round(rusty.strength)}/100 strength). Let's re-drill it before you forget it.`,
+      skill: rusty.skill,
+      confidence: rusty.confidence,
+      strength: Math.round(rusty.strength),
+    };
+  }
 
   // 1. Prerequisite diagnosis on the most relevant weak skill.
   //    Prefer the skill tied to the learner's current context, else the weakest.

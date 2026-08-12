@@ -494,6 +494,13 @@ function renderBrainPane(b) {
       <div class="card" style="margin-top:16px"><div class="h">Recurring failures (24h) ${b.recurringFailures.length ? `<span class="badge b-red">${b.recurringFailures.length}</span>` : `<span class="badge b-green">clear</span>`}</div>
         ${fail || `<div class="empty">No recurring failures.</div>`}
       </div>
+      <div class="card" style="margin-top:16px"><div class="h">Anime source reputation <span class="badge b-accent">resolver</span></div>
+        ${(b.providers || []).length ? b.providers.map((p) => {
+          const circ = p.circuit === "open" ? `<span class="badge b-red">🔴 open</span>` : p.circuit === "half-open" ? `<span class="badge b-amber">🟠 half-open</span>` : `<span class="badge b-green">🟢 closed</span>`;
+          const color = p.score >= 70 ? "var(--green)" : p.score >= 40 ? "var(--amber)" : "var(--red)";
+          return `<div class="row"><span class="k mono">${p.provider}</span><span class="v">${p.score}/100 ${circ}</span></div>${bar(p.score, 100, color)}${p.circuit === "open" ? `<div style="color:var(--faint);font-size:10.5px;margin:-6px 0 10px">retry in ${Math.ceil((p.retryAfterMs || 0) / 60000)}min · ${p.lastError || ""}</div>` : ""}`;
+        }).join("") : `<div class="empty">No provider activity yet. Send !animedl to start.</div>`}
+      </div>
     </div>`;
 }
 
@@ -798,6 +805,16 @@ router.post("/api/anime/:id/retry", checkAuth, (req, res) => {
     const fresh = retryJob(req.params.id);
     if (!fresh) return res.status(404).json({ error: "job not found or not retryable" });
     return res.json({ ok: true, id: fresh.id });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// Anime source reputation API — provider scores + circuit state (auth-protected).
+router.get("/api/source-reputation", checkAuth, (req, res) => {
+  try {
+    const { reputationReport } = require("./tools/sourceResolver");
+    return res.json(reputationReport());
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }

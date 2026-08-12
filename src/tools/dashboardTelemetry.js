@@ -321,6 +321,13 @@ function brainData() {
     if (act && act.objective) focus = act.objective;
   } catch (_) {}
 
+  // Provider reputation snapshot (anime source resolution).
+  let providers = [];
+  try {
+    const { reputationReport } = require("./sourceResolver");
+    providers = reputationReport();
+  } catch (_) {}
+
   return {
     memory: { value: memoryPct, formula: `stored ${memoryCount} / capacity ${MEMORY_CAPACITY}` },
     learning: { value: learning, formula: `avg recall health over ${learningDenom} learner(s)` },
@@ -329,6 +336,7 @@ function brainData() {
     memoryCount,
     focus,
     recurringFailures,
+    providers,
   };
 }
 

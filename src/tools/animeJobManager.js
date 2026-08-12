@@ -469,138 +469,120 @@ async function runJob(job) {
   };
 
   try {
-    send(`⏬ *${job.name}* — Ep ${job.episode}\nResolving a source…`);
+    send(`⏬ *${job.name}* — Ep ${job.episode}\nResolving a playable source…`);
 
-    // Honor a preferred provider (from the browser) by trying it first.
-    const ordered = job.preferred
-      ? [...PROVIDER_ORDER].sort((a, b) => (a.name === job.preferred ? -1 : b.name === job.preferred ? 1 : a.priority - b.priority))
-      : PROVIDER_ORDER;
+    // ── SOURCE RESOLUTION ENGINE ──
+    // Resolve canonical identity → discover candidates concurrently across
+    // providers → validate every candidate → quality-route to the best
+    // healthy stream. The downloader never picks a provider; it consumes a
+    // validated candidate. Broken providers are auto-suppressed by the
+    // reputation/circuit-breaker store.
+    const resolver = require("./sourceResolver");
+    const report = await resolver.resolveEpisode(job.name, job.episode, {
+      preference: job.preferred,
+      quality: job.quality,
+    });
 
-    for (const ad of ordered) {
-      // 1. Provider search
-      let results = [];
-      try {
-        step(`${ad.name || "provider"}`, "search", true, "looking up");
-        results = await ad.search(job.name);
-      } catch (e) {
-        step(`${ad.name || "provider"}`, "search", false, e.message);
-        job.failures.push(jobError("SEARCH_FAILED", ad.name || "provider", "search", e.message, true));
-        continue;
+    // Canonical + confidence diagnostic (metadata ≠ downloadable).
+    if (report.canonical) {
+      step("resolver", "canonical", true, `${report.canonical.title} (id ${report.canonical.id}${report.confidence?.title != null ? `, title match ${report.confidence.title}%` : ""})`);
+    } else {
+      step("resolver", "canonical", false, report.error || "no canonical match");
+    }
+
+    // Provider discovery diagnostics (all independent attempts).
+    for (const d of report.diagnostics || []) {
+      step(d.provider, "discover", d.candidateCount > 0, d.candidateCount > 0 ? `${d.candidateCount} candidate(s) · ${d.latencyMs}ms` : (d.error || "no candidate"));
+      if (d.candidateCount === 0) {
+        job.failures.push(jobError(d.error || "no candidate", d.provider, "discover", d.error || "no results", true));
       }
-      if (!results.length) {
-        step(`${ad.name || "provider"}`, "search", false, "no results");
-        job.failures.push(jobError("ANIME_NOT_FOUND", ad.name || "provider", "search", "no results for title", true));
-        continue;
-      }
-      step(`${ad.name || "provider"}`, "anime_id", true, results[0].title || "found");
-      const anime = results[0];
+    }
 
-      // 2. Resolve episode source
-      let src = null;
-      try {
-        src = await ad.resolve(anime, job.episode);
-      } catch (e) {
-        const fe = e?.code ? e : jobError("SOURCE_NOT_FOUND", ad.name || "provider", "extract", e?.message || "resolve failed", true);
-        step(`${ad.name || "provider"}`, "extract", false, fe.message);
-        job.failures.push(fe);
-        continue;
-      }
-      if (!src?.url) {
-        const fe = jobError("SOURCE_NOT_FOUND", ad.name || "provider", "extract", "no source returned", true);
-        step(`${ad.name || "provider"}`, "extract", false, fe.message);
-        job.failures.push(fe);
-        continue;
-      }
-      step(`${src.provider}`, "episode_id", true, `ep ${job.episode}`);
+    // Validation results per candidate.
+    for (const [url, v] of Object.entries(report.validation || {})) {
+      const prov = report.candidates?.find((c) => c.url === url)?.provider || "?";
+      step(prov, "validate", v.ok, v.ok ? "stream OK" : v.reason || "rejected");
+      if (!v.ok) job.failures.push(jobError(v.reason || "invalid stream", prov, "validate", v.reason || "invalid", true));
+    }
 
-      // 3. Validate the URL before downloading.
-      if (!/^https?:\/\//i.test(src.url)) {
-        const fe = jobError("SOURCE_EXPIRED", src.provider, "validate", "malformed URL", true);
-        step(src.provider, "validate", false, fe.message);
-        job.failures.push(fe);
-        continue;
-      }
-      step(src.provider, "source", true, src.type + (src.quality !== "unknown" ? " · " + src.quality : ""));
-
-      // 4. Download with provider headers preserved. For WhatsApp jobs, cap the
-      // download at the WhatsApp ceiling UPFRONT (--max-filesize) so yt-dlp
-      // aborts early instead of fetching a 1.5 GB file we'll then refuse to
-      // send. Browser jobs keep the larger MAX_DOWNLOAD_MB ceiling.
-      const isWhatsAppJob = !!(job.sock && job.chatId);
-      const dlCap = isWhatsAppJob ? WHATSAPP_MAX_MB : MAX_DOWNLOAD_MB;
-      step(src.provider, "download", true, `fetching${job.quality && job.quality !== "best" ? " (" + job.quality + "p)" : ""}…`);
-      const dl = await downloadStream(job, src.url, src.headers, dlCap, job.quality || "best", onProgress);
-      job.progress = null;
-      if (!dl.success) {
-        const fe = jobError("DOWNLOAD_FAILED", src.provider, "download", dl.error || "yt-dlp failed", true);
-        step(src.provider, "download", false, fe.message);
-        job.failures.push(fe);
-        continue;
-      }
-      step(src.provider, "validate", true, `${(dl.size / 1024 / 1024).toFixed(1)} MB`);
-
-      job.result = {
-        filePath: dl.filePath,
-        size: dl.size,
-        url: src.url,
-        provider: src.provider,
-        type: src.type,
-        quality: src.quality,
-        title: src.title || job.name,
-      };
-
-      // Browser-initiated job: keep the file so the web UI can serve it.
-      if (!job.sock || !job.chatId) {
-        job.source = "browser";
-        step(src.provider, "save", true, `${(dl.size / 1024 / 1024).toFixed(1)} MB ready`);
-      } else {
-        // WhatsApp job: size-aware upload, then clean up.
-        if (dl.size > WHATSAPP_MAX_MB * 1024 * 1024) {
-          const fe = jobError("MEDIA_TOO_LARGE", src.provider, "send", `file is ${(dl.size / 1024 / 1024).toFixed(1)} MB, WhatsApp ceiling is ${WHATSAPP_MAX_MB} MB`, false);
-          step(src.provider, "send", false, fe.message);
-          job.failures.push(fe);
-          fs.unlinkSync(dl.filePath);
-          continue;
-        }
-        step(src.provider, "send", true, "uploading to WhatsApp…");
-        try {
-          const buffer = fs.readFileSync(dl.filePath);
-          await job.sock.sendMessage(job.chatId, {
-            video: buffer,
-            mimetype: "video/mp4",
-            caption: `🎬 ${job.result.title || job.name} — Ep ${job.episode} · ${src.provider}`,
-          }, { quoted: job.quotedMsg });
-          step(src.provider, "send", true, "delivered ✓");
-        } catch (e) {
-          step(src.provider, "send", false, e?.message || "upload failed");
-          job.failures.push(jobError("UPLOAD_FAILED", src.provider, "send", e?.message || "upload failed", true));
-        } finally {
-          try { fs.unlinkSync(dl.filePath); } catch (_) {}
-        }
-      }
-
-      job.status = "done";
+    if (!report.selected) {
+      const err = report.error || "no validated source";
+      job.status = "failed";
       job.finishedAt = Date.now();
+      job.error = jobError("SOURCE_NOT_FOUND", "all", "resolve", err, true);
+      const tried = (report.diagnostics || [])
+        .map((d) => `• ${d.provider} — ${d.candidateCount > 0 ? `${d.candidateCount} candidate(s)` : (d.error || "no results")}`)
+        .join("\n");
+      send(`❌ Couldn't resolve *${job.name}* Ep ${job.episode} (\`${job.id}\`).\n\n${report.canonical ? `✓ Found: ${report.canonical.title} (title match ${report.confidence?.title || "?"}%)\n` : ""}Sources tried:\n${tried || "• none viable"}\n\n_${err}_`);
       emit(job);
       return job;
     }
 
-    // All providers exhausted. WhatsApp gets a CONCISE message listing the
-    // providers actually tried and why; the full per-step trace stays in
-    // job.steps for the dashboard.
-    job.status = "failed";
-    job.finishedAt = Date.now();
-    job.error = job.failures[job.failures.length - 1] || jobError("SOURCE_NOT_FOUND", "all", "extract", "no provider produced a source", true);
-    // Map: provider -> last failure message, deduped, only failed providers.
-    const failedByProvider = {};
-    for (const f of job.failures) {
-      const key = f.provider || "unknown";
-      if (!failedByProvider[key]) failedByProvider[key] = f.message || "failed";
+    const src = report.selected;
+    step("resolver", "selected", true, `${"" + (src.provider)} · ${src.type}${src.height ? ` · ${src.height}p` : ""} · score ${src.score}`);
+
+    // ── DOWNLOAD the validated candidate ──
+    const isWhatsAppJob = !!(job.sock && job.chatId);
+    const dlCap = isWhatsAppJob ? WHATSAPP_MAX_MB : MAX_DOWNLOAD_MB;
+    step(src.provider, "download", true, `fetching${job.quality && job.quality !== "best" ? " (" + job.quality + "p)" : ""}…`);
+    const dl = await downloadStream(job, src.url, src.headers, dlCap, job.quality || "best", onProgress);
+    job.progress = null;
+    if (!dl.success) {
+      const fe = jobError("DOWNLOAD_FAILED", src.provider, "download", dl.error || "yt-dlp failed", true);
+      step(src.provider, "download", false, fe.message);
+      job.failures.push(fe);
+      job.status = "failed";
+      job.finishedAt = Date.now();
+      job.error = fe;
+      emit(job);
+      return job;
     }
-    const tried = Object.entries(failedByProvider)
-      .map(([p, m]) => `• ${p} — ${m}`)
-      .join("\n");
-    send(`❌ Couldn't download *${job.name}* Ep ${job.episode} (\`${job.id}\`).\n\nSources tried:\n${tried || "• none viable"}\n\n_${job.error.code}. Try again or choose another quality._`);
+    step(src.provider, "validate", true, `${(dl.size / 1024 / 1024).toFixed(1)} MB`);
+
+    job.result = {
+      filePath: dl.filePath,
+      size: dl.size,
+      url: src.url,
+      provider: src.provider,
+      type: src.type,
+      quality: src.quality,
+      title: src.title || job.name,
+    };
+
+    if (!job.sock || !job.chatId) {
+      job.source = "browser";
+      step(src.provider, "save", true, `${(dl.size / 1024 / 1024).toFixed(1)} MB ready`);
+    } else {
+      if (dl.size > WHATSAPP_MAX_MB * 1024 * 1024) {
+        const fe = jobError("MEDIA_TOO_LARGE", src.provider, "send", `file is ${(dl.size / 1024 / 1024).toFixed(1)} MB, WhatsApp ceiling is ${WHATSAPP_MAX_MB} MB`, false);
+        step(src.provider, "send", false, fe.message);
+        job.failures.push(fe);
+        fs.unlinkSync(dl.filePath);
+        job.status = "failed";
+        job.finishedAt = Date.now();
+        job.error = fe;
+        emit(job);
+        return job;
+      }
+      step(src.provider, "send", true, "uploading to WhatsApp…");
+      try {
+        const buffer = fs.readFileSync(dl.filePath);
+        await job.sock.sendMessage(job.chatId, {
+          video: buffer,
+          mimetype: "video/mp4",
+          caption: `🎬 ${job.result.title || job.name} — Ep ${job.episode} · ${src.provider}`,
+        }, { quoted: job.quotedMsg });
+        step(src.provider, "send", true, "delivered ✓");
+      } catch (e) {
+        step(src.provider, "send", false, e?.message || "upload failed");
+        job.failures.push(jobError("UPLOAD_FAILED", src.provider, "send", e?.message || "upload failed", true));
+      } finally {
+        try { fs.unlinkSync(dl.filePath); } catch (_) {}
+      }
+    }
+
+    job.status = "done";
+    job.finishedAt = Date.now();
     emit(job);
     return job;
   } catch (e) {

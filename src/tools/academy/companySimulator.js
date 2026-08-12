@@ -60,14 +60,26 @@ const PROJECT_TEMPLATES = {
   fullstack: [
     { name: "E-commerce storefront", value: 48000, rep: 8, complexity: 2.8 },
     { name: "SaaS onboarding platform", value: 75000, rep: 12, complexity: 3.6 },
+    { name: "Real-estate listing platform", value: 60000, rep: 10, complexity: 3.1 },
+    { name: "Team collaboration tool MVP", value: 68000, rep: 11, complexity: 3.4 },
   ],
   devops: [
     { name: "CI/CD pipeline setup", value: 20000, rep: 4, complexity: 1.6 },
     { name: "Kubernetes migration", value: 55000, rep: 10, complexity: 3.0 },
+    { name: "Observability stack (logs + traces + metrics)", value: 42000, rep: 8, complexity: 2.4 },
+    { name: "Multi-region failover setup", value: 62000, rep: 12, complexity: 3.5 },
   ],
   data: [
     { name: "Reporting & analytics dashboard", value: 30000, rep: 6, complexity: 2.0 },
     { name: "ETL data warehouse", value: 65000, rep: 11, complexity: 3.2 },
+    { name: "Real-time fraud detection pipeline", value: 72000, rep: 13, complexity: 3.7 },
+  ],
+  frontend: [
+    { name: "Marketing landing page", value: 18000, rep: 3, complexity: 1.2 },
+    { name: "Customer dashboard UI", value: 35000, rep: 6, complexity: 2.2 },
+    { name: "Design system + component lib", value: 50000, rep: 9, complexity: 3.2 },
+    { name: "Accessibility audit + fix", value: 26000, rep: 7, complexity: 1.8 },
+    { name: "Progressive web app conversion", value: 46000, rep: 9, complexity: 2.6 },
   ],
 };
 
@@ -77,6 +89,11 @@ const INCIDENTS = [
   { id: "frontend-crash", title: "Dashboard crashes in Safari", track: "frontend", fix: "fix the CSS/JS browser bug, add polyfill, test in Safari", tokens: ["polyfill", "safari", "browser"] },
   { id: "deploy-outage", title: "Deploy took the site down", track: "devops", fix: "roll back the release, fix the broken deploy pipeline", tokens: ["roll", "back", "rollback", "pipeline"] },
   { id: "slow-report", title: "Analytics report is extremely slow", track: "data", fix: "add index, optimize the query, cache results", tokens: ["index", "query", "cache"] },
+  { id: "ssrf-proxy", title: "Image proxy lets attackers reach internal services", track: "backend", fix: "allowlist public hosts, block private/link-local IP ranges", tokens: ["allowlist", "block", "private", "ip", "range"] },
+  { id: "race-balance", title: "Race condition lets users double-spend", track: "backend", fix: "atomic conditional update / transaction with row lock / optimistic version check", tokens: ["atomic", "transaction", "lock", "version"] },
+  { id: "stale-cache", title: "Stale cache serving old prices/stock", track: "data", fix: "invalidate cache on write (write-through or explicit purge), short TTL", tokens: ["invalidate", "purge", "ttl", "write-through"] },
+  { id: "mobile-checkout", title: "Checkout button unresponsive on mobile", track: "frontend", fix: "fix the overlay z-index/pointer-events so it doesn't cover the button", tokens: ["z-index", "pointer-events", "overlay"] },
+  { id: "auth-bypass", title: "Rate-limit auth endpoint bypass", track: "devops", fix: "enforce rate limiting per-user/IP, add lockout + alerting", tokens: ["rate", "limit", "lockout", "alert"] },
 ];
 
 // ── Company creation ────────────────────────────────────────────

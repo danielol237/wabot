@@ -40,6 +40,11 @@ app.use("/", websiteRouter);
 const dashboardRouter = require("./dashboard");
 app.use("/dashboard", dashboardRouter);
 
+// ARIA Learner Portal — per-learner accounts (Google OAuth / email), each
+// student's own Learner Space + competition leaderboard. Own session cookie
+// (aria_portal), separate from the owner dashboard.
+app.use("/portal", require("./tools/learnerPortal").router);
+
 let latestQrDataUrl = null;
 let qrGeneratedAt = null;
 let pairingCode = null;

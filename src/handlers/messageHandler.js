@@ -167,6 +167,13 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
         if (out) { await react(sock, msg, "⚖️"); return reply(sock, msg, out.text); }
       }
     } catch (_) {}
+    try {
+      const teach = require("../tools/academy/teachBack");
+      if (teach.hasActiveFlow(chatId)) {
+        const out = await teach.submitExplanation(chatId, senderJid.split("@")[0], text.trim());
+        if (out) { await react(sock, msg, "🧑‍🏫"); return reply(sock, msg, out.text); }
+      }
+    } catch (_) {}
   }
 
   return routeMessage(sock, msg, context);

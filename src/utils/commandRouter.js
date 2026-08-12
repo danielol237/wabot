@@ -123,6 +123,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "review", aliases: ["codereview", "court"], category: "utility", description: "AI code review court: !review <code>", handler: handleReview, ownerOnly: false });
   registerCommand({ name: "duel", aliases: ["vs", "challenge"], category: "utility", description: "AI-vs-human duel: !duel <problem>", handler: handleDuel, ownerOnly: false });
   registerCommand({ name: "submit", aliases: ["mycode"], category: "utility", description: "Submit your duel solution: !submit <code>", handler: handleSubmit, ownerOnly: false });
+  registerCommand({ name: "explain", aliases: ["teach", "teachback"], category: "utility", description: "Teach-it-back: explain a concept, ARIA grades + finds misconceptions", handler: handleExplain, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -649,6 +650,11 @@ async function handleDuel(sock, msg, args, ctx) {
 async function handleSubmit(sock, msg, args, ctx) {
   const { handleSubmitCommand } = require("../tools/academy/duelMode");
   await handleSubmitCommand(sock, msg, args, ctx);
+}
+
+async function handleExplain(sock, msg, args, ctx) {
+  const { handleExplainCommand } = require("../tools/academy/teachBack");
+  await handleExplainCommand(sock, msg, args, ctx);
 }
 
 // Fun handlers

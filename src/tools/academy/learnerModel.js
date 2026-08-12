@@ -60,9 +60,35 @@ function learner(uid) {
       xpLog: [],          // { ts, amt, reason } — for per-activity XP breakdown
       streak: 0,
       lastStudy: null,
+      profile: {},        // personalization: { name, nickname, goals[], style, bestTime, arriaNotes[] }
     };
   }
   return model.learners[uid];
+}
+
+// ── Learner Space personalization ─────────────────────────────
+// Each learner's "spot": ARIA's structured understanding of who they are,
+// how they learn, and her running observations. This is the data behind the
+// Learner Space panel and ARIA's personalised encouragement.
+function getProfile(uid) {
+  return learner(uid).profile || {};
+}
+
+function updateProfile(uid, patch) {
+  const l = learner(uid);
+  l.profile = { ...(l.profile || {}), ...(patch || {}) };
+  save();
+  return l.profile;
+}
+
+// Append an ARIA observation (kept to the last N for a manageable record).
+function addAriaNote(uid, text, tag = "insight") {
+  const l = learner(uid);
+  l.profile = l.profile || {};
+  l.profile.ariaNotes = l.profile.ariaNotes || [];
+  l.profile.ariaNotes.push({ ts: Date.now(), tag, text });
+  if (l.profile.ariaNotes.length > 30) l.profile.ariaNotes = l.profile.ariaNotes.slice(-30);
+  save();
 }
 
 // Record a single assessment attempt. `skill` is an optional concept tag
@@ -190,4 +216,4 @@ function computeMastery(uid, track, level) {
   return getMastery(uid, track, level);
 }
 
-module.exports = { recordAttempt, recordEvidence, addXp, setMastery, getMastery, evidenceFor, getStats, getAllLearners, skillProfile, skillConfidence, computeMastery, learner, LEVELS, tierFor };
+module.exports = { recordAttempt, recordEvidence, addXp, setMastery, getMastery, evidenceFor, getStats, getAllLearners, skillProfile, skillConfidence, computeMastery, learner, getProfile, updateProfile, addAriaNote, LEVELS, tierFor };

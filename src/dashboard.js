@@ -440,6 +440,60 @@ function renderAnalyticsPane(a) {
     </div>`;
 }
 
+// ── ARIA Learner Space ──────────────────────────────────────────
+// Each learner's personal "spot": identity header, ARIA's first-person
+// insights, skill strengths/weak-spots, learning pace, best time, goals,
+// personalized next step, and ARIA's running notes.
+function renderLearnerSpacePane(space, selfUid) {
+  const id = space.identity;
+  const name = id.nickname || id.name || id.uid.split("@")[0];
+  const tierColor = id.tier === "pro" ? "var(--accent)" : id.tier === "advanced" ? "var(--green)" : id.tier === "intermediate" ? "var(--cyan)" : "var(--muted)";
+
+  const insightCards = (space.insights || []).map((i) => {
+    const tagColor = i.tag === "focus" ? "var(--amber)" : i.tag === "nudge" ? "var(--cyan)" : i.tag === "strength" ? "var(--green)" : "var(--accent)";
+    return `<div class="feed-item"><div class="feed-ico" style="color:${tagColor};background:var(--panel2)">💭</div><div class="feed-body"><div class="m">${i.text}</div><div class="s">${i.tag}</div></div></div>`;
+  }).join("") || `<div class="empty">No insights yet — start learning and I'll begin reading you.</div>`;
+
+  const skillChips = (arr, emoji) => arr.length ? arr.map((s) => `<span class="badge b-muted">${emoji} ${s.skill} · ${Math.round(s.confidence)}%</span>`).join(" ") : `<span class="badge b-muted">—</span>`;
+
+  const goalRows = (space.goals || []).map((g) => `<div class="row"><span class="k">🎯</span><span class="v">${g}</span></div>`).join("") || `<div class="empty">Set a goal and I'll help you chase it.</div>`;
+
+  const noteRows = (space.ariaNotes || []).map((n) => `<div class="feed-item"><div class="feed-ico">📝</div><div class="feed-body"><div class="m">${n.text}</div><div class="s">${new Date(n.ts).toLocaleString()}</div></div></div>`).join("") || `<div class="empty">No notes yet.</div>`;
+
+  const recentText = space.recency == null ? "never" : space.recency === 0 ? "today" : `${space.recency}d ago`;
+
+  return `
+    <div class="pane" id="pane-learnerspace"><div class="page-title">Learner Space</div><div class="page-sub">ARIA knows you · your spot · ${id.tier}</div>
+      <div class="hero" style="background:linear-gradient(120deg,#13153a,#1c2050)">
+        <div class="hrow">
+          <div class="avatar" style="background:linear-gradient(135deg,#8b5cf6,#3b82f6)">${name.slice(0, 1).toUpperCase()}</div>
+          <div style="color:#fff"><h2 style="color:#fff">${name}</h2>
+            <div class="sub" style="color:#9aa3c9"><span class="badge" style="background:${tierColor};color:#fff">${id.tier}</span> ${id.xp} XP · ${id.streak}d streak ${space.recency == null ? "" : "· last seen " + recentText}</div>
+          </div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card"><div class="h">💭 ARIA's insights</div>${insightCards}</div>
+        <div>
+          <div class="card"><div class="h">Strengths</div>${skillChips(space.skills.strong, "💪")}</div>
+          <div class="card" style="margin-top:12px"><div class="h">Needs focus</div>${skillChips(space.skills.focus, "🎯")}</div>
+          <div class="card" style="margin-top:12px"><div class="h">Improving</div>${skillChips(space.skills.improving, "📈")}</div>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:16px">
+        <div class="card"><div class="h">How you learn</div>
+          <div class="row"><span class="k">Pace</span><span class="v">${space.pace.label}</span></div>
+          <div class="row"><span class="k">Best time</span><span class="v">${space.bestTime ? space.bestTime.time : "—"}</span></div>
+          <div class="row"><span class="k">Style</span><span class="v">${space.style || "learning…"}</span></div>
+          <div style="color:var(--faint);font-size:11px;margin-top:8px">${space.pace.detail}</div>
+        </div>
+        <div class="card"><div class="h">Goals</div>${goalRows}</div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="h">➡️ What's next</div><div class="row"><span class="k">Recommendation</span><span class="v">${space.next.text}</span></div></div>
+      <div class="card" style="margin-top:16px"><div class="h">ARIA's notes</div>${noteRows}</div>
+    </div>`;
+}
+
 // Academy intelligence + learner drill-down.
 function renderAcademyPane(ad, selfUid, profile) {
   const track = ad.mostActiveTrack;
@@ -663,6 +717,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Command</span></div>
     <div class="navitem" data-pane="analytics"><span class="ico">📊</span><span>Analytics</span></div>
     <div class="navitem" data-pane="academy"><span class="ico">🎓</span><span>Academy</span></div>
+    <div class="navitem" data-pane="learnerspace"><span class="ico">🧑‍🎓</span><span>Learner Space</span></div>
     <div class="navitem" data-pane="incidents"><span class="ico">🚨</span><span>Incidents</span></div>
     <div class="navitem" data-pane="brain"><span class="ico">🧬</span><span>Brain</span></div>
     <a class="navitem" style="text-decoration:none" href="/dashboard/anime"><span class="ico">🎬</span><span>Anime</span></a>
@@ -862,6 +917,16 @@ router.get("/api/source-reputation", checkAuth, (req, res) => {
   }
 });
 
+// Learner Space API — ARIA's personal profile for a learner (auth-protected).
+router.get("/api/learner-space/:uid", checkAuth, (req, res) => {
+  try {
+    const { buildLearnerSpace } = require("./tools/academy/learnerSpace");
+    return res.json(buildLearnerSpace(req.params.uid));
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // Learner drill-down API — full evidence, attempts, weaknesses, recs (auth-protected).
 router.get("/api/learner/:uid", checkAuth, (req, res) => {
   try {
@@ -956,6 +1021,12 @@ router.get("/", checkAuth, (req, res) => {
     let content = renderLiveStrip(ls);
     content += renderAnalyticsPane(a);
     content += renderAcademyPane(ad, selfUid, profile);
+    try {
+      const { buildLearnerSpace } = require("./tools/academy/learnerSpace");
+      content += renderLearnerSpacePane(buildLearnerSpace(selfUid), selfUid);
+    } catch (e) {
+      content += `<div class="pane" id="pane-learnerspace"><div class="page-title">Learner Space</div><div class="page-sub">ARIA knows you</div><div class="card"><div class="empty">Learner Space unavailable: ${e.message}</div></div></div>`;
+    }
     content += renderIncidentsPane(id);
     content += renderBrainPane(b);
     content += `

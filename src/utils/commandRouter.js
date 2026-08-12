@@ -120,6 +120,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "run", aliases: ["execute", "practice"], category: "utility", description: "Run code for a challenge: !run <code>", handler: handleAcademyRun, ownerOnly: false });
   registerCommand({ name: "project", aliases: ["capstone", "build"], category: "utility", description: "Start a track project: !project <track> <level>", handler: handleProject, ownerOnly: false });
   registerCommand({ name: "incident", aliases: ["oncall", "sre"], category: "utility", description: "Production incident simulator: diagnose + fix", handler: handleIncident, ownerOnly: false });
+  registerCommand({ name: "review", aliases: ["codereview", "court"], category: "utility", description: "AI code review court: !review <code>", handler: handleReview, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -631,6 +632,11 @@ async function handleProject(sock, msg, args, ctx) {
 async function handleIncident(sock, msg, args, ctx) {
   const { handleIncidentCommand } = require("../tools/academy/incidentSimulator");
   await handleIncidentCommand(sock, msg, args, ctx);
+}
+
+async function handleReview(sock, msg, args, ctx) {
+  const { handleReviewCommand } = require("../tools/academy/reviewCourt");
+  await handleReviewCommand(sock, msg, args, ctx);
 }
 
 // Fun handlers

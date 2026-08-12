@@ -160,6 +160,13 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
         if (out) { await react(sock, msg, "📚"); return reply(sock, msg, out.text); }
       }
     } catch (_) {}
+    try {
+      const review = require("../tools/academy/reviewCourt");
+      if (review.hasActiveFlow(chatId)) {
+        const out = review.handleReply(chatId, senderJid.split("@")[0], text.trim());
+        if (out) { await react(sock, msg, "⚖️"); return reply(sock, msg, out.text); }
+      }
+    } catch (_) {}
   }
 
   return routeMessage(sock, msg, context);

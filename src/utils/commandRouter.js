@@ -141,6 +141,10 @@ function registerBuiltinCommands() {
   // Utility
   registerCommand({ name: "search", aliases: ["web", "google"], category: "utility", description: "Search the web", handler: handleSearch, ownerOnly: false });
   registerCommand({ name: "download", aliases: ["dl"], category: "utility", description: "Download media from URL", handler: handleDownload, ownerOnly: true });
+  registerCommand({ name: "play", aliases: ["music", "song"], category: "utility", description: "Play a song: !play <song name>", handler: handlePlayMusic, ownerOnly: false });
+  registerCommand({ name: "yt", aliases: ["youtube", "ytdl"], category: "utility", description: "Download a video: !yt <url>", handler: handleYtDownload, ownerOnly: false });
+  registerCommand({ name: "tiktok", aliases: ["tok"], category: "utility", description: "Download a TikTok video: !tiktok <url>", handler: handleYtDownload, ownerOnly: false });
+  registerCommand({ name: "ig", aliases: ["instagram", "igdl"], category: "utility", description: "Download an Instagram post/reel: !ig <url>", handler: handleYtDownload, ownerOnly: false });
   registerCommand({ name: "run", aliases: ["exec", "code"], category: "utility", description: "Execute code", handler: handleCode, ownerOnly: true });
   registerCommand({ name: "weather", aliases: [], category: "utility", description: "Get weather", handler: handleWeather, ownerOnly: false });
   registerCommand({ name: "translate", aliases: ["tr"], category: "utility", description: "Translate text", handler: handleTranslate, ownerOnly: false });
@@ -939,6 +943,47 @@ async function handleDownload(sock, msg, args, ctx) {
     await sock.sendMessage(ctx.chatId, { document: result.buffer, mimetype: result.mimetype, fileName: result.filename });
   } else {
     await reply(sock, msg, result?.text || "❌ Download failed.");
+  }
+}
+
+// !play <song> — search YouTube, download audio, send mp3.
+async function handlePlayMusic(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: !play <song name>");
+  await react(sock, msg, "🎵");
+  const { searchYt, downloadAudio } = require("../tools/mediaTools");
+  await reply(sock, msg, `🔎 Searching *${args}*…`);
+  const hit = await searchYt(args);
+  if (!hit) return reply(sock, msg, "❌ Couldn't find that song.");
+  await reply(sock, msg, `⏬ Downloading *${hit.title}*…`);
+  const dl = await downloadAudio(hit.url, hit.title);
+  if (!dl.success) return reply(sock, msg, `❌ Download failed: ${dl.error}`);
+  try {
+    const buf = require("fs").readFileSync(dl.filePath);
+    await sock.sendMessage(ctx.chatId, { audio: buf, mimetype: "audio/mpeg", ptt: false, caption: `🎵 ${dl.title}` });
+  } catch (e) {
+    await reply(sock, msg, `❌ Couldn't send audio: ${e.message}`);
+  } finally {
+    try { require("fs").unlinkSync(dl.filePath); } catch (_) {}
+  }
+}
+
+// !yt / !tiktok / !ig <url> — download video, send mp4.
+async function handleYtDownload(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: !yt <url>");
+  await react(sock, msg, "⬇️");
+  const { downloadVideo } = require("../tools/mediaTools");
+  await reply(sock, msg, "⏬ Downloading… (may take a bit)");
+  const dl = await downloadVideo(args, 50);
+  if (!dl.success) return reply(sock, msg, `❌ Download failed: ${dl.error}`);
+  try {
+    const buf = require("fs").readFileSync(dl.filePath);
+    await sock.sendMessage(ctx.chatId, { video: buf, mimetype: "video/mp4", caption: "🎬 Here you go" });
+  } catch (e) {
+    await reply(sock, msg, `❌ Couldn't send video: ${e.message}`);
+  } finally {
+    try { require("fs").unlinkSync(dl.filePath); } catch (_) {}
   }
 }
 

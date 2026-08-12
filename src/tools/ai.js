@@ -102,7 +102,9 @@ function needsLargeOutput(userMessage) {
   return signals.some((s) => lower.includes(s));
 }
 
-async function getAIResponse(userMessage, userName, history = [], systemOverride = null, extraContext = "", options = {}) {
+// The real implementation. Named getAIResponseImpl (NOT getAIResponse) so the
+// telemetry wrapper below can capture it without a hoisting collision.
+async function getAIResponseImpl(userMessage, userName, history = [], systemOverride = null, extraContext = "", options = {}) {
   // History entries must be valid {role, content} objects. Some callers (or stored
   // conversation history) pass plain strings or malformed entries, which breaks
   // the providers (they reject non-object message entries). Sanitize everything:
@@ -303,10 +305,14 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
 // latency and success to the dashboard telemetry layer. The original function
 // is unchanged; this only adds a measurement around it. Safe: any telemetry
 // failure is swallowed and never affects the AI response.
-const _getAIResponse = getAIResponse;
+//
+// FIX: `getAIResponseImpl` captures the REAL implementation (getAIResponseImpl,
+// a distinct name) — not the wrapper. The previous code captured `getAIResponse`,
+// which function-declaration hoisting resolved to the wrapper itself, producing
+// infinite recursion → "Maximum call stack size exceeded" on every AI reply.
 async function getAIResponse(...args) {
   const t0 = Date.now();
-  const out = await _getAIResponse(...args);
+  const out = await getAIResponseImpl(...args);
   try {
     const ok = typeof out === "string" && !out.startsWith("❌");
     const tel = require("./dashboardTelemetry");

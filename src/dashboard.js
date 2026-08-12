@@ -430,11 +430,21 @@ function renderAcademyPane(ad, selfUid, profile) {
         <div class="card"><div class="h">Top learners</div>${topRows || `<div class="empty">No ranked learners yet.</div>`}</div>
       </div>
       <div class="card" style="margin-top:16px"><div class="h">Weakest skill (needs attention)</div>${weakRow}</div>
-      <div class="card" style="margin-top:16px"><div class="h">Engineering DNA <span class="badge b-accent">${profile?.uid === selfUid ? "you" : profile?.uid?.split("@")[0] || "learner"}</span></div>
+      <div class="card" style="margin-top:16px"><div class="h">Engineering DNA <span class="badge b-accent">${profile?.uid === selfUid ? "you" : profile?.uid?.split("@")[0] || "learner"}</span><button class="qbtn" style="padding:5px 10px;font-size:11px" onclick="openLearner('${profile?.uid || ""}')">Drill down ▸</button></div>
+        <div id="dna-clusters">
         ${profile && profile.dna.length ? profile.dna.map((c) => `<div class="row"><span class="k">${c.cluster}</span><span class="v">${c.score}%</span></div>${bar(c.score, 100, c.score >= 60 ? "var(--green)" : c.score >= 35 ? "var(--amber)" : "var(--red)")}`).join("") : `<div class="empty">No DNA yet — start !academy.</div>`}
         ${profile?.career ? `<div class="row"><span class="k">Best-fit</span><span class="v">${profile.career.emoji} ${profile.career.role} (${profile.career.fit}%)</span></div>` : ""}
         ${profile?.roadmapList && profile.roadmapList.length ? `<div class="row"><span class="k">Next</span><span class="v">${profile.roadmapList.slice(0, 4).join(", ")}</span></div>` : ""}
-        <div class="feed-item" style="margin-top:8px"><div class="feed-ico">🧬</div><div class="feed-body"><div class="m">Full evidence via <b>!academy evidence</b> in chat.</div></div></div>
+        </div>
+        <div class="feed-item" style="margin-top:8px"><div class="feed-ico">🧬</div><div class="feed-body"><div class="m">Click <b>Drill down</b> for the full learner view — evidence, attempts, weaknesses, recommended drills.</div></div></div>
+      </div>
+      <!-- Learner detail modal -->
+      <div id="learner-modal" style="display:none;position:fixed;inset:0;background:rgba(10,12,30,.55);z-index:50;align-items:center;justify-content:center;padding:20px">
+        <div class="card" style="max-width:560px;width:100%;max-height:86vh;overflow:auto;background:var(--panel)">
+          <div class="h" id="lm-title">Learner</div>
+          <div id="lm-body"></div>
+          <button class="qbtn" style="margin-top:14px" onclick="document.getElementById('learner-modal').style.display='none'">Close</button>
+        </div>
       </div>
     </div>`;
 }
@@ -462,12 +472,19 @@ function renderIncidentsPane(id) {
 // ARIA 'brain' pane.
 function renderBrainPane(b) {
   const fail = b.recurringFailures.map(([k, c]) => `<div class="row"><span class="k">${k}</span><span class="v">×${c}</span></div>`).join("");
-  const meter = (label, pct, emoji) => `<div class="row"><span class="k">${emoji} ${label}</span><span class="v">${pct}%</span></div>${bar(pct, 100, pct >= 80 ? "var(--green)" : pct >= 60 ? "var(--amber)" : "var(--red)")}`;
+  // Every % is backed by a formula — show the definition under the bar.
+  const meter = (label, met, emoji) => {
+    const pct = met.value; // null = no data yet
+    const shown = pct == null ? "—" : pct + "%";
+    const color = pct == null ? "var(--faint)" : pct >= 80 ? "var(--green)" : pct >= 60 ? "var(--amber)" : "var(--red)";
+    const barHtml = pct == null ? `<div class="empty" style="padding:6px">no data yet</div>` : bar(pct, 100, color);
+    return `<div class="row"><span class="k">${emoji} ${label}</span><span class="v">${shown}</span></div>${barHtml}<div style="color:var(--faint);font-size:10.5px;margin:-6px 0 10px">= ${met.formula}</div>`;
+  };
   return `
-    <div class="pane" id="pane-brain"><div class="page-title">Brain</div><div class="page-sub">ARIA intelligence</div>
+    <div class="pane" id="pane-brain"><div class="page-title">Brain</div><div class="page-sub">ARIA intelligence · every % is a defined formula</div>
       <div class="card"><div class="h">Core systems</div>
-        ${meter("Memory", b.memoryPct, "🧠")}
-        ${meter("Learning (recall health)", b.learning, "📚")}
+        ${meter("Memory", b.memory, "🧠")}
+        ${meter("Learning", b.learning, "📚")}
         ${meter("Automation", b.automation, "⚙️")}
         ${meter("Reliability", b.reliability, "🛡️")}
       </div>
@@ -635,6 +652,37 @@ function showPane(p){
 }
 navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
 showPane('home');
+// Learner drill-down — fetch full profile + evidence and open the modal.
+async function openLearner(uid){
+  const modal=document.getElementById('learner-modal');
+  const body=document.getElementById('lm-body');
+  const title=document.getElementById('lm-title');
+  if(!modal||!body) return;
+  modal.style.display='flex';
+  body.innerHTML='<div class="empty">Loading…</div>';
+  try{
+    const r=await fetch('/dashboard/api/learner/'+encodeURIComponent(uid),{headers:{'Accept':'application/json'}});
+    if(!r.ok){ body.innerHTML='<div class="empty">Could not load learner.</div>'; return; }
+    const d=await r.json();
+    title.textContent='🧬 '+(uid.split('@')[0])+' — Engineering DNA';
+    let html='';
+    html+='<div class="row"><span class="k">XP</span><span class="v">'+(d.stats?.xp||0)+'</span></div>';
+    html+='<div class="row"><span class="k">Streak</span><span class="v">'+(d.stats?.streak||0)+'d</span></div>';
+    html+='<div class="row"><span class="k">Attempts</span><span class="v">'+(d.stats?.attempts||0)+'</span></div>';
+    if(d.career) html+='<div class="row"><span class="k">Best-fit</span><span class="v">'+d.career.emoji+' '+d.career.role+' ('+d.career.fit+'%)</span></div>';
+    if(d.recommendation) html+='<div class="feed-item" style="margin-top:8px"><div class="feed-ico">🎯</div><div class="feed-body"><div class="m">'+d.recommendation.reason+'</div>'+(d.recommendation.action?'<div class="s">→ '+d.recommendation.action+'</div>':'')+'</div></div>';
+    if(d.dna&&d.dna.length){
+      html+='<div style="margin-top:12px"><b>DNA</b></div>';
+      for(const c of d.dna) html+='<div class="row"><span class="k">'+c.cluster+'</span><span class="v">'+c.score+'%</span></div><div class="bar"><div class="bar-fill" style="width:'+Math.min(100,c.score)+'%;background:'+(c.score>=60?'var(--green)':c.score>=35?'var(--amber)':'var(--red)')+'"></div></div>';
+    }
+    if(d.roadmapList&&d.roadmapList.length) html+='<div style="margin-top:10px"><b>Recommended next:</b> '+d.roadmapList.slice(0,6).join(', ')+'</div>';
+    if(d.evidence&&d.evidence.length){
+      html+='<div style="margin-top:12px"><b>Evidence-backed mastery</b></div>';
+      for(const e of d.evidence) html+='<div class="row"><span class="k">'+e.track+'/'+e.level+'</span><span class="v">'+e.percent+'%</span></div>';
+    } else html+='<div class="empty" style="margin-top:8px">No assessment evidence yet.</div>';
+    body.innerHTML=html;
+  }catch(_){ body.innerHTML='<div class="empty">Could not load learner.</div>'; }
+}
 // Live ARIA status — poll /api/live every 5s and update the Command pane.
 async function refreshLive(){
   const home=document.getElementById('pane-home');
@@ -750,6 +798,27 @@ router.post("/api/anime/:id/retry", checkAuth, (req, res) => {
     const fresh = retryJob(req.params.id);
     if (!fresh) return res.status(404).json({ error: "job not found or not retryable" });
     return res.json({ ok: true, id: fresh.id });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// Learner drill-down API — full evidence, attempts, weaknesses, recs (auth-protected).
+router.get("/api/learner/:uid", checkAuth, (req, res) => {
+  try {
+    const tel = require("./tools/dashboardTelemetry");
+    const profile = tel.learnerProfile(req.params.uid);
+    const lm = require("./tools/academy/learnerModel");
+    const rec = require("./tools/academy/adaptiveTutor").recommend(req.params.uid);
+    const evidence = [];
+    try {
+      const ee = require("./tools/academy/evidenceEngine");
+      const rec2 = lm.learner(req.params.uid);
+      for (const track of Object.keys(rec2.mastery || {}))
+        for (const level of Object.keys(rec2.mastery[track] || {}))
+          evidence.push({ track, level, ...ee.computeEvidenceMastery(req.params.uid, track, level) });
+    } catch (_) {}
+    return res.json({ ...profile, recommendation: rec, evidence });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }

@@ -261,40 +261,46 @@ function incidentData() {
 }
 
 // ── ARIA 'brain' pane ─────────────────────────────────────────
+// Every metric is a CALCULABLE formula, never a hand-wavy score. Each returns
+// { value, formula } so the dashboard can show not just the % but what it
+// actually means.
+const MEMORY_CAPACITY = 2000; // soft cap for the semantic store
+
 function brainData() {
   const lm = tryLoad("./academy/learnerModel");
   const fe = tryLoad("./academy/forgettingEngine");
   const mem = tryLoad("./utils/semanticMemory");
 
-  // Memory: % of semantic memory store used (cap ~2000 entries as "full").
-  let memoryPct = 0, memoryCount = 0;
-  try { const store = mem.getUserStore("*"); memoryCount = store?.memories?.length || 0; memoryPct = Math.min(100, Math.round(memoryCount / 2000 * 100)); } catch (_) {}
+  // Memory = used / capacity (capped at MEMORY_CAPACITY entries).
+  let memoryCount = 0;
+  try { const store = mem.getUserStore("*"); memoryCount = store?.memories?.length || 0; } catch (_) {}
+  const memoryPct = Math.min(100, Math.round((memoryCount / MEMORY_CAPACITY) * 100));
 
-  // Learning: recall health (how much knowledge is currently retained).
-  let learning = 0;
+  // Learning = average recall health across all learners (retained knowledge).
+  let learning = 0, learningDenom = 0;
   try {
     const learners = lm.getAllLearners();
-    let sum = 0, n = 0;
-    for (const l of learners) { sum += fe.recallHealth(l.uid).health; n++; }
-    learning = n ? Math.round(sum / n) : 0;
+    for (const l of learners) { learning += fe.recallHealth(l.uid).health; learningDenom++; }
+    learning = learningDenom ? Math.round(learning / learningDenom) : 0;
   } catch (_) { learning = 0; }
 
-  // Automation: fraction of missions completed (or downloads succeeded).
-  let automation = 0;
+  // Automation = completed missions / total missions.
+  let automation = 0, autoDenom = 0;
   try {
     const durable = tryLoad("./durableMissions");
     const missions = durable.getAllMissions();
-    const done = missions.filter((m) => m.status === "completed").length;
-    automation = missions.length ? Math.round(done / missions.length * 100) : 0;
+    autoDenom = missions.length;
+    automation = autoDenom ? Math.round(missions.filter((m) => m.status === "completed").length / autoDenom * 100) : 0;
   } catch (_) { automation = 0; }
 
-  // Reliability: 1 - AI failure rate over the last 30d (min 50 baseline).
-  let reliability = 50;
+  // Reliability = AI success rate over the last 30d (1 - failures/total).
+  // When there's no AI traffic yet, report null ("no data") instead of a fake
+  // number — a vibe % is worse than an honest "insufficient data".
   const a = analytics()["30d"] || {};
-  if (a.aiRequests > 0) reliability = Math.max(20, Math.min(100, a.aiSuccessRate));
-  else reliability = 100 - Math.min(30, a.errors * 2);
+  let reliability = null, reliabilityDenom = a.aiRequests || 0;
+  if (reliabilityDenom > 0) reliability = Math.round(((reliabilityDenom - (a.aiFailures || 0)) / reliabilityDenom) * 100);
 
-  // Recurring failures: count distinct error details in the last 24h.
+  // Recurring failures: distinct error details occurring >=2x in the last 24h.
   const recurring = {};
   try {
     const now = Date.now();
@@ -307,7 +313,7 @@ function brainData() {
   const recurringFailures = Object.entries(recurring).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 4);
 
   // Current focus: from the most recent active mission objective.
-  let focus = "Anime pipeline reliability";
+  let focus = "Idle — no active mission";
   try {
     const durable = tryLoad("./durableMissions");
     const missions = durable.getAllMissions();
@@ -315,7 +321,15 @@ function brainData() {
     if (act && act.objective) focus = act.objective;
   } catch (_) {}
 
-  return { memoryPct, memoryCount, learning, automation, reliability, focus, recurringFailures };
+  return {
+    memory: { value: memoryPct, formula: `stored ${memoryCount} / capacity ${MEMORY_CAPACITY}` },
+    learning: { value: learning, formula: `avg recall health over ${learningDenom} learner(s)` },
+    automation: { value: automation, formula: `completed missions / total (${autoDenom})` },
+    reliability: { value: reliability, formula: reliabilityDenom ? `(total - failures) / total over 30d (${reliabilityDenom} calls)` : "no AI traffic in 30d" },
+    memoryCount,
+    focus,
+    recurringFailures,
+  };
 }
 
 module.exports = { record, analytics, liveStatus, academyData, learnerProfile, incidentData, brainData };

@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DASHBOARD_PASSWORD: ci-test-password
+      DASHBOARD_CSRF_SECRET: ci-csrf-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Lint-free syntax check
+        run: |
+          for f in src/index.js src/dashboard.js src/tools/ai.js \
+                   src/tools/dashboardTelemetry.js src/utils/commandRouter.js \
+                   src/handlers/messageHandler.js \
+                   src/tools/academy/*.js; do
+            node --check "$f" || exit 1
+          done
+          echo "All syntax checks passed."
+
+      - name: Run academy + dashboard test suite
+        run: npm test

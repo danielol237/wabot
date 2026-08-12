@@ -149,10 +149,10 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
       const { hasActiveFlow } = require("../tools/studySystem");
       const { handleReply } = require("../tools/studySystem");
       if (hasActiveFlow(chatId)) {
-        const out = handleReply(chatId, senderJid.split("@")[0], text.trim());
+        const out = await handleReply(chatId, senderJid.split("@")[0], text.trim());
         if (out) {
           await react(sock, msg, "📚");
-          return reply(sock, msg, out);
+          return reply(sock, msg, out.text);
         }
       }
     } catch (_) {}

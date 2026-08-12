@@ -117,6 +117,7 @@ function registerBuiltinCommands() {
 
   // Study
   registerCommand({ name: "study", aliases: ["learn"], category: "utility", description: "Interactive study: pick a language + level", handler: handleStudy, ownerOnly: false });
+  registerCommand({ name: "run", aliases: ["execute", "practice"], category: "utility", description: "Run code for a study exercise: !run <code>", handler: handleStudyRun, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -613,6 +614,17 @@ async function handleGroupPurge(sock, msg, args, ctx) {
 async function handleStudy(sock, msg, args, ctx) {
   const { handleStudyCommand } = require("../tools/studySystem");
   await handleStudyCommand(sock, msg, args, ctx);
+}
+
+async function handleStudyRun(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { runExercise, hasActiveFlow } = require("../tools/studySystem");
+  if (!hasActiveFlow(ctx.chatId)) return reply(sock, msg, "Start a study session first with !study, then use !run <code> on a lesson with an exercise.");
+  const uid = (ctx.senderJid || "").split("@")[0];
+  const code = (Array.isArray(args) ? args.join(" ") : args || "").trim();
+  if (!code) return reply(sock, msg, "Usage: !run <code>\nExample: !run for i in range(1,6): print(i)");
+  const result = await runExercise(ctx.chatId, uid, code);
+  return reply(sock, msg, result ? result.text : "No active exercise here.");
 }
 
 // Fun handlers

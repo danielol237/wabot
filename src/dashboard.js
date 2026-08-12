@@ -294,10 +294,24 @@ function renderLogsPane() {
 }
 
 function renderStudyPane() {
-  let overview = [];
-  try { overview = require("./tools/studySystem").getCurriculumOverview(); } catch (_) {}
-  return `<div class="pane" id="pane-study"><div class="page-title">Study</div><div class="page-sub">ARIA curriculum · 8 languages</div>
-    <div class="card"><div class="h">Curricula</div>
+  let overview = [], userStats = { xp: 0, streak: 0 }, ownerProgress = [];
+  try {
+    const ss = require("./tools/studySystem");
+    overview = ss.getCurriculumOverview();
+    const owner = (process.env.OWNER_NUMBER || "237650284057").split("@")[0];
+    userStats = ss.getUserStats(owner);
+    ownerProgress = ss.getCurriculumOverview().map((l) => ({
+      ...l, levels: ss.getUserLangProgress(owner, l.id),
+    }));
+  } catch (_) {}
+  const totalLessons = overview.reduce((s, l) => s + l.totalLessons, 0);
+  return `<div class="pane" id="pane-study"><div class="page-title">Study</div><div class="page-sub">ARIA coding academy</div>
+    <div class="card"><div class="h">Your progress</div>
+      <div class="row"><span class="k">Total XP</span><span class="v">${userStats.xp}</span></div>
+      <div class="row"><span class="k">Streak</span><span class="v">${userStats.streak} day${userStats.streak === 1 ? "" : "s"}</span></div>
+      ${ownerProgress.map((l) => `<div class="feed-item"><div class="feed-ico">🎓</div><div class="feed-body"><div class="t">${l.name}</div><div class="s">${l.levels.map((lv) => `${lv.emoji}${lv.label} ${lv.mastery}%`).join(" · ")}</div></div></div>`).join("") || `<div class="empty">No study progress yet. Run !study in a chat.</div>`}
+    </div>
+    <div class="card"><div class="h">Curriculum (${totalLessons} lessons)</div>
       <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
         ${overview.map((l) => `<div class="mini-card" style="border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel2)">
           <div style="font-weight:700;margin-bottom:2px">${l.name}</div>
@@ -305,8 +319,7 @@ function renderStudyPane() {
           <div style="color:var(--faint);font-size:11px;margin-top:6px">${l.levels} levels · ${l.totalLessons} lessons</div>
         </div>`).join("")}
       </div>
-      <div class="row" style="margin-top:14px"><span class="k">Total lessons</span><span class="v">${overview.reduce((s, l) => s + l.totalLessons, 0)}</span></div>
-      <div class="feed-item" style="margin-top:8px"><div class="feed-ico">📱</div><div class="feed-body"><div class="m">Use <b>!study</b> in a chat — pick a language, then a level (🌱 beginner → 👑 pro), and ARIA walks you through each lesson.</div></div></div>
+      <div class="feed-item" style="margin-top:8px"><div class="feed-ico">📱</div><div class="feed-body"><div class="m">Use <b>!study</b> in a chat — pick a language, then a level, and ARIA walks you through lessons with quizzes + coding exercises for XP.</div></div></div>
     </div>
   </div>`;
 }

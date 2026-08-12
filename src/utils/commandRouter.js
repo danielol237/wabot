@@ -1965,17 +1965,30 @@ async function handleAIResponse(sock, msg, text, ctx) {
   //    her answer from stale training memory (which produces the lazy canned
   //    replies people hate). Only triggers on clearly-research-y phrasing.
   let researchContext = "";
+  // ARIA auto-searches on ANY message that needs current/up-to-date info — not
+  // just explicit "research" commands. Covers news, live events, sports, prices,
+  // weather, releases, trending, and questions about facts that change over time.
+  // This is intentionally broad so she doesn't give stale canned replies.
   const wantsLiveInfo =
-    /(research|look up|lookup|google it|search (the )?web|what('| i)?s the latest|current (price|score|news|status|situation)|breaking|as of (now|today|this year)|up to date|latest (on|info|news|price)|happening now|is it real|is that true|verify|fact[- ]check|make research|do (some|a) research)/i.test(text);
+    /(research|look up|lookup|google it|search (the )?web|what('| i)?s the latest|current (price|score|news|status|situation)|breaking|as of (now|today|this year)|up to date|latest (on|info|news|price|release|update)|happening now|is it real|is that true|verify|fact[- ]check|make research|do (some|a) research|\bnews\b|\bscore\b|\bprice\b|\bweather\b|\breleases?\b|\btrending\b|\bforecast\b|\bresults?\b|\bwinner\b|\bchampion\b|\bhappened (today|yesterday|this week)\b|\bwho won\b|\bwho is\b|\bwhat is (the latest|happening)\b|\bwhat happened\b|\bcurrent status\b|\bthis (week|year|month) in\b|\bnew (update|feature|version)\b|\btoday'?s\b|\bthis year\b|\bis (it|there|she|he|that|the) .{0,25}(this year|today|now|still|currently|coming|releasing|happening|out yet|out|alive|dead|real|true)\b)/i.test(text);
   if (wantsLiveInfo && (process.env.TAVILY_API_KEY || process.env.BRAVE_API_KEY)) {
     try {
       const { searchWeb } = require("../tools/webSearch");
       await react(sock, msg, "🔍");
-      // Extract a clean search query: strip command-y words, keep the meat.
-      const query = text
-        .replace(/^(aria\s*)?(make|do|run|google|search)[^ ]*\s+(a|some|the|research about|research on)?\s*/i, "")
-        .replace(/\b(make research|do research|research about|research on|look up|google it|search the web|before spitting)\b/gi, "")
-        .replace(/\b(nigha|nigga|bro|dude|man|please|pls)\b/gi, "")
+      // Extract a clean search query. For auto-triggered (no explicit research
+      // wording), just search the natural message so she looks up exactly what
+      // was asked. Only strip command-y fluff when someone said "make research
+      // about X" / "look up X" etc.
+      const explicitCmd = /(make|do|run|google|search).*(research|look up|lookup|about|on)/i.test(text);
+      let query = text;
+      if (explicitCmd) {
+        query = text
+          .replace(/^(aria\s*)?(make|do|run|google|search)[^ ]*\s+(a|some|the|research about|research on)?\s*/i, "")
+          .replace(/\b(make research|do research|research about|research on|look up|google it|search the web|before spitting)\b/gi, "");
+      }
+      query = query
+        .replace(/\b(nigha|nigga|bro|dude|man|please|pls|aria)\b/gi, " ")
+        .replace(/\s+/g, " ")
         .trim()
         .slice(0, 120);
       const result = await searchWeb(query || text.slice(0, 120));

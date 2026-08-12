@@ -47,25 +47,29 @@ function ytBaseFlags() {
 }
 
 // yt-dlp search: query -> { title, id, url } best match.
+// Uses flat extraction (--flat-playlist --print) so search works without needing
+// a resolvable format. The old -J approach made yt-dlp try to resolve formats and
+// failed with "Requested format is not available" -> search always returned null.
 async function searchYt(query) {
   const r = await exec("yt-dlp", [
     ...ytBaseFlags(),
+    "--flat-playlist",
+    "--no-warnings",
+    "--print", "%(id)s\t%(title)s\t%(duration)s\t%(uploader)s",
     "ytsearch1:" + query,
-    "-J",
-    "--no-download",
-    "--skip-download",
   ], 45000);
   if (r.err) return null;
-  try {
-    const info = JSON.parse(r.stdout);
-    return {
-      title: info.title || query,
-      id: info.id,
-      url: info.webpage_url || `https://www.youtube.com/watch?v=${info.id}`,
-      duration: info.duration,
-      uploader: info.uploader,
-    };
-  } catch (_) { return null; }
+  const line = String(r.stdout).split("\n").find((l) => l.includes("\t"));
+  if (!line) return null;
+  const [id, title, duration, uploader] = line.split("\t");
+  if (!id) return null;
+  return {
+    title: title || query,
+    id,
+    url: `https://www.youtube.com/watch?v=${id}`,
+    duration: duration ? Number(duration) || 0 : undefined,
+    uploader,
+  };
 }
 
 // Download audio (mp3) from a yt-dlp-able source. Returns { success, filePath, size, title }.

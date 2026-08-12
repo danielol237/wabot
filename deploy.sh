@@ -45,6 +45,14 @@ apt install -y -qq ffmpeg python3 python3-pip nginx 2>/dev/null || true
 if ! command -v yt-dlp >/dev/null 2>&1; then
   pip3 install --break-system-packages -q yt-dlp 2>/dev/null || pip3 install -q yt-dlp 2>/dev/null || true
 fi
+# YouTube "n challenge" solver — required since 2025.11.12. Without yt-dlp-ejs,
+# YouTube format extraction fails with "No video formats found" / n challenge
+# solving failed, which breaks !play/!yt. Install it alongside yt-dlp so the
+# solver scripts are bundled locally instead of downloaded at runtime (which is
+# unreliable behind proxies / on Render).
+if ! python3 -c "import yt_dlp_ejs" >/dev/null 2>&1; then
+  pip3 install --break-system-packages -q yt-dlp-ejs 2>/dev/null || pip3 install -q yt-dlp-ejs 2>/dev/null || true
+fi
 if ! command -v docker >/dev/null 2>&1; then
   apt install -y -qq docker.io 2>/dev/null || true
 fi

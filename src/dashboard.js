@@ -1,6 +1,12 @@
-// ARIA Dashboard — clean sidebar + card-grid control room
+// ARIA Dashboard — live intelligence cockpit
 // Mounted on /dashboard in index.js
-// Real auth + session, light theme, reference-grade layout.
+// Real auth + session (hashed tokens, CSRF, login throttle), live telemetry,
+// analytics, academy intelligence, incident center, and the 'brain' pane.
+//
+// Session store: in-memory Map + hashed-token JSON persistence. Acceptable for
+// a single-instance deployment; if this ever runs multi-instance/concurrent,
+// migrate sessions to Redis/DB so a shared token store isn't write-contended.
+// Tokens are stored only as SHA-256 hashes, so a leaked file is not reusable.
 
 const express = require("express");
 const crypto = require("crypto");
@@ -322,6 +328,155 @@ function renderStudyPane() {
   </div>`;
 }
 
+// ── Intelligence cockpit panes ────────────────────────────────
+function bar(value, max = 100, color = "var(--accent)") {
+  const pct = Math.max(0, Math.min(100, Math.round((value / max) * 100)));
+  return `<div class="bar"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>`;
+}
+
+// Real-time ARIA status strip (rendered live via /api/live).
+function renderLiveStrip(ls) {
+  const provBadge = (p) => `<span class="badge ${p && p !== "none" ? "b-accent" : "b-muted"}">${p || "none"}</span>`;
+  return `
+    <div class="pane show" id="pane-home">
+      <div class="page-title">Command</div><div class="page-sub">ARIA core · live telemetry</div>
+      <div class="hero" style="background:linear-gradient(120deg,#0f1230,#1a1d45)">
+        <div class="hrow">
+          <div class="avatar">◢</div>
+          <div style="color:#fff"><h2 style="color:#fff">ARIA CORE <span class="badge b-green" id="core-badge">● ONLINE</span></h2>
+            <div class="sub" style="color:#9aa3c9">model <b style="color:#cdd3f0">${ls.primary}</b> · fallback <b style="color:#cdd3f0">${ls.fallback}</b> · pid ${process.pid}</div>
+          </div>
+        </div>
+        <div class="stats" style="margin-top:18px;background:transparent">
+          <div class="stat dark"><div class="n" id="lv-memory">${ls.memoryCount}</div><div class="l">memories</div></div>
+          <div class="stat dark"><div class="n" id="lv-missions">${ls.activeMissions}</div><div class="l">active missions</div></div>
+          <div class="stat dark"><div class="n" id="lv-msg">${ls.msgsPerMin}</div><div class="l">msgs / min</div></div>
+          <div class="stat dark"><div class="n" id="lv-lat">${ls.lastLatency}ms</div><div class="l">latency</div></div>
+          <div class="stat dark"><div class="n" id="lv-err">${ls.errors5m}</div><div class="l">errors / 5m</div></div>
+        </div>
+        <div style="color:#9aa3c9;font-size:12px;margin-top:6px">uptime ${ls.uptimeHrs}h · ${ls.memMB}MB · ${ls.cpuCores} cores · <span id="lv-last">last AI: ${ls.lastProvider} in ${ls.lastLatency}ms</span></div>
+      </div>
+    </div>`;
+}
+
+// Analytics — 24h / 7d / 30d.
+function renderAnalyticsPane(a) {
+  const windows = ["24h", "7d", "30d"];
+  const rows = (key, label, emoji) => windows.map((w) => {
+    const v = a[w] ? a[w][key] : 0;
+    return `<td>${v}</td>`;
+  }).join("");
+  const providerRows = Object.entries(a["24h"]?.providers || {}).map(([p, c]) => {
+    const total = a["24h"].aiRequests || 1;
+    return `<div class="row"><span class="k mono">${p}</span><span class="v">${c} calls</span>${bar(c, total, "var(--cyan)")}</div>`;
+  }).join("");
+  return `
+    <div class="pane" id="pane-analytics"><div class="page-title">Analytics</div><div class="page-sub">volume · latency · reliability</div>
+      <div class="card"><div class="h">Activity <span class="badge b-accent">live</span></div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="color:var(--muted);text-align:left"><th></th><th>24h</th><th>7d</th><th>30d</th></tr></thead>
+          <tbody>
+            <tr><td>💬 Messages</td>${rows("messages")}</tr>
+            <tr><td>⚡ Commands</td>${rows("commands")}</tr>
+            <tr><td>🤖 AI requests</td>${rows("aiRequests")}</tr>
+            <tr><td>❌ Errors</td>${rows("errors")}</tr>
+            <tr><td>⬇️ Downloads</td>${rows("downloads")}</tr>
+            <tr><td>🚨 Incidents</td>${rows("incidents")}</tr>
+            <tr><td>⏱️ Latency</td>${rows("latencyMs")}<td style="color:var(--faint);font-size:11px">ms</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid2" style="margin-top:16px">
+        <div class="card"><div class="h">AI Reliability</div>
+          <div class="row"><span class="k">Success rate (30d)</span><span class="v" id="an-succ">${a["30d"]?.aiSuccessRate || 100}%</span></div>
+          <div class="row"><span class="k">Failures (30d)</span><span class="v">${a["30d"]?.aiFailures || 0}</span></div>
+          <div class="row"><span class="k">Avg latency</span><span class="v">${a["30d"]?.latencyMs || 0}ms</span></div>
+        </div>
+        <div class="card"><div class="h">Providers (24h)</div>
+          ${providerRows || `<div class="empty">No AI traffic yet.</div>`}
+        </div>
+      </div>
+    </div>`;
+}
+
+// Academy intelligence + learner drill-down.
+function renderAcademyPane(ad, selfUid) {
+  const track = ad.mostActiveTrack;
+  const trackRow = track
+    ? `<div class="row"><span class="k">Most active</span><span class="v">${track[0]} · ${track[1]} attempts</span></div>${bar(track[1], Math.max(1, track[1]))}`
+    : `<div class="empty">No activity yet.</div>`;
+  const weak = ad.weakestSkill;
+  const weakRow = weak
+    ? `<div class="row"><span class="k">Weakest skill</span><span class="v">${weak[0]} · ${weak[1].confidence}%</span></div>${bar(100 - weak[1].confidence, 100, "var(--red)")}`
+    : `<div class="empty">Not enough data.</div>`;
+  const topRows = ad.top.map((l, i) => {
+    const name = l.uid === selfUid ? "*you*" : l.uid.split("@")[0];
+    return `<div class="row"><span class="k">${i + 1}. ${name}</span><span class="v">${l.xp} XP${l.streak ? ` · ${l.streak}d 🔥` : ""}</span></div>`;
+  }).join("");
+  return `
+    <div class="pane" id="pane-academy"><div class="page-title">Academy</div><div class="page-sub">intelligence · learners · mastery</div>
+      <div class="stats">
+        <div class="stat"><div class="n">${ad.learnerCount}</div><div class="l">learners</div></div>
+        <div class="stat"><div class="n">${ad.lessons}</div><div class="l">lessons</div></div>
+        <div class="stat"><div class="n">${ad.challenges}</div><div class="l">challenges</div></div>
+        <div class="stat"><div class="n">${ad.projects}</div><div class="l">projects</div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><div class="h">Mastery</div>
+          <div class="row"><span class="k">Avg mastery</span><span class="v">${ad.avgMastery}%</span></div>
+          <div class="row"><span class="k">Streaks ≥2d</span><span class="v">${ad.streaks}</span></div>
+          ${trackRow}
+        </div>
+        <div class="card"><div class="h">Top learners</div>${topRows || `<div class="empty">No ranked learners yet.</div>`}</div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="h">Weakest skill (needs attention)</div>${weakRow}</div>
+      <div class="card" style="margin-top:16px"><div class="h">Engineering DNA <span class="badge b-accent">drill-down</span></div>
+        <div class="empty">Use <b>!academy evidence</b> in chat for a learner's full evidence report, or view your DNA with <b>!dna</b>.</div>
+      </div>
+    </div>`;
+}
+
+// Incident center.
+function renderIncidentsPane(id) {
+  const latest = id.latestIncident;
+  return `
+    <div class="pane" id="pane-incidents"><div class="page-title">Incidents</div><div class="page-sub">production response · ${id.totalIncidents} scenarios</div>
+      <div class="stats">
+        <div class="stat"><div class="n" style="color:var(--green)">${id.resolved}</div><div class="l">resolved</div></div>
+        <div class="stat"><div class="n" style="color:var(--amber)">${id.active}</div><div class="l">active</div></div>
+        <div class="stat"><div class="n" style="color:var(--red)">${id.critical}</div><div class="l">critical</div></div>
+      </div>
+      <div class="card"><div class="h">Latest scenario ${latest ? `<span class="badge b-accent">${latest.difficulty}</span>` : ""}</div>
+        ${latest ? `
+          <div class="row"><span class="k">${latest.title}</span></div>
+          <div class="row"><span class="k">Skills</span><span class="v">${latest.skills.join(", ")}</span></div>
+        ` : `<div class="empty">No incident scenarios loaded.</div>`}
+        <div class="feed-item" style="margin-top:8px"><div class="feed-ico">🚨</div><div class="feed-body"><div class="m">Run <b>!incident</b> in a chat to diagnose a live incident. Grades your root-cause + fix.</div></div></div>
+      </div>
+    </div>`;
+}
+
+// ARIA 'brain' pane.
+function renderBrainPane(b) {
+  const fail = b.recurringFailures.map(([k, c]) => `<div class="row"><span class="k">${k}</span><span class="v">×${c}</span></div>`).join("");
+  const meter = (label, pct, emoji) => `<div class="row"><span class="k">${emoji} ${label}</span><span class="v">${pct}%</span></div>${bar(pct, 100, pct >= 80 ? "var(--green)" : pct >= 60 ? "var(--amber)" : "var(--red)")}`;
+  return `
+    <div class="pane" id="pane-brain"><div class="page-title">Brain</div><div class="page-sub">ARIA intelligence</div>
+      <div class="card"><div class="h">Core systems</div>
+        ${meter("Memory", b.memoryPct, "🧠")}
+        ${meter("Learning (recall health)", b.learning, "📚")}
+        ${meter("Automation", b.automation, "⚙️")}
+        ${meter("Reliability", b.reliability, "🛡️")}
+      </div>
+      <div class="card" style="margin-top:16px"><div class="h">Current focus</div>
+        <div class="row"><span class="k">${b.focus}</span></div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="h">Recurring failures (24h) ${b.recurringFailures.length ? `<span class="badge b-red">${b.recurringFailures.length}</span>` : `<span class="badge b-green">clear</span>`}</div>
+        ${fail || `<div class="empty">No recurring failures.</div>`}
+      </div>
+    </div>`;
+}
+
 function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "") {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -397,6 +552,11 @@ body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:linear
 .b-amber{background:rgba(245,158,11,.13);color:var(--amber)}
 .b-accent{background:rgba(124,92,255,.13);color:var(--accent)}
 .b-muted{background:var(--panel2);color:var(--muted)}
+.bar{height:6px;border-radius:99px;background:var(--panel2);overflow:hidden;margin:2px 0 12px}
+.bar-fill{height:100%;border-radius:99px;transition:width .4s}
+.stat.dark{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.12)}
+.stat.dark .n{color:#fff}
+.stat.dark .l{color:#9aa3c9}
 .empty{text-align:center;padding:22px;color:var(--faint);font-size:12px}
 .pane{display:none}
 .pane.show{display:block;animation:fade .25s}
@@ -432,14 +592,17 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
   <aside class="sidebar">
     <div class="sb-brand"><div class="sb-logo">◢</div><div class="sb-name">ARIA<small>control room</small></div></div>
     <div class="sb-group">Workspace</div>
-    <div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Home</span></div>
+    <div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Command</span></div>
+    <div class="navitem" data-pane="analytics"><span class="ico">📊</span><span>Analytics</span></div>
+    <div class="navitem" data-pane="academy"><span class="ico">🎓</span><span>Academy</span></div>
+    <div class="navitem" data-pane="incidents"><span class="ico">🚨</span><span>Incidents</span></div>
+    <div class="navitem" data-pane="brain"><span class="ico">🧬</span><span>Brain</span></div>
     <a class="navitem" style="text-decoration:none" href="/dashboard/anime"><span class="ico">🎬</span><span>Anime</span></a>
     <div class="navitem" data-pane="missions"><span class="ico">◆</span><span>Missions</span></div>
     <div class="navitem" data-pane="memory"><span class="ico">🧠</span><span>Memory</span></div>
     <div class="navitem" data-pane="media"><span class="ico">🖼️</span><span>Media</span></div>
     <div class="navitem" data-pane="downloads"><span class="ico">⬇️</span><span>Downloads</span></div>
     <div class="navitem" data-pane="household"><span class="ico">🏠</span><span>Household</span></div>
-    <div class="navitem" data-pane="study"><span class="ico">🎓</span><span>Study</span></div>
     <div class="sb-group">System</div>
     <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
     <div class="navitem" data-pane="system"><span class="ico">🛠️</span><span>System</span></div>
@@ -458,7 +621,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};
-const titles={home:['Home',"what's she up to"],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],study:['Study','curriculum'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
+const titles={home:['Command',"ARIA core · live telemetry"],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
@@ -469,6 +632,23 @@ function showPane(p){
 }
 navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
 showPane('home');
+// Live ARIA status — poll /api/live every 5s and update the Command pane.
+async function refreshLive(){
+  const home=document.getElementById('pane-home');
+  if(!home || !home.classList.contains('show')) return;
+  try{
+    const r=await fetch('/dashboard/api/live',{headers:{'Accept':'application/json'}});
+    if(!r.ok) return;
+    const d=await r.json();
+    const set=(id,v)=>{const el=document.getElementById(id); if(el)el.textContent=v;};
+    set('lv-memory',d.memoryCount);
+    set('lv-missions',d.activeMissions);
+    set('lv-msg',d.msgsPerMin);
+    set('lv-lat',d.lastLatency+'ms');
+    set('lv-err',d.errors5m);
+    set('lv-last','last AI: '+d.lastProvider+' in '+d.lastLatency+'ms');
+  }catch(_){}
+}
 // Live downloads panel — refresh just this pane via the JSON API (no full reload).
 async function refreshDownloads(){
   const pane=document.getElementById('pane-downloads');
@@ -541,6 +721,7 @@ function startLogStream(){
   }catch(_){}
 }
 document.addEventListener('click',()=>{ if(document.getElementById('pane-logs')&&document.getElementById('pane-logs').classList.contains('show')) startLogStream(); });
+setInterval(refreshLive, 5000);
 setInterval(refreshDownloads, 8000);
 setInterval(()=>{ location.reload(); }, 120000);
 </script>
@@ -566,6 +747,16 @@ router.post("/api/anime/:id/retry", checkAuth, (req, res) => {
     const fresh = retryJob(req.params.id);
     if (!fresh) return res.status(404).json({ error: "job not found or not retryable" });
     return res.json({ ok: true, id: fresh.id });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// Live ARIA telemetry — real-time status for the Command pane (auth-protected).
+router.get("/api/live", checkAuth, (req, res) => {
+  try {
+    const { liveStatus } = require("./tools/dashboardTelemetry");
+    return res.json(liveStatus());
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -622,38 +813,26 @@ router.get("/api/logs/stream", checkAuth, (req, res) => {
 router.get("/", checkAuth, (req, res) => {
   try {
     const d = collectData();
+    const tel = require("./tools/dashboardTelemetry");
+    const selfUid = (process.env.OWNER_NUMBER || "237650284057").split("@")[0];
+    const ls = tel.liveStatus();
+    const a = tel.analytics();
+    const ad = tel.academyData();
+    const id = tel.incidentData();
+    const b = tel.brainData();
     const active = d.activeMissions[0] || d.missions[0];
-    let content = `
-    <div class="pane show" id="pane-home">
-      <div class="page-title">Hello</div><div class="page-sub">How can I help you today?</div>
-
-      <div class="hero">
-        <div class="hrow">
-          <div class="avatar">◢</div>
-          <div><h2>ARIA <span class="badge b-green">online</span></h2><div class="sub">${d.activeMissions.length ? "Working on " + d.activeMissions.length + " mission(s)." : "Idle — waiting for you."}</div></div>
-        </div>
-        <div class="actions">
-          <button class="qbtn purple">✦ Ask AI</button>
-          <button class="qbtn">Mission updates</button>
-          <button class="qbtn">Create task</button>
-        </div>
-      </div>
-
-      <div class="stats">
-        <div class="stat"><div class="n">${d.activeMissions.length}</div><div class="l">active missions</div></div>
-        <div class="stat"><div class="n">${d.missions.length}</div><div class="l">total missions</div></div>
-        <div class="stat"><div class="n">${d.memories.length}</div><div class="l">memories</div></div>
-        <div class="stat"><div class="n">${d.keysSet}/${d.aiKeys.length}</div><div class="l">AI keys</div></div>
-      </div>
-
-      <div class="grid2">
-        <div class="card"><div class="h">Mission Spotlight ${active ? `<span class="badge b-accent">${active.status}</span>` : ""}</div>
-          ${active ? `<div class="row"><span class="k">${active.objective || "Untitled"}</span></div><div class="row"><span class="k">Progress</span><span class="v">${active.progress || "—"}</span></div>${active.trace && active.trace.length ? `<div class="feed" style="margin-top:8px">${active.trace.slice(-3).map(t=>`<div class="feed-item"><div class="feed-ico">🧾</div><div class="feed-body"><div class="m">${t.detail}</div><div class="s">${new Date(t.ts).toLocaleTimeString()}</div></div></div>`).join("")}</div>`:""}` : `<div class="empty">No active mission. Use !delegate or !mission in chat.</div>`}
-        </div>
-        <div class="card"><div class="h">Attention ${d.errors.length ? `<span class="badge b-red">${d.errors.length}</span>` : `<span class="badge b-green">clear</span>`}</div>
-          ${d.errors.length ? d.errors.slice(0,4).map(e=>`<div class="feed-item"><div class="feed-ico">⚠️</div><div class="feed-body"><div class="t" style="color:var(--red)">${(e.message||String(e)).slice(0,70)}</div><div class="s">${new Date(e.time||Date.now()).toLocaleTimeString()}</div></div></div>`).join("") : `<div class="empty">All clear.</div>`}
-        </div>
-      </div>
+    let content = renderLiveStrip(ls);
+    content += renderAnalyticsPane(a);
+    content += renderAcademyPane(ad, selfUid);
+    content += renderIncidentsPane(id);
+    content += renderBrainPane(b);
+    content += `
+    <div class="pane" id="pane-missions"><div class="page-title">Missions</div><div class="page-sub">what ARIA is building</div>
+      ${d.missions.length ? `<div class="grid2">${d.missions.slice(0,12).map(m=>`
+        <div class="card"><div class="h"><span>${m.id||"mission"}</span><span class="badge ${m.status==='completed'?'b-green':m.status==='running'?'b-accent':m.status==='failed'?'b-red':'b-muted'}">${m.status}</span></div>
+          <div class="row"><span class="k">${m.objective||"Untitled"}</span></div>
+          <div class="row"><span class="k">Progress</span><span class="v">${m.progress||"—"}</span></div>
+        </div>`).join("")}</div>` : `<div class="card"><div class="empty">No missions yet.</div></div>`}
     </div>`;
 
     content += `
@@ -697,8 +876,6 @@ router.get("/", checkAuth, (req, res) => {
         <div class="row"><span class="k">Started</span><span class="v">${new Date(Date.now()-process.uptime()*1000).toLocaleString()}</span></div>
       </div>
     </div>`;
-
-    content += renderStudyPane();
 
     content += `
     <div class="pane" id="pane-system"><div class="page-title">System</div><div class="page-sub">health</div>

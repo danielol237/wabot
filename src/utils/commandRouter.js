@@ -306,6 +306,7 @@ async function routeMessage(sock, msg, context) {
           }
         }
         try {
+          try { require("./tools/dashboardTelemetry").record("command", { detail: cmd.name }); } catch (_) {}
           await cmd.handler(sock, msg, args, context);
           try { require("./eventLog").track("command", cmd.name + (args ? " " + args.slice(0, 40) : "")); } catch (_) {}
         } catch (err) {

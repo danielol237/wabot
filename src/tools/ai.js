@@ -298,5 +298,22 @@ async function getAIResponse(userMessage, userName, history = [], systemOverride
   return "❌ AI request failed on all providers. Last error: " + (lastError || "unknown") + " (Cerebras/Gemini/Groq/OpenRouter all tried)";
 }
 
+// ── Dashboard telemetry ─────────────────────────────────────
+// Wrap the exported function (non-invasively) so every AI call records its
+// latency and success to the dashboard telemetry layer. The original function
+// is unchanged; this only adds a measurement around it. Safe: any telemetry
+// failure is swallowed and never affects the AI response.
+const _getAIResponse = getAIResponse;
+async function getAIResponse(...args) {
+  const t0 = Date.now();
+  const out = await _getAIResponse(...args);
+  try {
+    const ok = typeof out === "string" && !out.startsWith("❌");
+    const tel = require("./dashboardTelemetry");
+    tel.record("ai", { ok, latency: Date.now() - t0, provider: (process.env.CEREBRAS_API_KEY ? "cerebras" : process.env.GEMINI_API_KEY ? "gemini" : process.env.GROQ_API_KEY ? "groq" : "openrouter") });
+  } catch (_) {}
+  return out;
+}
+
 module.exports = { getAIResponse };
 

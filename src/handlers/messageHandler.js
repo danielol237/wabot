@@ -34,6 +34,9 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // ── Ignore bot's own messages ──────────────────────────────
   if (msg.key.fromMe) return;
 
+  // ── Dashboard telemetry (real inbound messages only) ────────
+  try { require("../tools/dashboardTelemetry").record("message"); } catch (_) {}
+
   // ── Build context ──────────────────────────────────────────
   const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins };
 

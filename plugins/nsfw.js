@@ -1,17 +1,73 @@
 // NSFW Plugin — anime NSFW images with chat toggle
-// Uses waifu.pics NSFW API (free, no key)
+// waifu.pics died (domain expired, 2026), so this now resolves images from a
+// small pool of still-alive free APIs. No single free API covers every category
+// anymore, so each command tries its best available source(s) in order:
+//   nekos.life  -> waifu, neko          (verified working)
+//   purrbot.site-> neko, blowjob, ...   (needs a browser User-Agent)
+// Categories with no live source return an honest "unavailable" message.
 
 const axios = require("axios");
 
-// Types that waifu.pics supports
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 const NSFW_TYPES = ["waifu", "neko", "trap", "blowjob", "ass", "hentai", "milf", "oral", "paizuri", "ero", "yuri", "cum", "feet", "spank", "smallboobs"];
-const SFW_TYPES = ["waifu", "neko", "shinobu", "megumin", "bully", "cuddle", "cry", "hug", "kiss", "lick", "pat", "smug", "bonk", "yeet", "blush", "smile", "wave", "highfive", "handhold", "nom", "bite", "glomp", "slap", "kill", "kick", "happy", "wink", "poke", "dance", "cringe"];
 
 // In-memory NSFW toggle per chat
 const nsfwToggles = new Map(); // chatId -> boolean
 
 function isNSFWEnabled(chatId) {
   return nsfwToggles.get(chatId) === true;
+}
+
+// ── Multi-source image resolver ────────────────────────────────
+// Try each source for a category in order; return the first image URL that
+// resolves, else null. Each source maps category -> its own URL path.
+const SOURCES = [
+  // nekos.life: simple JSON { url } — works for waifu + neko.
+  {
+    supports: (cat) => ["waifu", "neko"].includes(cat),
+    async url(cat) {
+      const r = await axios.get(`https://nekos.life/api/v2/img/${cat}`, { timeout: 10000 });
+      return r.data?.url || null;
+    },
+  },
+  // purrbot.site: JSON { link } — needs a browser UA; spotty category coverage.
+  {
+    supports: () => true,
+    async url(cat) {
+      const r = await axios.get(`https://purrbot.site/api/img/nsfw/${cat}/gif`, {
+        timeout: 10000,
+        headers: { "User-Agent": UA },
+      });
+      if (r.status !== 200) return null;
+      return r.data?.link || null;
+    },
+  },
+];
+
+async function fetchNSFWImage(category) {
+  for (const src of SOURCES) {
+    if (!src.supports(category)) continue;
+    try {
+      const url = await src.url(category);
+      if (url) return { url, source: "api" };
+    } catch (_) { /* try next source */ }
+  }
+  return null;
+}
+
+// Build one command handler per category (avoids 15 copy-pasted handlers).
+function makeNSFWCommand(category) {
+  return async (sock, msg, args, ctx) => {
+    if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off. Ask an admin to enable with *!nsfw on*");
+    try {
+      const img = await fetchNSFWImage(category);
+      if (!img?.url) return ctx.reply(`❌ *!${category}*: no live image source right now.`);
+      await sock.sendMessage(msg.key.remoteJid, { image: { url: img.url }, caption: `🔞 ${category[0].toUpperCase()}${category.slice(1)}` });
+    } catch {
+      ctx.reply("Couldn't fetch image.");
+    }
+  };
 }
 
 module.exports = {
@@ -35,67 +91,7 @@ module.exports = {
       return ctx.reply(`🔞 NSFW is currently *${status}*\nUse *!nsfw on* or *!nsfw off*`);
     },
 
-    // Dynamic NSFW command handler — matches any NSFW type as a command
-    waifu: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off. Ask an admin to enable with *!nsfw on*");
-      try {
-        const res = await axios.get("https://api.waifu.pics/nsfw/waifu", { timeout: 10000 });
-        await sock.sendMessage(msg.key.remoteJid, { image: { url: res.data.url }, caption: "🔞 Waifu" });
-      } catch { ctx.reply("Couldn't fetch image."); }
-    },
-    neko: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try {
-        const res = await axios.get("https://api.waifu.pics/nsfw/neko", { timeout: 10000 });
-        await sock.sendMessage(msg.key.remoteJid, { image: { url: res.data.url }, caption: "🔞 Neko" });
-      } catch { ctx.reply("Couldn't fetch image."); }
-    },
-    hentai: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try {
-        const res = await axios.get("https://api.waifu.pics/nsfw/hentai", { timeout: 10000 });
-        await sock.sendMessage(msg.key.remoteJid, { image: { url: res.data.url }, caption: "🔞 Hentai" });
-      } catch { ctx.reply("Couldn't fetch image."); }
-    },
-    blowjob: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/blowjob", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 Blowjob" }); } catch { ctx.reply("Error."); }
-    },
-    ass: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/ass", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 Ass" }); } catch { ctx.reply("Error."); }
-    },
-    milf: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/milf", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 MILF" }); } catch { ctx.reply("Error."); }
-    },
-    oral: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/oral", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 Oral" }); } catch { ctx.reply("Error."); }
-    },
-    paizuri: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/paizuri", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 Paizuri" }); } catch { ctx.reply("Error."); }
-    },
-    ero: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/ero", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 Ero" }); } catch { ctx.reply("Error."); }
-    },
-    yuri: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/yuri", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 Yuri" }); } catch { ctx.reply("Error."); }
-    },
-    trap: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/trap", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 Trap" }); } catch { ctx.reply("Error."); }
-    },
-    feet: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/feet", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 Feet" }); } catch { ctx.reply("Error."); }
-    },
-    cum: async (sock, msg, args, ctx) => {
-      if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off.");
-      try { const r = await axios.get("https://api.waifu.pics/nsfw/cum", { timeout: 10000 }); await sock.sendMessage(msg.key.remoteJid, { image: { url: r.data.url }, caption: "🔞 Cum" }); } catch { ctx.reply("Error."); }
-    },
+    // Every NSFW category command, generated from the list.
+    ...Object.fromEntries(NSFW_TYPES.map((c) => [c, makeNSFWCommand(c)])),
   },
 };

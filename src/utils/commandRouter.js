@@ -692,10 +692,19 @@ async function handleLeaderboard(sock, msg, args, ctx) {
   const { reply } = require("../utils/baileysHelpers");
   const { leaderboardView } = require("../tools/academy/xpSystem");
   const selfUid = (ctx.senderJid || "").split("@")[0];
-  // Leaderboard is global for now. Group-scoping is deferred until a group
-  // member list helper is wired into the router (the function signature
-  // already accepts a scope list for future use).
-  return reply(sock, msg, leaderboardView(null, selfUid));
+  // In group chats, scope the board to that group's members via
+  // groupMetadata; otherwise show the global board.
+  let scopeUids = null;
+  if (ctx.chatId && String(ctx.chatId).endsWith("@g.us") && sock) {
+    try {
+      const meta = await sock.groupMetadata(ctx.chatId);
+      if (meta && Array.isArray(meta.participants)) {
+        scopeUids = meta.participants.map((p) => String(p.id).split("@")[0]);
+      }
+    } catch (_) { scopeUids = null; }
+  }
+  const scopeNote = scopeUids ? "_This group_" : "_Global_ (DMs not in this group)";
+  return reply(sock, msg, scopeNote + "\n\n" + leaderboardView(scopeUids, selfUid));
 }
 
 // Fun handlers

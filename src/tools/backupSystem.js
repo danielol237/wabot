@@ -6,6 +6,7 @@ const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const axios = require("axios");
 
 const HOME = path.join(__dirname, "../..");
 const DATA = path.join(HOME, "data");
@@ -61,4 +62,37 @@ async function restoreBackup(zipPath) {
   });
 }
 
-module.exports = { createBackup, restoreBackup };
+// ── Auto GitHub backup ─────────────────────────────────────────
+// Push the backup ZIP to a PRIVATE GitHub gist as base64, so there's an
+// off-server copy without needing a separate hosting service. Requires
+// GITHUB_TOKEN with gist scope in env. Returns success:false if not configured
+// (never blocks). On success returns the gist URL.
+async function backupToGist() {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) return { success: false, error: "GITHUB_TOKEN not set" };
+
+  const b = await createBackup();
+  if (!b.success) return { success: false, error: b.error };
+  try {
+    const content = fs.readFileSync(b.filePath).toString("base64");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const res = await axios.post(
+      "https://api.github.com/gists",
+      {
+        description: `ARIA backup ${stamp}`,
+        public: false,
+        files: {
+          [`aria_backup_${stamp}.zip.b64`]: { content },
+        },
+      },
+      { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, timeout: 30000 }
+    );
+    try { fs.unlinkSync(b.filePath); } catch (_) {}
+    return { success: true, url: res.data?.html_url, size: b.size };
+  } catch (err) {
+    try { fs.unlinkSync(b.filePath); } catch (_) {}
+    return { success: false, error: err.response?.data?.message || err.message };
+  }
+}
+
+module.exports = { createBackup, restoreBackup, backupToGist };

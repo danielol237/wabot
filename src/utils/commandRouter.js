@@ -1147,6 +1147,14 @@ async function handleCrypto(sock, msg, args, ctx) {
 async function handleBackup(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "💾");
+  const arg = (Array.isArray(args) ? args[0] : args || "").toLowerCase();
+  if (arg === "remote" || arg === "gist" || arg === "cloud") {
+    const { backupToGist } = require("../tools/backupSystem");
+    await reply(sock, msg, "☁️ Uploading backup to a private GitHub gist…");
+    const r = await backupToGist();
+    if (r.success) return reply(sock, msg, `✅ Backup uploaded to private gist: ${r.url}`);
+    return reply(sock, msg, `❌ Remote backup failed: ${r.error}`);
+  }
   const result = await createBackup();
   await reply(sock, msg, result);
 }

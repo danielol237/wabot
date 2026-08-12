@@ -126,6 +126,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "explain", aliases: ["teach", "teachback"], category: "utility", description: "Teach-it-back: explain a concept, ARIA grades + finds misconceptions", handler: handleExplain, ownerOnly: false });
   registerCommand({ name: "recall", aliases: ["reviewdue", "spaced"], category: "utility", description: "Recall engine: shows which skills are due for review", handler: handleRecall, ownerOnly: false });
   registerCommand({ name: "dna", aliases: ["roadmap", "career", "profile"], category: "utility", description: "Engineering DNA + career roadmap over your learner model", handler: handleDna, ownerOnly: false });
+  registerCommand({ name: "company", aliases: ["startup", "ceo"], category: "utility", description: "Company simulator: run a software company on your real skills", handler: handleCompany, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -671,6 +672,11 @@ async function handleDna(sock, msg, args, ctx) {
   const { dnaReport } = require("../tools/academy/engineeringDNA");
   const uid = (ctx.senderJid || "").split("@")[0];
   return reply(sock, msg, dnaReport(uid));
+}
+
+async function handleCompany(sock, msg, args, ctx) {
+  const { handleCompanyCommand } = require("../tools/academy/companySimulator");
+  await handleCompanyCommand(sock, msg, args, ctx);
 }
 
 // Fun handlers

@@ -127,6 +127,8 @@ function registerBuiltinCommands() {
   registerCommand({ name: "recall", aliases: ["reviewdue", "spaced"], category: "utility", description: "Recall engine: shows which skills are due for review", handler: handleRecall, ownerOnly: false });
   registerCommand({ name: "dna", aliases: ["roadmap", "career", "profile"], category: "utility", description: "Engineering DNA + career roadmap over your learner model", handler: handleDna, ownerOnly: false });
   registerCommand({ name: "company", aliases: ["startup", "ceo"], category: "utility", description: "Company simulator: run a software company on your real skills", handler: handleCompany, ownerOnly: false });
+  registerCommand({ name: "level", aliases: ["xp", "rank"], category: "utility", description: "Your XP level, title, progress & breakdown", handler: handleLevel, ownerOnly: false });
+  registerCommand({ name: "leaderboard", aliases: ["lb", "top"], category: "utility", description: "Global academy leaderboard by XP", handler: handleLeaderboard, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -677,6 +679,23 @@ async function handleDna(sock, msg, args, ctx) {
 async function handleCompany(sock, msg, args, ctx) {
   const { handleCompanyCommand } = require("../tools/academy/companySimulator");
   await handleCompanyCommand(sock, msg, args, ctx);
+}
+
+async function handleLevel(sock, msg, args, ctx) {
+  const { reply } = require("../utils/baileysHelpers");
+  const { xpView } = require("../tools/academy/xpSystem");
+  const uid = (ctx.senderJid || "").split("@")[0];
+  return reply(sock, msg, xpView(uid));
+}
+
+async function handleLeaderboard(sock, msg, args, ctx) {
+  const { reply } = require("../utils/baileysHelpers");
+  const { leaderboardView } = require("../tools/academy/xpSystem");
+  const selfUid = (ctx.senderJid || "").split("@")[0];
+  // Leaderboard is global for now. Group-scoping is deferred until a group
+  // member list helper is wired into the router (the function signature
+  // already accepts a scope list for future use).
+  return reply(sock, msg, leaderboardView(null, selfUid));
 }
 
 // Fun handlers

@@ -34,6 +34,7 @@ function learner(uid) {
       skills: {},         // { [skill]: { correct, total, confidence } }
       misconceptions: {}, // { [skill]: count }
       xp: 0,
+      xpLog: [],          // { ts, amt, reason } — for per-activity XP breakdown
       streak: 0,
       lastStudy: null,
     };
@@ -59,10 +60,16 @@ function recordAttempt(uid, { track, level, lessonId, sectionType, correct, skil
   save();
 }
 
-// Mark XP and update streak.
-function addXp(uid, amt) {
+// Mark XP (optional `reason` records where it came from, feeding the XP
+// breakdown view) and update streak.
+function addXp(uid, amt, reason) {
   const l = learner(uid);
   l.xp = (l.xp || 0) + amt;
+  if (reason && amt) {
+    l.xpLog = l.xpLog || [];
+    l.xpLog.push({ ts: Date.now(), amt, reason });
+    if (l.xpLog.length > 300) l.xpLog = l.xpLog.slice(-300); // bound memory
+  }
   const today = new Date().toDateString();
   if (l.lastStudy === today) { /* same day */ }
   else if (l.lastStudy) {
@@ -86,7 +93,21 @@ function getMastery(uid, track, level) {
 
 function getStats(uid) {
   const l = learner(uid);
-  return { xp: l.xp || 0, streak: l.streak || 0, attempts: l.attempts.length };
+  return { xp: l.xp || 0, streak: l.streak || 0, attempts: l.attempts.length, xpLog: l.xpLog || [] };
+}
+
+// All learners ranked by XP (for the leaderboard). Returns display-safe rows.
+function getAllLearners() {
+  return Object.entries(model.learners)
+    .filter(([, l]) => (l.xp || 0) > 0)
+    .map(([uid, l]) => ({
+      uid,
+      xp: l.xp || 0,
+      streak: l.streak || 0,
+      attempts: l.attempts.length,
+      lastActivity: l.lastStudy || null,
+    }))
+    .sort((a, b) => b.xp - a.xp);
 }
 
 // ── Weak/strong skills for the adaptive tutor ───────────────────
@@ -121,4 +142,4 @@ function computeMastery(uid, track, level) {
   return getMastery(uid, track, level);
 }
 
-module.exports = { recordAttempt, addXp, setMastery, getMastery, getStats, skillProfile, skillConfidence, computeMastery, learner };
+module.exports = { recordAttempt, addXp, setMastery, getMastery, getStats, getAllLearners, skillProfile, skillConfidence, computeMastery, learner };

@@ -87,6 +87,19 @@ test("dashboard: authenticated GET / renders the cockpit", async () => {
   assert.strictEqual(r.status, 200);
   assert.ok(r.body.includes("Command"), "should render Command pane");
   assert.ok(r.body.includes("Brain"), "should render Brain nav");
+  assert.ok(r.body.includes("pane-sources"), "should render Sources pane");
+  assert.ok(r.body.includes(">Sources</span>"), "should render Sources nav item");
+  await close(srv);
+});
+
+test("dashboard: /api/source-reputation requires auth + returns provider snapshot", async () => {
+  const srv = await listen(makeApp());
+  const anon = await req(srv, "GET", "/dashboard/api/source-reputation");
+  assert.strictEqual(anon.status, 401, "unauthenticated → 401");
+  const cookie = await login(srv);
+  const r = await req(srv, "GET", "/dashboard/api/source-reputation", { headers: { Cookie: cookie } });
+  assert.strictEqual(r.status, 200);
+  assert.ok(Array.isArray(r.json), "returns provider array");
   await close(srv);
 });
 

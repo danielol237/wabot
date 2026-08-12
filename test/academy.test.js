@@ -170,6 +170,24 @@ test("incident: semantic grading resolves a correct diagnosis+fix", async () => 
   cleanup("incidentState.json", "learnerModel.json");
 });
 
+test("incident: anime resolver-race scenario loads with correct schema", async () => {
+  const inc = require("../src/tools/academy/incidentSimulator");
+  const i = inc.INCIDENTS.find((x) => x.id === "anime-resolver-race");
+  assert.ok(i, "anime resolver-race incident present");
+  assert.strictEqual(i.difficulty, "hard");
+  assert.ok(Array.isArray(i.skills) && i.skills.includes("async-concurrency"));
+  assert.ok(i.scenario.includes("sequence"));
+  assert.ok(i.evidence.logs.length >= 4, "has evidence logs");
+  assert.ok(Array.isArray(i.distractors) && i.distractors.length >= 3);
+  // Root cause must reflect the architectural fix (validate + circuit breaker).
+  assert.ok(/validat/i.test(i.rootCause), "root cause mentions validation");
+  assert.ok(/circuit/i.test(i.correctFix), "correct fix mentions circuit breaker");
+  // It should be selectable by name.
+  const start = inc.start("c2", "INX-" + Date.now(), "anime-resolver-race");
+  assert.ok(start.phase === "diagnosis");
+  cleanup("incidentState.json", "learnerModel.json");
+});
+
 test("company: backlog weighted to learner strengths; full loop runs", () => {
   const { recordAttempt } = require("../src/tools/academy/learnerModel");
   const cs = require("../src/tools/academy/companySimulator");

@@ -230,6 +230,38 @@ const INCIDENTS = [
       "Remove React entirely",
     ],
   },
+  {
+    id: "anime-resolver-race",
+    title: "Source resolver race burns downloads",
+    difficulty: "hard",
+    skills: ["async-concurrency", "backend", "distributed-systems"],
+    scenario: "The anime pipeline downloads started failing in bursts. Each job tries providers in sequence (OmniSave → Gogo → Consumet). When one download fails mid-stream, the next provider is tried, but many jobs end with partial files or 'no stream'. Downloads that used to succeed now intermittently fail.",
+    evidence: {
+      logs: [
+        "[ERROR] job ep3: omnisave returned 403 after 40MB of a 350MB file, aborting",
+        "[ERROR] job ep3: gogo m3u8 probe failed, trying consumet",
+        "[WARN] provider omnisave failing repeatedly, still sending it first",
+        "[ERROR] provider omnisave latency 9.4s, timeout=10s",
+        "[INFO] provider omnisave circuit open (3 consecutive failures) — but resolver still calls it on next job",
+      ],
+      metrics: { "download_failure_rate": "2% → 14%", "partial_downloads": "0 → 9", "p95_resolve_time": "1.2s → 8.7s" },
+      traces: [
+        "resolve(ep3) → omnisave (wait 9.4s, fail) → gogo (wait 6s, fail) → consumet (wait 7s, ok) — 22s for one episode",
+        "resolve(ep4) → omnisave (wait 9.4s, fail) → ... every job pays the broken provider's latency first",
+      ],
+      db: { status: "UP", connections: "12 / 100" },
+      deploy: "Sequential provider-fallback resolver added in v7.0.0",
+    },
+    rootCause: "The resolver treats 'provider search found a result' as proof the stream is downloadable, tries providers in strict sequence, never validates the stream before committing to the download, and has no circuit breaker — so a dead first provider (omnisave) is hit first on every job, wasting 9-22s and causing mid-download aborts.",
+    correctFix: "Resolve providers CONCURRENTLY (resolver race), validate the stream (HTTP/range/yt-dlp/ffprobe) BEFORE committing to the download, and add per-provider circuit breakers + reputation so a repeatedly-failing provider is skipped and only healthy providers are used.",
+    distractors: [
+      "Increase the download timeout to 60s",
+      "Run omnisave first but retry it 3 times on failure",
+      "Download the file fully, then check if it's valid",
+      "Add more bandwidth to the pipeline",
+    ],
+    commBad: "You didn't mention the resolver race or the missing circuit breaker.",
+  },
 ];
 
 function randomIncident() {

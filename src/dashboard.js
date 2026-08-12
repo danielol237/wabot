@@ -246,6 +246,47 @@ function renderDownloadsPane() {
     </div>`;
 }
 
+// Sources pane — per-job Source Resolution Engine report.
+function resolverSummaryCard(j) {
+  const r = j.resolver;
+  if (!r) return null;
+  const conf = r.confidence || {};
+  const confChips = [
+    conf.title != null ? `title ${conf.title}%` : null,
+    conf.season != null ? `season ${conf.season}%` : null,
+    conf.episodeExists === false ? "⚠️ episode not listed" : null,
+  ].filter(Boolean);
+  const sel = r.selected || {};
+  const diag = r.diagnostics || [];
+  return `
+    <div class="card">
+      <div class="h"><span>${j.name} — Ep ${j.episode}</span><span class="badge b-accent">source</span></div>
+      ${r.canonical ? `<div class="row"><span class="k">canonical</span><span class="v mono">${r.canonical.title} (id ${r.canonical.id}${r.canonical.totalEpisodes ? ` · ${r.canonical.totalEpisodes} eps` : ""})</span></div>` : ""}
+      ${confChips.length ? `<div class="row"><span class="k">confidence</span><span class="v">${confChips.map((c) => `<span class="badge b-muted">${c}</span>`).join(" ")}</span></div>` : ""}
+      <div class="row"><span class="k">candidates</span><span class="v">${(r.candidates || []).length} discovered</span></div>
+      ${(r.candidates || []).length ? `<div class="feed" style="margin-top:6px">${r.candidates.map((c, i) => {
+        const v = (r.validation || {})[c.url] || {};
+        return `<div class="feed-item"><div class="feed-ico" style="color:${v.ok ? "var(--green)" : "var(--faint)"}">${v.ok ? "✓" : "·"}</div><div class="feed-body"><div class="m mono">${c.provider} · ${c.type}${c.quality !== "unknown" ? ` · ${c.quality}` : ""}</div><div class="s">${v.ok ? "validated" : (v.reason || "not validated")}</div></div></div>`;
+      }).join("")}</div>` : ""}
+      ${diag.length ? `<div class="row"><span class="k">discovery latency</span><span class="v">${diag.map((d) => `${d.provider} ${d.latencyMs}ms`).join(" · ")}</span></div>` : ""}
+      ${sel.provider ? `<div class="row"><span class="k" style="color:var(--green)">selected</span><span class="v"><span class="badge b-green">${sel.provider}</span> ${sel.type}${sel.height ? ` · ${sel.height}p` : ""}${sel.codec ? ` · ${sel.codec}` : ""}${sel.duration ? ` · ${Number(sel.duration).toFixed(0)}s` : ""} · score ${sel.score}</span></div>` : ""}
+    </div>`;
+}
+
+function renderSourcesPane() {
+  let snap = null;
+  try { snap = require("./tools/animeJobManager").snapshot(); } catch (_) { snap = null; }
+  const jobs = [
+    ...(snap ? snap.current : []),
+    ...(snap ? snap.recent : []),
+  ];
+  const withResolver = jobs.filter((j) => j.resolver);
+  return `
+    <div class="pane" id="pane-sources"><div class="page-title">Sources</div><div class="page-sub">source resolution engine · canonical → discover → validate → select</div>
+      ${withResolver.length ? withResolver.map(resolverSummaryCard).join("") : `<div class="card"><div class="empty">No resolved sources yet. Send !animedl in a chat — the resolver logs its full report here.</div></div>`}
+    </div>`;
+}
+
 // Health pane — anime source + AI provider probe results.
 function healthRow(item) {
   const ok = !!item.ok;
@@ -629,6 +670,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="navitem" data-pane="memory"><span class="ico">🧠</span><span>Memory</span></div>
     <div class="navitem" data-pane="media"><span class="ico">🖼️</span><span>Media</span></div>
     <div class="navitem" data-pane="downloads"><span class="ico">⬇️</span><span>Downloads</span></div>
+    <div class="navitem" data-pane="sources"><span class="ico">🧩</span><span>Sources</span></div>
     <div class="navitem" data-pane="household"><span class="ico">🏠</span><span>Household</span></div>
     <div class="sb-group">System</div>
     <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
@@ -982,6 +1024,7 @@ router.get("/", checkAuth, (req, res) => {
     </div>`;
 
     content += renderDownloadsPane();
+    content += renderSourcesPane();
 
     content += `
     <div class="pane" id="pane-admin"><div class="page-title">Admin</div><div class="page-sub">access</div>

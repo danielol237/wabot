@@ -29,7 +29,9 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
 
   // ── BAN / MUTE check ───────────────────────────────────────
   if (isBanned(senderJid)) return;
-  if (isMuted(chatId) && !checkOwner(senderJid)) return;
+  // Direct @mentions bypass mute so a muted group can still summon ARIA.
+  const directlyMentioned = isBotMentioned(msg, botJid) || triggeredByName(text);
+  if (isMuted(chatId) && !checkOwner(senderJid) && !directlyMentioned) return;
 
   // ── Ignore bot's own messages ──────────────────────────────
   if (msg.key.fromMe) return;

@@ -33,16 +33,29 @@ async function anilistSearch(title) {
         title{english romaji native} episodes format seasonYear status nextAiringEpisode{episode}}}}}`,
       variables: { q: title },
     }, { timeout: 12000 });
-    return r.data?.data?.Page?.media || [];
-  } catch (_) { return []; }
+    return { ok: true, media: r.data?.data?.Page?.media || [] };
+  } catch (e) {
+    // Distinguish a network/API failure from a genuine "no match" so callers
+    // can tell "AniList unavailable" apart from "AniList found nothing".
+    return {
+      ok: false,
+      error: e?.response?.data?.error?.message || e?.code || e?.message || "network error",
+      status: e?.response?.status || null,
+      media: [],
+    };
+  }
 }
 
 // Resolve title+episode → canonical identity. Returns
 // { ok, canonical, confidence } where confidence = { title, season, episodeExists }.
 async function resolveCanonical(title, episode) {
   const target = normalize(title);
-  const results = await anilistSearch(title);
-  if (!results.length) return { ok: false, reason: "no canonical match on AniList" };
+  const search = await anilistSearch(title);
+  // If AniList itself failed (timeout/429/5xx), report it as UNAVAILABLE, not
+  // "no match" — the caller may choose to continue with provider-native discovery.
+  if (!search.ok) return { ok: false, unavailable: true, reason: "AniList unavailable: " + search.error };
+  const results = search.media;
+  if (!results.length) return { ok: false, unavailable: false, reason: "no canonical match on AniList" };
 
   // Score each result by title-match, prefer the best.
   const scored = results.map((a) => {
@@ -55,7 +68,7 @@ async function resolveCanonical(title, episode) {
   }).sort((a, b) => b.score - a.score);
 
   const best = scored[0];
-  if (!best || best.score < 0.5) return { ok: false, reason: "no confident title match" };
+  if (!best || best.score < 0.5) return { ok: false, unavailable: false, reason: "no confident title match" };
   const anime = best.anime;
   const epCount = anime.episodes || null;
   const episodeExists = epCount ? episode <= epCount : true; // null = ongoing/unknown
@@ -126,6 +139,19 @@ const DISCOVERERS = [
       const got = await consumetEpisodeStream(anime.id, episode, null);
       if (!got?.url) return { candidates: [], error: got?.error || "no stream" };
       return { candidates: [{ provider: "consumet", url: got.url, type: /m3u8/i.test(got.url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0" }, title: anime.title }] };
+    },
+  },
+  {
+    provider: "animepahe",
+    enabled: () => rep.usable("animepahe"),
+    async discover(title, episode) {
+      const { searchAnimePahe, animepaheGetStreamUrl } = require("./animeDownload");
+      const list = await searchAnimePahe(title);
+      if (!list.length) return { candidates: [], noResults: true };
+      const anime = list[0];
+      const got = await animepaheGetStreamUrl(anime.id, episode || 1);
+      if (!got?.url) return { candidates: [], error: got?.error || "no stream url" };
+      return { candidates: [{ provider: "animepahe", url: got.url, type: /m3u8/i.test(got.url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0", Referer: "https://animepahetv.to/" }, title: anime.title }] };
     },
   },
 ];
@@ -199,17 +225,24 @@ function qualityRank(candidates, validations, preference, preferredQuality) {
 async function resolveEpisode(title, episode, { preference, quality } = {}) {
   const report = { title, episode, canonical: null, confidence: null, candidates: [], diagnostics: [], selected: null, error: null };
 
-  // 1. Canonical identity.
+  // 1. Canonical identity — OPTIONAL enrichment, NOT a hard gate.
+  // Canonical resolution improves source selection (season, episode count,
+  // title matching) but must never block provider discovery. If AniList is
+  // unavailable or finds no confident match, we still try every provider with
+  // the raw title. Only a definitive "episode doesn't exist" (when we DO have
+  // reliable metadata) short-circuits discovery.
   const canon = await resolveCanonical(title, episode);
   report.canonical = canon.canonical || null;
   report.confidence = canon.confidence || null;
   if (!canon.ok) {
-    report.error = "canonical: " + canon.reason;
-    return report;
+    report.diagnostics.push(canon.unavailable
+      ? `canonical unavailable (${canon.reason}) — continuing with provider-native resolution`
+      : `canonical: ${canon.reason} — continuing with provider-native resolution`);
   }
   // Canonical episode validation: if metadata says the episode doesn't exist,
-  // do NOT proceed to source discovery — fail fast with a clear reason.
-  if (canon.confidence?.episodeExists === false) {
+  // we can only trust that when canonical resolution actually SUCCEEDED.
+  // If canonical is unavailable, we can't know — so proceed to discovery.
+  if (canon.ok && canon.confidence?.episodeExists === false) {
     report.error = `episode ${episode} not in canonical episode list (${canon.canonical?.totalEpisodes ?? "?"} total)`;
     return report;
   }

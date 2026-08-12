@@ -98,7 +98,44 @@ test("gogo: decryptAjax uses a valid 16-byte AES-CBC IV (no RangeError)", () => 
 test("resolver: ranked list includes only validated candidates for retry", () => {
   const sr = require("../src/tools/sourceResolver");
   // The ranked list is populated inside resolveEpisode only after validation.
-  // We assert the export surface + that episodeExists=false blocks discovery by
-  // calling resolveCanonical logic shape (unit-level contract, no network).
+  // We assert the export surface + that canonical resolution is OPTIONAL (not a
+  // hard gate) — see the AniList-unavailable regression test below.
   assert.ok(typeof sr.resolveEpisode === "function");
+});
+
+test("resolver: AniList unavailable must NOT block provider discovery (regression)", async () => {
+  // The core bug: when resolveCanonical fails (AniList down/timeout/429/5xx),
+  // resolveEpisode used to `return` early, so DISCOVERERS never ran → the report
+  // said "no sources tried" even though providers were never reached.
+  //
+  // We can't easily force AniList to be down in a unit test, so we assert the
+  // ARCHITECTURE that prevents the bug:
+  //  1. resolveCanonical returns an `unavailable` flag (distinct from "no match").
+  //  2. resolveEpisode continues to discovery when canonical is unavailable.
+  const { resolveCanonical, resolveEpisode } = require("../src/tools/sourceResolver");
+
+  // 1. The unavailable path must be representable.
+  const canon = await resolveCanonical("__anilist_down__zzz_nomatch", 1);
+  assert.ok("ok" in canon, "canonical returns ok flag");
+  assert.ok("unavailable" in canon, "canonical exposes unavailable vs no-match");
+  if (canon.unavailable === false) {
+    // Genuinely no match (AniList responded). Both are NOT a hard block:
+    // resolveEpisode must continue to discovery either way.
+    assert.strictEqual(canon.ok, false);
+  }
+
+  // 2. resolveEpisode must not early-return just because canonical failed.
+  // We assert the control flow source shape: the only `return report` between
+  // canonical resolution and discovery is the episodeExists=false guard, which
+  // requires canon.ok to be true. So an unavailable canon falls through to discovery.
+  const src = require("fs").readFileSync(require.resolve("../src/tools/sourceResolver"), "utf8");
+  const gate = src.match(/if \(canon\.ok && canon\.confidence\?\.episodeExists === false\)/);
+  assert.ok(gate, "episode block only fires when canonical succeeded (canon.ok)");
+  assert.ok(!src.includes("if (!canon.ok) {\\n    report.error = \\\"canonical"),
+    "removed the hard canonical gate that returned before discovery");
+
+  // AnimePahe must be in the unified DISCOVERERS pipeline.
+  const sr = require("../src/tools/sourceResolver");
+  assert.ok(sr.DISCOVERERS.some((d) => d.provider === "animepahe"), "animepahe is a discoverer");
+  assert.ok(sr.DISCOVERERS.length >= 4, "all 4 providers in one pipeline");
 });

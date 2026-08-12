@@ -400,7 +400,7 @@ function renderAnalyticsPane(a) {
 }
 
 // Academy intelligence + learner drill-down.
-function renderAcademyPane(ad, selfUid) {
+function renderAcademyPane(ad, selfUid, profile) {
   const track = ad.mostActiveTrack;
   const trackRow = track
     ? `<div class="row"><span class="k">Most active</span><span class="v">${track[0]} · ${track[1]} attempts</span></div>${bar(track[1], Math.max(1, track[1]))}`
@@ -430,8 +430,11 @@ function renderAcademyPane(ad, selfUid) {
         <div class="card"><div class="h">Top learners</div>${topRows || `<div class="empty">No ranked learners yet.</div>`}</div>
       </div>
       <div class="card" style="margin-top:16px"><div class="h">Weakest skill (needs attention)</div>${weakRow}</div>
-      <div class="card" style="margin-top:16px"><div class="h">Engineering DNA <span class="badge b-accent">drill-down</span></div>
-        <div class="empty">Use <b>!academy evidence</b> in chat for a learner's full evidence report, or view your DNA with <b>!dna</b>.</div>
+      <div class="card" style="margin-top:16px"><div class="h">Engineering DNA <span class="badge b-accent">${profile?.uid === selfUid ? "you" : profile?.uid?.split("@")[0] || "learner"}</span></div>
+        ${profile && profile.dna.length ? profile.dna.map((c) => `<div class="row"><span class="k">${c.cluster}</span><span class="v">${c.score}%</span></div>${bar(c.score, 100, c.score >= 60 ? "var(--green)" : c.score >= 35 ? "var(--amber)" : "var(--red)")}`).join("") : `<div class="empty">No DNA yet — start !academy.</div>`}
+        ${profile?.career ? `<div class="row"><span class="k">Best-fit</span><span class="v">${profile.career.emoji} ${profile.career.role} (${profile.career.fit}%)</span></div>` : ""}
+        ${profile?.roadmapList && profile.roadmapList.length ? `<div class="row"><span class="k">Next</span><span class="v">${profile.roadmapList.slice(0, 4).join(", ")}</span></div>` : ""}
+        <div class="feed-item" style="margin-top:8px"><div class="feed-ico">🧬</div><div class="feed-body"><div class="m">Full evidence via <b>!academy evidence</b> in chat.</div></div></div>
       </div>
     </div>`;
 }
@@ -820,10 +823,11 @@ router.get("/", checkAuth, (req, res) => {
     const ad = tel.academyData();
     const id = tel.incidentData();
     const b = tel.brainData();
+    const profile = tel.learnerProfile(selfUid);
     const active = d.activeMissions[0] || d.missions[0];
     let content = renderLiveStrip(ls);
     content += renderAnalyticsPane(a);
-    content += renderAcademyPane(ad, selfUid);
+    content += renderAcademyPane(ad, selfUid, profile);
     content += renderIncidentsPane(id);
     content += renderBrainPane(b);
     content += `

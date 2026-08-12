@@ -22,7 +22,25 @@ function isNSFWEnabled(chatId) {
 // ── Multi-source image resolver ────────────────────────────────
 // Try each source for a category in order; return the first image URL that
 // resolves, else null. Each source maps category -> its own URL path.
+//
+// nekoobot.xyz is the workhorse — it covers the categories waifu.pics used to
+// (hentai, ass, feet, paizuri, blowjob, etc). The others are fallbacks.
+const NEKOBOT_MAP = {
+  hentai: "hentai", ass: "ass", feet: "feet", paizuri: "paizuri",
+  blowjob: "blowjob", neko: "neko", thigh: "thigh", boobs: "boobs",
+  anal: "hentai_anal", yuri: "gonewild", milf: "hentai",
+  oral: "blowjob", ero: "hneko", trap: "hkitsune", smallboobs: "boobs",
+  cum: "pgif", spank: "gonewild", waifu: "neko",
+};
 const SOURCES = [
+  // nekoobot.xyz: JSON { success, message: "url" }. Broad NSFW coverage.
+  {
+    supports: (cat) => !!NEKOBOT_MAP[cat],
+    async url(cat) {
+      const r = await axios.get(`https://nekobot.xyz/api/image?type=${NEKOBOT_MAP[cat]}`, { timeout: 10000 });
+      return r.data?.success ? r.data.message : null;
+    },
+  },
   // nekos.life: simple JSON { url } — works for waifu + neko.
   {
     supports: (cat) => ["waifu", "neko"].includes(cat),

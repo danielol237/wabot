@@ -37,6 +37,7 @@ function recommend(uid, { currentTrack, currentLevel, currentSkill } = {}) {
       type: "recall",
       reason: `You haven't touched *${rusty.skill}* in ~${days}d and it's fading (${Math.round(rusty.strength)}/100 strength). Let's re-drill it before you forget it.`,
       skill: rusty.skill,
+      action: `Drill ${rusty.skill} with a coding challenge or explain it back with !explain ${rusty.skill}`,
       confidence: rusty.confidence,
       strength: Math.round(rusty.strength),
     };
@@ -59,6 +60,7 @@ function recommend(uid, { currentTrack, currentLevel, currentSkill } = {}) {
         type: "prerequisite",
         reason: `You're struggling with *${targetSkill}*, but your real gap is *${root.skill}* (${root.confidence ?? "unassessed"}% confidence). Let's lock that in first.`,
         skill: root.skill,
+        action: `Do a ${root.skill} coding challenge (!academy) or explain it (!explain ${root.skill})`,
         drillTarget: targetSkill,
         chain: d.chain.map((c) => c.skill),
       };
@@ -68,6 +70,7 @@ function recommend(uid, { currentTrack, currentLevel, currentSkill } = {}) {
         type: "drill",
         reason: `Let's drill *${targetSkill}* — you're at ${root.confidence ?? 0}% confidence.`,
         skill: targetSkill,
+        action: `Do the ${targetSkill} quiz/challenge in !academy, or !duel a ${targetSkill} problem`,
       };
     }
   }
@@ -75,7 +78,7 @@ function recommend(uid, { currentTrack, currentLevel, currentSkill } = {}) {
   // 2. No strong prerequisite signal → drill the weakest weak skill directly.
   if (weak.length) {
     const w = weak[0];
-    return { type: "drill", reason: `Let's strengthen *${w.name}* (${w.confidence}%).`, skill: w.name };
+    return { type: "drill", reason: `Let's strengthen *${w.name}* (${w.confidence}%).`, skill: w.name, action: `Try a ${w.name} challenge or !explain ${w.name}` };
   }
 
   // 3. Otherwise continue progression, or advance a mastered level.

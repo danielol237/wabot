@@ -271,25 +271,55 @@ function diagnosisView(chatId) {
   };
 }
 
-// Grade the diagnosis. Returns { correct, verdict }.
-function gradeDiagnosis(inc, answer) {
+// Deterministic token guardrail (used when AI unavailable). This is the
+// UNDERLYING check — the AI semantic path runs first when the provider is up.
+function gradeTokenMatch(inc, answer, target) {
   const a = String(answer).toLowerCase();
-  // Match on key tokens of the root cause.
-  const tokens = inc.rootCause.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 3);
+  const tokens = String(target).toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 3);
   const matched = tokens.filter((t) => a.includes(t)).length;
   const ratio = matched / tokens.length;
   return { correct: ratio >= 0.4, score: ratio };
 }
 
-function gradeFix(inc, answer) {
-  const a = String(answer).toLowerCase();
-  const tokens = inc.correctFix.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 3);
-  const matched = tokens.filter((t) => a.includes(t)).length;
-  const ratio = matched / tokens.length;
-  return { correct: ratio >= 0.4, score: ratio };
+const INCIDENT_GRADER_PROMPT = `You are an SRE on-call grading a junior engineer's incident response. The engineer states a root-cause diagnosis and a fix. Determine if they're technically CORRECT, even if their wording differs from the official answer. Be lenient on wording, strict on technical correctness. Return ONLY JSON:
+{"correct": true|false, "score": 0-100, "reason": "one line"}`;
+
+// Semantic AI grading with deterministic fallback. Returns { correct, score }.
+async function gradeDiagnosis(inc, answer) {
+  const guard = gradeTokenMatch(inc, answer, inc.rootCause);
+  try {
+    const { getAIResponse } = require("../ai");
+    const res = await getAIResponse(
+      `Official root cause: ${inc.rootCause}\n\nEngineer's diagnosis: "${String(answer).slice(0, 1200)}"\n\nIs the engineer's diagnosis technically correct?`,
+      "Incident Grader", [], INCIDENT_GRADER_PROMPT
+    );
+    if (/ai reque|rate limit|❌|unavailable/i.test(String(res))) throw new Error("provider");
+    const m = String(res).trim().replace(/```json|```/gi, "").match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(m ? m[0] : res);
+    return { correct: !!parsed.correct, score: Number(parsed.score) || 0, ai: true };
+  } catch (e) {
+    return { correct: guard.correct, score: guard.score * 100, ai: false };
+  }
 }
 
-function handleReply(chatId, uid, input) {
+async function gradeFix(inc, answer) {
+  const guard = gradeTokenMatch(inc, answer, inc.correctFix);
+  try {
+    const { getAIResponse } = require("../ai");
+    const res = await getAIResponse(
+      `Official fix: ${inc.correctFix}\n\nEngineer's fix: "${String(answer).slice(0, 1200)}"\n\nIs the engineer's fix technically correct?`,
+      "Incident Grader", [], INCIDENT_GRADER_PROMPT
+    );
+    if (/ai reque|rate limit|❌|unavailable/i.test(String(res))) throw new Error("provider");
+    const m = String(res).trim().replace(/```json|```/gi, "").match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(m ? m[0] : res);
+    return { correct: !!parsed.correct, score: Number(parsed.score) || 0, ai: true };
+  } catch (e) {
+    return { correct: guard.correct, score: guard.score * 100, ai: false };
+  }
+}
+
+async function handleReply(chatId, uid, input) {
   const st = state.chats[chatId];
   if (!st || st.uid !== uid) return null;
 
@@ -304,8 +334,8 @@ function handleReply(chatId, uid, input) {
 
   if (st.step === "fix") {
     const inc = INCIDENTS.find((i) => i.id === st.inc);
-    const dg = gradeDiagnosis(inc, st.diagnosis);
-    const fx = gradeFix(inc, input.trim());
+    const dg = await gradeDiagnosis(inc, st.diagnosis);
+    const fx = await gradeFix(inc, input.trim());
     const elapsedMin = ((Date.now() - st.startedAt) / 60000).toFixed(1);
 
     // Record attempts for learner model.

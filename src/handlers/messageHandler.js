@@ -149,7 +149,7 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
       // Production incident simulator takes priority (free-form diagnosis/fix).
       const incident = require("../tools/academy/incidentSimulator");
       if (incident.hasActiveFlow(chatId)) {
-        const out = incident.handleReply(chatId, senderJid.split("@")[0], text.trim());
+        const out = await incident.handleReply(chatId, senderJid.split("@")[0], text.trim());
         if (out) { await react(sock, msg, "🚨"); return reply(sock, msg, out.text); }
       }
     } catch (_) {}

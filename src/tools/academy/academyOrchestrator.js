@@ -10,7 +10,7 @@ const path = require("path");
 const { lessonAt, allTrackOverviews, levelLessons, CURRICULUM_VERSION, LEVEL_DEFS } = require("./curriculumEngine");
 const { gradeQuiz, gradeChallenge, XP_QUIZ, XP_CHALLENGE } = require("./assessmentEngine");
 const { addXp, setMastery, getMastery, getStats } = require("./learnerModel");
-const { recomputeMastery, evidenceReport } = require("./evidenceEngine");
+const { recomputeMastery, evidenceReport, isEvidenceMastered } = require("./evidenceEngine");
 const { levelUpText } = require("./xpSystem");
 const { recommend } = require("./adaptiveTutor");
 const { startProject, projectView, hasActiveProject, handleProjectReply } = require("./projectWorkspace");
@@ -135,7 +135,22 @@ async function handleReply(chatId, uid, input) {
   if (st.step === "level") {
     const levels = Object.keys(LEVEL_DEFS);
     if (!Number.isFinite(n) || n < 1 || n > levels.length) return { text: `Reply with a number 1-${levels.length}.` };
-    st.level = levels[n - 1]; st.lessonIdx = 0; st.sectionIdx = 0; st.step = "lesson";
+    const requested = levels[n - 1];
+    // ── Prerequisite gating (#6): every prior level in this track must be
+    //    EVIDENCE-mastered (>=80) before advancing. No jumping straight to
+    //    advanced/pro and farming XP.
+    const priorIdx = levels.indexOf(requested);
+    const blocked = [];
+    for (let i = 0; i < priorIdx; i++) {
+      const prior = levels[i];
+      const m = isEvidenceMastered(st.uid, st.track, prior, 80);
+      if (!m) blocked.push({ level: prior, mastery: getMastery(st.uid, st.track, prior) });
+    }
+    if (blocked.length) {
+      const list = blocked.map((b) => `• ${LEVEL_DEFS[b.level]} ${b.level} — ${b.mastery}% mastery`).join("\n");
+      return { text: `🔒 *Prerequisite not met*\n\nTo start *${LEVEL_DEFS[requested]} ${requested}*, you must first demonstrate mastery (≥80%) in:\n${list}\n\nMastery comes from passing the quizzes, challenges, and projects in those levels — not just reading them.` };
+    }
+    st.level = requested; st.lessonIdx = 0; st.sectionIdx = 0; st.step = "lesson";
     // No XP for entering a level — XP must reward activity, not menu navigation.
     save();
     return renderLesson(chatId, 0);
@@ -211,7 +226,8 @@ async function handleAcademyCommand(sock, msg, args, ctx) {
   if (arg === "me" || arg === "stats") {
     const s = getStats(uid);
     const r = recommend(uid);
-    return reply(sock, msg, `📊 *Your academy stats*\nXP: *${s.xp}* · streak ${s.streak} · ${s.attempts} attempts\n\n🎯 ${r.reason}\n\n_Use \`!evidence <track> <level>\` to see the evidence behind any mastery._`);
+    const action = r.action ? `\n\n➡️ *Do this:* ${r.action}` : "";
+    return reply(sock, msg, `📊 *Your academy stats*\nXP: *${s.xp}* · streak ${s.streak} · ${s.attempts} attempts\n\n🎯 ${r.reason}${action}\n\n_Use \`!evidence <track> <level>\` to see the evidence behind any mastery._`);
   }
   if (arg === "evidence" || arg === "why") {
     const track = (Array.isArray(args) ? args[1] : "") || "";

@@ -138,6 +138,7 @@ function buildLearnerSpace(uid) {
   const space = {
     uid,
     identity: {
+      uid,
       name: profile.name || null,
       nickname: profile.nickname || null,
       xp: stats.xp,
@@ -158,4 +159,30 @@ function buildLearnerSpace(uid) {
   return space;
 }
 
-module.exports = { buildLearnerSpace, inferPace, inferBestTime, skillBreakdown, ariaInsights, recommendNext, engagement };
+// Chat-friendly text view of the Learner Space (for the !learner command).
+function learnerSpaceView(space) {
+  const id = space.identity;
+  const name = id.nickname || id.name || id.uid.split("@")[0];
+  const lines = [];
+  lines.push(`🧑‍🎓 *${name}* · ARIA Learner Space`);
+  lines.push(`Tier: *${id.tier}* · ${id.xp} XP · ${id.streak}d streak`);
+  if (space.pace) lines.push(`\n*How you learn:* ${space.pace.label} — ${space.pace.detail}`);
+  if (space.bestTime) lines.push(`Best time: ${space.bestTime.time} (${space.bestTime.share}% of sessions)`);
+
+  const strong = space.skills?.strong || [];
+  if (strong.length) lines.push(`\n*Strong in:* ${strong.map((s) => s.skill).join(", ")}`);
+  const focus = space.skills?.focus || [];
+  if (focus.length) lines.push(`*Needs focus:* ${focus.map((s) => s.skill).join(", ")}`);
+
+  lines.push("\n*ARIA's notes:*");
+  const notes = space.ariaNotes?.length ? space.ariaNotes.slice(0, 3) : [];
+  if (notes.length) {
+    for (const n of notes) lines.push(`💭 ${n.text}`);
+  } else {
+    lines.push("Start a lesson and I'll start learning you.");
+  }
+  if (space.next?.text) lines.push(`\n➡️ *Next:* ${space.next.text}`);
+  return lines.join("\n");
+}
+
+module.exports = { buildLearnerSpace, learnerSpaceView, inferPace, inferBestTime, skillBreakdown, ariaInsights, recommendNext, engagement };

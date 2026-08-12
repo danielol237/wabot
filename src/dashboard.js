@@ -491,7 +491,27 @@ function renderLearnerSpacePane(space, selfUid) {
       </div>
       <div class="card" style="margin-top:16px"><div class="h">➡️ What's next</div><div class="row"><span class="k">Recommendation</span><span class="v">${space.next.text}</span></div></div>
       <div class="card" style="margin-top:16px"><div class="h">ARIA's notes</div>${noteRows}</div>
-    </div>`;
+      <div class="card" style="margin-top:16px"><div class="h">💬 Tell this learner something (ARIA delivers)</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="ls-msg" placeholder="A note or encouragement for ${name}…" style="flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:10px;font-size:13px;outline:none">
+          <button class="qbtn" onclick="sendLearnerNote('${id.uid}')">Send ➤</button>
+        </div>
+        <div id="ls-msg-result" style="color:var(--faint);font-size:11px;margin-top:8px"></div>
+      </div>
+    </div>
+    <script>
+    async function sendLearnerNote(uid){
+      const txt=document.getElementById('ls-msg').value.trim();
+      const res=document.getElementById('ls-msg-result');
+      if(!txt){res.textContent='Enter a message first.';return;}
+      try{
+        const r=await fetch('/dashboard/api/learner-note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uid,text:txt,_csrf:CSRF})});
+        const j=await r.json();
+        if(r.ok){res.textContent='✅ Saved as an ARIA note for '+uid+'.';document.getElementById('ls-msg').value='';}
+        else res.textContent='❌ '+ (j.error||'failed');
+      }catch(e){res.textContent='❌ '+e.message;}
+    }
+    </script>`;
 }
 
 // Academy intelligence + learner drill-down.
@@ -922,6 +942,19 @@ router.get("/api/learner-space/:uid", checkAuth, (req, res) => {
   try {
     const { buildLearnerSpace } = require("./tools/academy/learnerSpace");
     return res.json(buildLearnerSpace(req.params.uid));
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// Add an ARIA note for a learner (auth-protected, CSRF-checked POST).
+router.post("/api/learner-note", checkAuth, (req, res) => {
+  try {
+    const { uid, text } = req.body || {};
+    if (!uid || !text) return res.status(400).json({ error: "uid and text required" });
+    const lm = require("./tools/academy/learnerModel");
+    lm.addAriaNote(String(uid), String(text).slice(0, 500), "manual");
+    return res.json({ ok: true });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }

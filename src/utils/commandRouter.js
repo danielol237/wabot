@@ -131,6 +131,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "level", aliases: ["xp", "rank"], category: "utility", description: "Your XP level, title, progress & breakdown", handler: handleLevel, ownerOnly: false });
   registerCommand({ name: "academyboard", aliases: ["lb", "aleaderboard"], category: "utility", description: "Global academy leaderboard by XP", handler: handleAcademyLeaderboard, ownerOnly: false });
   registerCommand({ name: "digest", aliases: ["learning", "weekly"], category: "utility", description: "Your weekly learning digest: !digest", handler: handleLearningDigest, ownerOnly: false });
+  registerCommand({ name: "learner", aliases: ["myspot", "learnerspace"], category: "utility", description: "Your ARIA Learner Space: !learner", handler: handleLearnerSpace, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -741,6 +742,14 @@ async function handleLearningDigest(sock, msg, args, ctx) {
   const days = parseInt((Array.isArray(args) ? args[0] : args) || "7", 10) || 7;
   const d = buildDigest(uid, { days });
   return reply(sock, msg, digestView(d, uid));
+}
+
+async function handleLearnerSpace(sock, msg, args, ctx) {
+  const { reply } = require("../utils/baileysHelpers");
+  const { buildLearnerSpace, learnerSpaceView } = require("../tools/academy/learnerSpace");
+  const uid = (ctx.senderJid || "").split("@")[0];
+  const space = buildLearnerSpace(uid);
+  return reply(sock, msg, learnerSpaceView(space));
 }
 
 // Fun handlers

@@ -48,3 +48,18 @@ test("learnerSpace: updateProfile + addAriaNote persist personalization", () => 
   assert.ok(Array.isArray(p.ariaNotes) && p.ariaNotes.length === 1);
   cleanup();
 });
+
+test("learnerSpace: recordAttempt auto-generates ARIA notes", () => {
+  const lm = require("../src/tools/academy/learnerModel");
+  const ls = require("../src/tools/academy/learnerSpace");
+  const uid = "LS-AUTONOTE-" + Date.now();
+  lm.recordAttempt(uid, { track: "js", level: "beginner", lessonId: "x", sectionType: "quiz", correct: false, skill: "closures" });
+  lm.recordAttempt(uid, { track: "js", level: "beginner", lessonId: "x", sectionType: "quiz", correct: false, skill: "closures" });
+  const s = ls.buildLearnerSpace(uid);
+  assert.ok(s.ariaNotes.some((n) => n.tag === "first"), "records first-step note");
+  assert.ok(s.ariaNotes.some((n) => n.tag === "focus"), "records weak-skill note");
+  const view = ls.learnerSpaceView(s);
+  assert.ok(view.includes("Learner Space"), "!learner view renders");
+  assert.ok(view.includes("closures"), "view mentions the weak skill");
+  cleanup();
+});

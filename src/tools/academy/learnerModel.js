@@ -95,6 +95,7 @@ function addAriaNote(uid, text, tag = "insight") {
 // (e.g. "async", "sql-joins") so the tutor can reason about strengths/weaknesses.
 function recordAttempt(uid, { track, level, lessonId, sectionType, correct, skill }) {
   const l = learner(uid);
+  const wasFirst = l.attempts.length === 0;
   l.attempts.push({ ts: Date.now(), track, level, lessonId, sectionType, correct, skill });
   if (l.attempts.length > 400) l.attempts = l.attempts.slice(-400); // bound memory
 
@@ -106,6 +107,23 @@ function recordAttempt(uid, { track, level, lessonId, sectionType, correct, skil
     l.skills[skill] = s;
     if (!correct) l.misconceptions[skill] = (l.misconceptions[skill] || 0) + 1;
   }
+  // ── Auto-generate ARIA's notes as the learner grows ─────────
+  // Lightweight, data-driven observations captured at meaningful moments so the
+  // Learner Space "notes" feel like ARIA has been paying attention.
+  l.profile = l.profile || {};
+  l.profile.ariaNotes = l.profile.ariaNotes || [];
+  if (wasFirst) {
+    l.profile.ariaNotes.push({ ts: Date.now(), tag: "first", text: `${track || ""} ${level || ""} — the first step. I'm watching their path now.` });
+  }
+  if (skill && l.skills[skill]) {
+    const conf = l.skills[skill].confidence;
+    if (conf >= 80 && l.skills[skill].total >= 2) {
+      l.profile.ariaNotes.push({ ts: Date.now(), tag: "strength", text: `${skill} clicked — they're confident in it (${conf}%).` });
+    } else if (conf <= 40 && l.skills[skill].total >= 2) {
+      l.profile.ariaNotes.push({ ts: Date.now(), tag: "focus", text: `${skill} is a consistent struggle (${conf}%). Worth drilling together.` });
+    }
+  }
+  if (l.profile.ariaNotes.length > 40) l.profile.ariaNotes = l.profile.ariaNotes.slice(-40);
   save();
 }
 

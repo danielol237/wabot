@@ -4,8 +4,17 @@
 async function isBotAdmin(sock, groupId) {
   try {
     const metadata = await sock.groupMetadata(groupId);
-    const botNumber = sock.user.id.split(":")[0].split("@")[0];
-    const botParticipant = metadata.participants.find((p) => p.id.split("@")[0] === botNumber);
+    // Robustly extract the bot's number. Baileys sock.user.id can be
+    // "phone@s.whatsapp.net" or "phone:device@s.whatsapp.net". Handle sock.user
+    // being undefined and normalize both sides before comparing.
+    const rawId = sock?.user?.id;
+    if (!rawId) return false;
+    const botNumber = String(rawId).split(":")[0].split("@")[0];
+    if (!botNumber) return false;
+    const botParticipant = metadata.participants.find((p) => {
+      const pid = String(p?.id || "").split(":")[0].split("@")[0];
+      return pid === botNumber;
+    });
     return botParticipant?.admin === "admin" || botParticipant?.admin === "superadmin";
   } catch (err) {
     console.error("isBotAdmin check failed:", err.message);
@@ -28,6 +37,15 @@ async function isSenderAdmin(sock, groupId, senderJid) {
 async function kickUser(sock, groupId, targetJid) {
   try {
     await sock.groupParticipantsUpdate(groupId, [targetJid], "remove");
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function addUser(sock, groupId, targetJid) {
+  try {
+    await sock.groupParticipantsUpdate(groupId, [targetJid], "add");
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -99,6 +117,7 @@ module.exports = {
   isBotAdmin,
   isSenderAdmin,
   kickUser,
+  addUser,
   promoteUser,
   demoteUser,
   getAllParticipants,

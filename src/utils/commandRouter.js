@@ -6,7 +6,7 @@
 const axios = require("axios");
 const fs = require("fs");
 const { getStats, getRecentErrors, logError, broadcastToAll } = require("../tools/botAdmin");
-const { isBotAdmin, isSenderAdmin, kickUser, promoteUser, demoteUser, tagAll, hideTag } = require("../tools/groupAdmin");
+const { isBotAdmin, isSenderAdmin, kickUser, addUser, promoteUser, demoteUser, tagAll, hideTag } = require("../tools/groupAdmin");
 const { getGroupSettings, setAntilink, setWelcome, setWelcomeMessage, setLeaveMessage, addWarning, resetWarnings, getWarnings } = require("../utils/groupSettings");
 const { getJoke, getTruth, getDare, getWouldYouRather, getRoast, getShipPercentage, getShipEmoji } = require("../tools/funGames");
 const { startTicTacToe, playTicTacToe, hasActiveGame, endGame, rollDice, flipCoin } = require("../tools/simpleGames");
@@ -97,6 +97,7 @@ function registerBuiltinCommands() {
 
   // Group admin
   registerCommand({ name: "kick", aliases: ["remove"], category: "group", description: "Kick a member", handler: handleKick, ownerOnly: false });
+  registerCommand({ name: "add", aliases: ["invite", "addmember"], category: "group", description: "Add a member to the group by number: !add <number>", handler: handleAddMember, ownerOnly: false });
   registerCommand({ name: "promote", aliases: ["prom"], category: "group", description: "Promote a member to admin", handler: handlePromote, ownerOnly: false });
   registerCommand({ name: "demote", aliases: ["dem"], category: "group", description: "Demote an admin", handler: handleDemote, ownerOnly: false });
   registerCommand({ name: "tagall", aliases: ["everyone", "all"], category: "group", description: "Tag all group members", handler: handleTagAll, ownerOnly: false });
@@ -495,6 +496,26 @@ async function handleKick(sock, msg, args, ctx) {
   await react(sock, msg, "👢");
   if (result?.success === false) await reply(sock, msg, `❌ Kick failed: ${result.error}`);
   else await reply(sock, msg, "👢 User kicked.");
+}
+
+async function handleAddMember(sock, msg, args, ctx) {
+  const { reply, react, getTargetJid } = require("./baileysHelpers");
+  if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  // Require the caller to be the owner or a real group admin (adding members is
+  // a group-mod action; the router's category="group" already checks admin).
+  let target = getTargetJid(msg);
+  // Support `!add <number>` (with or without country code / separators).
+  if (!target) {
+    const raw = (Array.isArray(args) ? args.join("") : String(args || "")).replace(/[^\d]/g, "");
+    if (raw && raw.length >= 8) {
+      target = raw + "@s.whatsapp.net";
+    }
+  }
+  if (!target) return reply(sock, msg, "Usage: !add <number>  (or mention/quote the person).");
+  const result = await addUser(sock, ctx.chatId, target);
+  await react(sock, msg, "➕");
+  if (result?.success === false) await reply(sock, msg, `❌ Add failed: ${result.error}`);
+  else await reply(sock, msg, `➕ Added ${target.split("@")[0]}.`);
 }
 
 async function handlePromote(sock, msg, args, ctx) {

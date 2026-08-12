@@ -1,2 +1,0 @@
-#!/bin/sh
-echo "$ARIA_SESSION_TOKEN"

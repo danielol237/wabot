@@ -25,13 +25,29 @@ jobs:
 
       - name: Lint-free syntax check
         run: |
-          for f in src/index.js src/dashboard.js src/tools/ai.js \
-                   src/tools/dashboardTelemetry.js src/utils/commandRouter.js \
-                   src/handlers/messageHandler.js \
-                   src/tools/academy/*.js; do
-            node --check "$f" || exit 1
-          done
+          # Syntax-check EVERY JavaScript file in the repo (not just a curated
+          # subset). This catches a broken module the moment it's committed.
+          fail=0
+          while IFS= read -r f; do
+            node --check "$f" || { echo "SYNTAX ERROR: $f"; fail=1; }
+          done < <(git ls-files '*.js')
+          if [ "$fail" -ne 0 ]; then exit 1; fi
           echo "All syntax checks passed."
+
+      - name: Load-test every module (import smoke)
+        run: |
+          # Require every tool/handler module once to catch circular/load-time
+          # errors. Skip entrypoints that start servers/network (index.js,
+          # dashboard.js, server.js) which would hang the CI job.
+          fail=0
+          while IFS= read -r f; do
+            case "$f" in
+              *src/index.js|*src/dashboard.js|*src/server.js|*src/templates/*) continue ;;
+            esac
+            node -e "require('$f')" 2>/dev/null || { echo "LOAD FAIL: $f"; fail=1; }
+          done < <(git ls-files 'src/*.js' 'src/**/*.js')
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "All modules loaded."
 
       - name: Run academy + dashboard test suite
         run: npm test

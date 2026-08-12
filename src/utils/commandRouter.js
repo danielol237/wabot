@@ -128,7 +128,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "dna", aliases: ["roadmap", "career", "profile"], category: "utility", description: "Engineering DNA + career roadmap over your learner model", handler: handleDna, ownerOnly: false });
   registerCommand({ name: "company", aliases: ["startup", "ceo"], category: "utility", description: "Company simulator: run a software company on your real skills", handler: handleCompany, ownerOnly: false });
   registerCommand({ name: "level", aliases: ["xp", "rank"], category: "utility", description: "Your XP level, title, progress & breakdown", handler: handleLevel, ownerOnly: false });
-  registerCommand({ name: "leaderboard", aliases: ["lb", "top"], category: "utility", description: "Global academy leaderboard by XP", handler: handleLeaderboard, ownerOnly: false });
+  registerCommand({ name: "academyboard", aliases: ["lb", "aleaderboard"], category: "utility", description: "Global academy leaderboard by XP", handler: handleAcademyLeaderboard, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -171,7 +171,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "daily", aliases: [], category: "fun", description: "Claim daily reward", handler: handleDaily, ownerOnly: false });
   registerCommand({ name: "inventory", aliases: ["inv", "cards"], category: "fun", description: "View card inventory", handler: handleInventory, ownerOnly: false });
   registerCommand({ name: "sell", aliases: [], category: "fun", description: "Sell a card", handler: handleSell, ownerOnly: false });
-  registerCommand({ name: "leaderboard", aliases: ["lb", "top"], category: "fun", description: "View card leaderboard", handler: handleLeaderboard, ownerOnly: false });
+  registerCommand({ name: "cardboard", aliases: ["cboard", "carlb"], category: "fun", description: "View card leaderboard", handler: handleCardLeaderboard, ownerOnly: false });
 
   // Pokémon Spawn
 
@@ -306,7 +306,7 @@ async function routeMessage(sock, msg, context) {
           }
         }
         try {
-          try { require("./tools/dashboardTelemetry").record("command", { detail: cmd.name }); } catch (_) {}
+          try { require("../tools/dashboardTelemetry").record("command", { detail: cmd.name }); } catch (_) {}
           await cmd.handler(sock, msg, args, context);
           try { require("./eventLog").track("command", cmd.name + (args ? " " + args.slice(0, 40) : "")); } catch (_) {}
         } catch (err) {
@@ -689,7 +689,7 @@ async function handleLevel(sock, msg, args, ctx) {
   return reply(sock, msg, xpView(uid));
 }
 
-async function handleLeaderboard(sock, msg, args, ctx) {
+async function handleAcademyLeaderboard(sock, msg, args, ctx) {
   const { reply } = require("../utils/baileysHelpers");
   const { leaderboardView } = require("../tools/academy/xpSystem");
   const selfUid = (ctx.senderJid || "").split("@")[0];
@@ -827,7 +827,7 @@ async function handleSell(sock, msg, args, ctx) {
   await reply(sock, msg, sellCard(ctx.senderJid, cardId));
 }
 
-async function handleLeaderboard(sock, msg, args, ctx) {
+async function handleCardLeaderboard(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   await reply(sock, msg, getLeaderboard());
 }

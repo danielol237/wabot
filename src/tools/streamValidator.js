@@ -42,7 +42,21 @@ async function probeHttp(candidate) {
     for (const [k, v] of Object.entries(candidate.headers)) if (!headers[k]) headers[k] = v;
   }
   try {
-    const res = await axios.get(url, { headers, timeout: 12000, maxRedirects: 5, validateStatus: () => true, responseType: "arraybuffer" });
+    // Use a streaming request and abort after the first bytes so a server that
+    // IGNORES the Range header (returns 200 + the entire file) doesn't make us
+    // buffer a hundreds-of-MB MP4 into memory. We only need status + headers,
+    // which are available before the body is consumed.
+    const res = await axios.get(url, {
+      headers,
+      timeout: 12000,
+      maxRedirects: 5,
+      validateStatus: () => true,
+      responseType: "stream",
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
+    // Destroy the stream immediately — we only inspect status + response headers.
+    if (res.data && typeof res.data.destroy === "function") res.data.destroy();
     const status = res.status;
     const ct = String(res.headers["content-type"] || "");
     const cl = res.headers["content-length"];
@@ -58,8 +72,18 @@ async function probeHttp(candidate) {
 }
 
 // Step 3: yt-dlp extraction probe — can it resolve the URL to a format?
-async function probeYtdlp(url) {
-  const r = await exec("yt-dlp", ["-J", "--no-download", "--skip-download", url], 45000);
+async function probeYtdlp(url, candidate) {
+  const args = ["-J", "--no-download", "--skip-download"];
+  if (candidate?.headers) {
+    for (const [k, v] of Object.entries(candidate.headers)) {
+      if (k.toLowerCase() === "referer") args.push("--referer", v);
+      else if (k.toLowerCase() === "user-agent") args.push("--user-agent", v);
+      else if (k.toLowerCase() === "origin") args.push("--add-header", `Origin:${v}`);
+      else args.push("--add-header", `${k}:${v}`);
+    }
+  }
+  args.push(url);
+  const r = await exec("yt-dlp", args, 45000);
   if (r.err) {
     // yt-dlp returns a non-zero exit + JSON on stderr when it can't extract.
     let reason = "yt-dlp extraction failed";
@@ -83,14 +107,16 @@ async function probeYtdlp(url) {
 }
 
 // Step 4: ffprobe the stream — confirm a real video stream + duration.
-async function probeFfprobe(url) {
-  const r = await exec("ffprobe", [
+async function probeFfprobe(url, candidate) {
+  const args = [
     "-v", "error",
     "-select_streams", "v:0",
     "-show_entries", "stream=codec_type,width,height,codec_name:format=duration",
     "-of", "json",
-    url,
-  ], 45000);
+  ];
+  if (candidate?.headers?.Referer) args.push("-headers", `Referer: ${candidate.headers.Referer}\r\n`);
+  args.push(url);
+  const r = await exec("ffprobe", args, 45000);
   if (r.err) return { ok: false, reason: "ffprobe failed: " + String(r.stderr).slice(0, 200) };
   try {
     const j = JSON.parse(r.stdout);
@@ -126,14 +152,14 @@ async function validateCandidate(candidate) {
   }
 
   // 3. yt-dlp extraction probe (authoritative for both hls + direct)
-  const yt = await probeYtdlp(url);
+  const yt = await probeYtdlp(url, candidate);
   out.steps.push({ name: "yt-dlp", ok: yt.ok, detail: yt.ok ? `${yt.formats} formats` : yt.reason });
   if (!yt.ok) { out.ok = false; out.reason = "yt-dlp cannot extract: " + yt.reason; return out; }
 
   // 4. ffprobe stream check — confirm real video, get dimensions/duration.
   //    Skip for HLS if it's slow; direct MP4 we always probe.
   if (!isHls) {
-    const ff = await probeFfprobe(url);
+    const ff = await probeFfprobe(url, candidate);
     out.steps.push({ name: "ffprobe", ok: ff.ok, detail: ff.ok ? `${ff.width}x${ff.height} · ${ff.codec}` : ff.reason });
     if (!ff.ok) { out.ok = false; out.reason = "ffprobe rejected stream: " + ff.reason; return out; }
     out.width = ff.width; out.height = ff.height; out.codec = ff.codec; out.duration = ff.duration;

@@ -48,7 +48,10 @@ function decryptAjax(data) {
   // The payload is base64-encoded AES-CBC ciphertext with static key+iv.
   try {
     const key = Buffer.from(GOGO_SECRET, "utf8");
-    const iv = Buffer.from(GOGO_SECOND_SECRET, "utf8");
+    // AES-256-CBC requires a 16-byte IV. GOGO_SECOND_SECRET is 20 bytes when
+    // taken as a raw UTF-8 buffer, which crypto.createDecipheriv rejects with a
+    // RangeError that sent the whole resolve into the catch → null. Slice to 16.
+    const iv = Buffer.from(GOGO_SECOND_SECRET, "utf8").subarray(0, 16);
     const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
     decipher.setAutoPadding(true);
     const buf = Buffer.concat([decipher.update(Buffer.from(ct, "base64")), decipher.final()]);

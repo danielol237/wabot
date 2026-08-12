@@ -519,7 +519,8 @@ async function runJob(job) {
     }
 
     const src = report.selected;
-    step("resolver", "selected", true, `${src.provider} · ${src.type}${src.height ? ` · ${src.height}p` : ""}${src.codec ? ` · ${src.codec}` : ""}${src.duration ? ` · ${Number(src.duration).toFixed(0)}s` : ""} · score ${src.score}`);
+    const retryOrder = (report.ranked && report.ranked.length) ? report.ranked : [src];
+    step("resolver", "selected", true, `${src.provider} · ${src.type}${src.height ? ` · ${src.height}p` : ""}${src.codec ? ` · ${src.codec}` : ""}${src.duration ? ` · ${Number(src.duration).toFixed(0)}s` : ""} · score ${src.score} · ${retryOrder.length} validated fallback(s)`);
     // Persist the last resolver report on the job for the dashboard Sources pane.
     job.resolver = {
       canonical: report.canonical,
@@ -533,29 +534,56 @@ async function runJob(job) {
     // ── DOWNLOAD the validated candidate ──
     const isWhatsAppJob = !!(job.sock && job.chatId);
     const dlCap = isWhatsAppJob ? WHATSAPP_MAX_MB : MAX_DOWNLOAD_MB;
-    step(src.provider, "download", true, `fetching${job.quality && job.quality !== "best" ? " (" + job.quality + "p)" : ""}…`);
-    const dl = await downloadStream(job, src.url, src.headers, dlCap, job.quality || "best", onProgress);
-    job.progress = null;
-    if (!dl.success) {
-      const fe = jobError("DOWNLOAD_FAILED", src.provider, "download", dl.error || "yt-dlp failed", true);
-      step(src.provider, "download", false, fe.message);
+
+    // Try each validated candidate in rank order. If the top download fails,
+    // fall through to the next validated candidate instead of giving up.
+    let dl = null;
+    let lastDlError = null;
+    let dlCandidate = null;
+    for (let i = 0; i < retryOrder.length; i++) {
+      const cand = retryOrder[i];
+      const isFirst = i === 0;
+      if (!isFirst) {
+        step(cand.provider, "retry", true, `falling back to validated candidate #${i + 1} (rank ${cand.score})`);
+        send(`🔄 *${job.name}* Ep ${job.episode} — top source failed, retrying validated ${cand.provider}…`);
+      }
+      step(cand.provider, "download", true, `fetching${job.quality && job.quality !== "best" ? " (" + job.quality + "p)" : ""}${cand.height ? ` · ${cand.height}p` : ""}…`);
+      dl = await downloadStream(job, cand.url, cand.headers, dlCap, job.quality || "best", onProgress);
+      job.progress = null;
+      if (dl.success) {
+        dlCandidate = cand;
+        step(cand.provider, "validate", true, `${(dl.size / 1024 / 1024).toFixed(1)} MB`);
+        break;
+      }
+      lastDlError = dl.error || "yt-dlp failed";
+      const fe = jobError("DOWNLOAD_FAILED", cand.provider, "download", lastDlError, true);
+      step(cand.provider, "download", false, fe.message);
       job.failures.push(fe);
+      // Reputation: mark this candidate's provider for the failed download.
+      try { require("./sourceReputation").record(cand.provider, "download", false, { error: lastDlError }); } catch (_) {}
+      dl = null;
+    }
+
+    if (!dl) {
+      const fe = jobError("DOWNLOAD_FAILED", retryOrder[0]?.provider || src.provider, "download", lastDlError || "all validated sources failed", true);
       job.status = "failed";
       job.finishedAt = Date.now();
       job.error = fe;
       emit(job);
+      send(`❌ Download failed for *${job.name}* Ep ${job.episode} after trying all ${retryOrder.length} validated source(s): ${lastDlError || "unknown"}`);
       return job;
     }
-    step(src.provider, "validate", true, `${(dl.size / 1024 / 1024).toFixed(1)} MB`);
+    // The successful candidate may differ from the initially-selected one.
+    const dlProvider = dlCandidate?.provider || src.provider;
 
     job.result = {
       filePath: dl.filePath,
       size: dl.size,
-      url: src.url,
-      provider: src.provider,
-      type: src.type,
-      quality: src.quality,
-      title: src.title || job.name,
+      url: dlCandidate?.url || src.url,
+      provider: dlProvider,
+      type: dlCandidate?.type || src.type,
+      quality: dlCandidate?.quality || src.quality,
+      title: dlCandidate?.title || src.title || job.name,
     };
 
     if (!job.sock || !job.chatId) {

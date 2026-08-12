@@ -167,12 +167,23 @@ async function handleReply(chatId, uid, input) {
 
     // Quiz answer
     if (section?.type === "quiz" && /^[a-d]$/i.test(input.trim())) {
+      // Anti-farming (#fix): only award XP the FIRST time this quiz section is
+      // answered correctly. Repeated correct answers (A A A A) used to grant XP
+      // every time because nothing marked the section as answered.
+      const alreadyAnswered = !!(st.answeredSections?.[lesson.id] || []).includes(st.sectionIdx);
       const g = gradeQuiz(st.uid, {
         track: st.track, level: st.level, lessonId: lesson.id, skill: lesson.skill,
       }, section, input.trim());
-      const up = g.correct ? addXp(st.uid, g.xp, "Quiz") : null;
-      const exp = g.correct ? `✅ Correct! +${g.xp} XP` : `❌ ${g.explanation || "Try again."}`;
-      return { text: `${exp}${levelUpText(up)}\n\n▸ reply *next* to continue` };
+      if (g.correct) {
+        st.answeredSections = st.answeredSections || {};
+        st.answeredSections[lesson.id] = st.answeredSections[lesson.id] || [];
+        if (!st.answeredSections[lesson.id].includes(st.sectionIdx)) st.answeredSections[lesson.id].push(st.sectionIdx);
+        save();
+        const up = alreadyAnswered ? null : addXp(st.uid, g.xp, "Quiz");
+        const exp = alreadyAnswered ? "✅ Correct (already answered)" : `✅ Correct! +${g.xp} XP`;
+        return { text: `${exp}${levelUpText(up)}\n\n▸ reply *next* to continue` };
+      }
+      return { text: `❌ ${g.explanation || "Try again."}\n\n▸ reply *next* to continue` };
     }
 
     if (/next|continue/i.test(input)) return nextSection(chatId);
@@ -219,6 +230,12 @@ async function handleAcademyCommand(sock, msg, args, ctx) {
   const overviews = allTrackOverviews();
   const match = overviews.find((t) => t.id === arg || t.name.toLowerCase() === arg);
   if (match) {
+    // Anti-collision (#fix): in a group, don't let a second learner clobber an
+    // active session owned by someone else. They get a clear message instead.
+    const existing = state.chats[ctx.chatId];
+    if (existing && existing.step && existing.uid !== uid) {
+      return reply(sock, msg, `🔒 *${allTrackOverviews().find((t) => t.id === existing.track)?.name || ""}* is already active in this chat (started by another member). Finish or *done* it before starting a new one here.`);
+    }
     state.chats[ctx.chatId] = { uid, step: "level", track: match.id };
     save();
     return reply(sock, msg, levelMenu(ctx.chatId));

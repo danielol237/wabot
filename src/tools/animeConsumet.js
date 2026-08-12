@@ -77,9 +77,13 @@ async function streamFromProvider(p, name, animeId, episodeNum, info) {
 
 // Get the direct stream URLs for an episode across providers.
 async function consumetEpisodeStream(animeId, episodeNum, providerName) {
+  // `providerName` is a PREFERENCE, not a hard pin: try it first, then fall back
+  // to the remaining providers if that specific one fails. Pinning alone broke
+  // the old fallback chain whenever the preferred provider was down.
+  const allProviders = ["AnimePahe", "Hianime", "AnimeKai", "AnimeUnity"];
   const providers = providerName
-    ? [providerName]
-    : ["AnimePahe", "Hianime", "AnimeKai", "AnimeUnity"];
+    ? [providerName, ...allProviders.filter((p) => p !== providerName)]
+    : allProviders;
 
   lastProviderErrors = [];
   const norm = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, "");

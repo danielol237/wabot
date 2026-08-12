@@ -188,6 +188,32 @@ test("incident: anime resolver-race scenario loads with correct schema", async (
   cleanup("incidentState.json", "learnerModel.json");
 });
 
+test("quiz: repeated correct answers award XP only once (anti-farming)", async () => {
+  const ac = require("../src/tools/academy/academyOrchestrator");
+  const { getStats } = require("../src/tools/academy/learnerModel");
+  const chat = "QF-" + Date.now();
+  const uid = "UQ-" + Date.now();
+  // Start html track, beginner level.
+  const s = ac.startFlow(chat, uid);
+  assert.ok(s.includes("ARIA Academy"), "track menu shows");
+  await ac.handleReply(chat, uid, "1"); // pick first track (html)
+  await ac.handleReply(chat, uid, "1"); // pick beginner level
+  // Jump to the Forms lesson (8) which has a quiz with answer C.
+  await ac.handleReply(chat, uid, "8");
+  // Section 0 = explanation → advance to the quiz section (index 1).
+  await ac.handleReply(chat, uid, "next");
+  const before = getStats(uid).xp;
+  const first = await ac.handleReply(chat, uid, "c");
+  const afterFirst = getStats(uid).xp;
+  assert.strictEqual(afterFirst, before + 15, "first correct quiz answer awards +15 XP");
+  assert.ok(first.text.includes("+15 XP"), "first reply shows XP award");
+  const second = await ac.handleReply(chat, uid, "c");
+  const afterSecond = getStats(uid).xp;
+  assert.strictEqual(afterSecond, afterFirst, "repeated correct answer must NOT award XP again");
+  assert.ok(/already answered/.test(second.text), "second reply notes it's already answered");
+  cleanup("academyState.json", "learnerModel.json");
+});
+
 test("company: backlog weighted to learner strengths; full loop runs", () => {
   const { recordAttempt } = require("../src/tools/academy/learnerModel");
   const cs = require("../src/tools/academy/companySimulator");

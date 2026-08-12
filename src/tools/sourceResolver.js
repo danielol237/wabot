@@ -163,7 +163,9 @@ async function discoverCandidates(title, episode) {
 // Score candidates: prefer validated, higher quality, healthier provider.
 // Uses ffprobe-reported height/codec when available (not just the claimed
 // quality label) so a 720p stream with real dimensions scores properly.
-function qualityRank(candidates, validations, preference) {
+// `preferredQuality` (e.g. "480") rewards candidates matching the requested
+// quality instead of always picking the highest-res validated stream.
+function qualityRank(candidates, validations, preference, preferredQuality) {
   const scored = candidates.map((c) => {
     const v = validations[c.url] || {};
     let s = 0;
@@ -180,6 +182,12 @@ function qualityRank(candidates, validations, preference) {
     const prov = rep.status(c.provider);
     s += prov.score * 0.3;             // provider reputation
     if (preference && c.provider === preference) s += 30; // user preference
+    // If a specific quality was requested, reward the closest match so we don't
+    // blindly pick 1080p when the user asked for 480p.
+    const pq = parseInt(preferredQuality, 10);
+    if (Number.isFinite(pq) && pq > 0) {
+      s += Math.max(0, 25 - Math.abs(height - pq) / 40); // 25 for exact match, less for off
+    }
     if (c.type === "mp4") s += 5;      // direct file slightly preferred over hls
     return { candidate: c, validation: v, score: s, height, codec: v.codec || null, duration: v.duration || null };
   }).sort((a, b) => b.score - a.score);
@@ -197,6 +205,12 @@ async function resolveEpisode(title, episode, { preference, quality } = {}) {
   report.confidence = canon.confidence || null;
   if (!canon.ok) {
     report.error = "canonical: " + canon.reason;
+    return report;
+  }
+  // Canonical episode validation: if metadata says the episode doesn't exist,
+  // do NOT proceed to source discovery — fail fast with a clear reason.
+  if (canon.confidence?.episodeExists === false) {
+    report.error = `episode ${episode} not in canonical episode list (${canon.canonical?.totalEpisodes ?? "?"} total)`;
     return report;
   }
 
@@ -222,7 +236,7 @@ async function resolveEpisode(title, episode, { preference, quality } = {}) {
   report.validation = Object.fromEntries(validationEntries.map(([u, v]) => [u, { ok: v.ok, reason: v.reason, steps: v.steps }]));
 
   // 4. Quality-route to the best validated candidate.
-  const ranked = qualityRank(disc.candidates, validations, preference);
+  const ranked = qualityRank(disc.candidates, validations, preference, quality);
   const selected = ranked.find((r) => r.validation.ok) || ranked[0];
   if (!selected.validation.ok) {
     report.error = "no candidate passed stream validation";
@@ -242,6 +256,22 @@ async function resolveEpisode(title, episode, { preference, quality } = {}) {
     duration: selected.duration,
     score: Math.round(selected.score),
   };
+  // Expose ALL validated candidates in ranked order so the downloader can retry
+  // the next-best candidate if the top one fails mid-download (instead of giving up).
+  report.ranked = ranked
+    .filter((r) => r.validation.ok)
+    .map((r) => ({
+      provider: r.candidate.provider,
+      url: r.candidate.url,
+      type: r.candidate.type,
+      quality: r.candidate.quality,
+      headers: r.candidate.headers,
+      title: r.candidate.title || title,
+      height: r.height,
+      codec: r.codec,
+      duration: r.duration,
+      score: Math.round(r.score),
+    }));
   rep.record(selected.candidate.provider, "download", true, {});
   return report;
 }

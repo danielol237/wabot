@@ -74,7 +74,11 @@ async function runSandboxed(code, lang, opts = {}) {
   ];
 
   return new Promise((resolve) => {
-    execFile("docker", dockerArgs, { timeout: (timeoutSec + 5) * 1000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    // `stdin` support (hidden-test harness): feed input to the program via
+    // execFile's `input` option, which writes it to the child's stdin.
+    const execOpts = { timeout: (timeoutSec + 5) * 1000, maxBuffer: 1024 * 1024 };
+    if (opts.stdin != null) execOpts.input = String(opts.stdin);
+    execFile("docker", dockerArgs, execOpts, (err, stdout, stderr) => {
       try { fs.unlinkSync(filePath); } catch (_) {}
       const output = (stdout || stderr || "").slice(0, 4000);
       if (err && err.killed) {

@@ -101,9 +101,17 @@ function runUnsafe(code, lang, opts = {}) {
 }
 
 // ── Main entry ────────────────────────────────────────────────
+// `strict` (used by the Academy assessment engine): refuse to run if Docker
+// isn't available rather than falling back to the unsandboxed executor.
+// Student code must never execute directly on the process that holds
+// WhatsApp/GitHub/DB credentials. The non-strict path keeps the timeout-only
+// fallback for owner-gated general use.
 async function runCode(code, lang = "js", opts = {}) {
   const available = await checkDocker();
   if (!available) {
+    if (opts.strict) {
+      return { success: false, output: "❌ Sandbox unavailable (no Docker). Code blocked for safety.", sandboxed: false, blocked: true };
+    }
     warn("Docker not available — running code UNSANDBOXED (timeout only).");
     return runUnsafe(code, lang, opts);
   }

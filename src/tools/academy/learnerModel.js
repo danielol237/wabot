@@ -104,4 +104,21 @@ function skillProfile(uid) {
   return { weak, strong, misconceptions };
 }
 
-module.exports = { recordAttempt, addXp, setMastery, getMastery, getStats, skillProfile, learner };
+// Confidence for a single skill (0-100) or undefined if never attempted.
+function skillConfidence(uid, skill) {
+  const s = learner(uid).skills[skill];
+  return s ? s.confidence : undefined;
+}
+
+// Mastery must reflect DEMONSTRATED competence (assessments passed), not XP.
+// Separate from the gamification XP counter. A learner's level is gated by
+// mastery, never by XP farming.
+function computeMastery(uid, track, level) {
+  // Placeholder — the orchestrator sets mastery on completion. This helper
+  // recomputes a % from passed assessments if we had per-lesson assessment
+  // records keyed to the track/level. Kept minimal; real gating lives in
+  // setMastery + the orchestrator's level-completion path.
+  return getMastery(uid, track, level);
+}
+
+module.exports = { recordAttempt, addXp, setMastery, getMastery, getStats, skillProfile, skillConfidence, computeMastery, learner };

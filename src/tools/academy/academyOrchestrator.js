@@ -11,6 +11,7 @@ const { lessonAt, allTrackOverviews, levelLessons, CURRICULUM_VERSION, LEVEL_DEF
 const { gradeQuiz, gradeChallenge, XP_QUIZ, XP_CHALLENGE } = require("./assessmentEngine");
 const { addXp, setMastery, getMastery, getStats } = require("./learnerModel");
 const { recommend } = require("./adaptiveTutor");
+const { startProject, projectView, hasActiveProject, handleProjectReply } = require("./projectWorkspace");
 
 const STATE_FILE = path.join(__dirname, "../../../data/academyState.json");
 
@@ -134,6 +135,9 @@ async function handleReply(chatId, uid, input) {
   }
 
   if (st.step === "lesson") {
+    // If a project is active in this chat, route replies to it first.
+    const pReply = handleProjectReply(chatId, st.uid, input);
+    if (pReply) return pReply;
     const { lesson } = lessonAt(st.track, st.level, st.lessonIdx);
     const sections = lesson.sections || [];
     const section = sections[st.sectionIdx || 0];
@@ -214,4 +218,18 @@ async function handleAcademyRun(sock, msg, args, ctx) {
   return reply(sock, msg, result.text);
 }
 
-module.exports = { hasActiveFlow, startFlow, handleReply, handleRun, handleAcademyCommand, handleAcademyRun, trackMenu, levelMenu };
+// Start a project: !project <track> <level>
+async function handleProjectCommand(sock, msg, args, ctx) {
+  const { reply } = require("../../utils/baileysHelpers");
+  const uid = (ctx.senderJid || "").split("@")[0];
+  const parts = (Array.isArray(args) ? args : String(args || "").split(/\s+/)).map((x) => x.toLowerCase());
+  const track = parts[0];
+  const level = parts[1];
+  const overviews = allTrackOverviews();
+  const match = overviews.find((t) => t.id === track || t.name.toLowerCase() === track);
+  if (!match || !level) return reply(sock, msg, "Usage: !project <track> <level>\nExample: !project backend intermediate");
+  const r = startProject(ctx.chatId, uid, match.id, level);
+  return reply(sock, msg, r.text);
+}
+
+module.exports = { hasActiveFlow, startFlow, handleReply, handleRun, handleAcademyCommand, handleAcademyRun, handleProjectCommand, trackMenu, levelMenu };

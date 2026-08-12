@@ -31,7 +31,13 @@ async function gradeChallenge(uid, { track, level, lessonId, skill }, code, chal
   let correct = false;
   let output = "";
   try {
-    const result = await runCode(code, runLang, { timeout: 5000 });
+    // Strict mode: academy student code MUST run in the Docker sandbox. If the
+    // sandbox is unavailable, the run is blocked (never executed unsandboxed on
+    // the process holding credentials) and graded as a fail with a clear note.
+    const result = await runCode(code, runLang, { timeout: 5000, strict: true });
+    if (result.blocked) {
+      return { correct: false, xp: 0, output: result.output, expected: String(challenge.expected ?? "").trim(), blocked: true };
+    }
     output = String(result?.output ?? result?.result ?? "").trim();
     const expected = String(challenge.expected ?? "").trim();
     // Expected empty means "must produce some output" OR exact match if provided.

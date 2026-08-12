@@ -14,10 +14,47 @@ const DEFAULT_SETTINGS = {
   maxRepeatedMsgs: 3,        // flood: same msg sent this many times in a row
   floodWindowMs: 5000,       // flood window in ms
   maxMsgsPerWindow: 5,       // max messages in flood window
+  scamLinkScan: true,        // heuristic scam-link detection
   autoWarn: true,
   autoKick: false,
   enabled: true,
 };
+
+// ── Heuristic scam/suspicious link scan ────────────────────────
+// Catches common scam patterns without an external reputation API:
+//   • Suspicious TLDs + giveaway/free-claim bait
+//   • URL shorteners (often used to hide phishing)
+//   • "you won / claim / free vbucks / gift card" bait next to a link
+//   • IP-address URLs (rare in legit links, common in phishing)
+const SCAM_HINTS = [
+  /you\s+won|claim\s+reward|gift\s+card|free\s+(vbucks|robux|nitro|iphone|prize)/i,
+  /earn\s+fast|crypto\s+giveaway|airdrop|double\s+your\s+(btc|eth|money)/i,
+  /verify\s+account|account\s+will\s+be\s+deleted|login\s+urgent/i,
+  /limited\s+time\s+offer|exclusive\s+deal|prize\s+claim/i,
+];
+const SHORTENER_RE = /(bit\.ly|t\.co|tinyurl|goo\.gl|is\.gd|buff\.ly|rb\.gy|shorturl|cutly|cutt\.ly|tiny\.cc|s\.link)/i;
+const SUSPICIOUS_TLDS = /\.(zip|mov|exe|scr|bin|apk|ru|cn|top|xyz|gq|ml|cf)([/\s]|$)/i;
+
+function scanLink(text) {
+  const hasLink = /(https?:\/\/|www\.)/i.test(text);
+  if (!hasLink) return null;
+
+  // Bait text + any link = classic scam.
+  if (SCAM_HINTS.some((r) => r.test(text))) {
+    return { action: "warn", reason: "Suspicious promo/claim link (possible scam)" };
+  }
+  // Shortener used with high-pressure bait, or on its own in a group.
+  const short = text.match(SHORTENER_RE);
+  if (short) {
+    return { action: "warn", reason: "Shortened link (bit.ly/t.co etc) — hide phishing" };
+  }
+  // Direct suspicious TLD.
+  const tld = text.match(SUSPICIOUS_TLDS);
+  if (tld) {
+    return { action: "warn", reason: `Suspicious link TLD (.${tld[1]})` };
+  }
+  return null;
+}
 
 // Get effective mod settings for a chat (merge with defaults)
 function getModSettings(chatId) {
@@ -42,6 +79,12 @@ function checkMessage(text, senderName, chatId) {
     if (linkRe.test(lower)) {
       return { action: "delete", reason: "Links are disabled in this group." };
     }
+  }
+
+  // 0b. Heuristic scam-link scan.
+  if (settings.scamLinkScan) {
+    const scam = scanLink(text);
+    if (scam) return { action: settings.autoKick ? "kick" : "warn", reason: scam.reason };
   }
 
   // 1. Banned words
@@ -111,4 +154,4 @@ function parseModArgs(args) {
   return null;
 }
 
-module.exports = { checkMessage, resetFloodTracker, parseModArgs, getModSettings };
+module.exports = { checkMessage, scanLink, resetFloodTracker, parseModArgs, getModSettings };

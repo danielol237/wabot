@@ -17,9 +17,9 @@ const { getLyrics } = require("../tools/lyricsSearch");
 const { searchWallpaper } = require("../tools/wallpaperSearch");
 const { searchAnime, searchAnimePahe, getAnimeEpisodes, getAnimeDetails, searchOmniSave } = require("../tools/animeDownload");
 const { checkMessage, parseModArgs } = require("../tools/autoMod");
-const { trackInteraction, getUserContext } = require("../utils/userMemory");
+const { trackInteraction } = require("../utils/userMemory");
 const { addPreference, getPreferences, clearPreferences } = require("../utils/userPreferences");
-const { learnFact, getFacts, forgetFact, getFactsContext } = require("../utils/learnedFacts");
+const { learnFact, getFacts, forgetFact } = require("../utils/learnedFacts");
 const { getMemory, saveMemory } = require("../utils/memory");
 const { isOwner, isAdmin, addAdmin, removeAdmin, listAdmins, banUser, unbanUser, isBanned, muteChat, unmuteChat, isMuted } = require("../utils/permissions");
 const { findPluginCommand } = require("../utils/pluginLoader");
@@ -2068,11 +2068,12 @@ async function handleAIResponse(sock, msg, text, ctx) {
     }
   }
 
-  // AI chat response
-  const userContext = getUserContext(ctx.senderJid);
+  // AI chat response. Memory is consolidated through the unified UserProfile
+  // service (audit #18) so the AI sees one coherent picture across all stores
+  // instead of a hand-grown concatenation.
+  const { buildUserContext } = require("../utils/userProfile");
+  const profileCtx = buildUserContext(ctx.senderJid, text);
   const memory = getMemory(ctx.chatId);
-  const preferences = getPreferences(ctx.senderJid);
-  const facts = getFactsContext(ctx.senderJid);
   
   // Owner gets special treatment — AI knows who built her
   const { isOwner } = require("../utils/permissions");
@@ -2093,8 +2094,7 @@ async function handleAIResponse(sock, msg, text, ctx) {
   const toneContext = tone !== "neutral" ? `\n[User tone: ${tone}] Match their energy naturally.` : "";
 
   // Semantic long-term memory: pull relevant memories + learned profile
-  const { getRelevantContext, getProfileContext, autoExtractMemory, learnCommunicationStyle } = require("../utils/semanticMemory");
-  const semanticContext = getRelevantContext(ctx.senderJid, text) + getProfileContext(ctx.senderJid);
+  const { autoExtractMemory, learnCommunicationStyle } = require("../utils/semanticMemory");
   // Media memory (images/voice ARIA has seen) — pulled into context for awareness.
   let mediaContext = "";
   try {
@@ -2104,15 +2104,12 @@ async function handleAIResponse(sock, msg, text, ctx) {
       mediaContext = "\n\n[Media I've seen/heard that's relevant:] " + mediaMem.map((m) => `(${m.kind}) ${m.summary}`).join(" | ");
     }
   } catch (_) {}
-  // World Model: inject the structured entity-relationship context
-  const { getWorldContext, extractFromMessage } = require("../utils/worldModel");
-  const worldContext = getWorldContext(ctx.senderJid);
   const personalizationContext = "\n\n[Personalization] Learn their name if they give it, match their communication style naturally, and remember important things they share.\n";
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: userContext + ownerContext + moodContext + personaContext + toneContext + semanticContext + mediaContext + worldContext + personalizationContext + researchContext,
-    preferences,
-    facts,
+    userContext: profileCtx.context + ownerContext + moodContext + personaContext + toneContext + mediaContext + personalizationContext + researchContext,
+    preferences: profileCtx.profile.preferences,
+    facts: profileCtx.profile.facts,
   });
 
   if (response) {

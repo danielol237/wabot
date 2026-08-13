@@ -120,7 +120,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "purge", aliases: ["prune"], category: "group", description: "Kick members under N msgs: !purge [N]", handler: handleGroupPurge, ownerOnly: false });
 
   // Academy (adaptive learning system)
-  registerCommand({ name: "academy", aliases: ["study", "learn", "school"], category: "utility", description: "Adaptive coding academy: pick a track + level", handler: handleAcademy, ownerOnly: false });
+  registerCommand({ name: "academy", aliases: ["study", "school"], category: "utility", description: "Adaptive coding academy: pick a track + level", handler: handleAcademy, ownerOnly: false });
   registerCommand({ name: "run", aliases: ["execute", "practice"], category: "utility", description: "Run code for a challenge: !run <code>", handler: handleAcademyRun, ownerOnly: false });
   registerCommand({ name: "project", aliases: ["capstone"], category: "utility", description: "Start a track project: !project <track> <level>", handler: handleProject, ownerOnly: false });
   registerCommand({ name: "incident", aliases: ["oncall", "sre"], category: "utility", description: "Production incident simulator: diagnose + fix", handler: handleIncident, ownerOnly: false });
@@ -149,7 +149,9 @@ function registerBuiltinCommands() {
   registerCommand({ name: "yt", aliases: ["youtube", "ytdl"], category: "utility", description: "Download a video: !yt <url>", handler: handleYtDownload, ownerOnly: false });
   registerCommand({ name: "tiktok", aliases: ["tok"], category: "utility", description: "Download a TikTok video: !tiktok <url>", handler: handleYtDownload, ownerOnly: false });
   registerCommand({ name: "ig", aliases: ["instagram", "igdl"], category: "utility", description: "Download an Instagram post/reel: !ig <url>", handler: handleYtDownload, ownerOnly: false });
-  registerCommand({ name: "run", aliases: ["exec", "code"], category: "utility", description: "Execute code", handler: handleCode, ownerOnly: true });
+  // NOTE: !run is claimed by the academy challenge runner (registered earlier).
+  // The generic code executor gets its own name so it isn't silently shadowed.
+  registerCommand({ name: "exec", aliases: ["code"], category: "utility", description: "Execute code: !exec <code>", handler: handleCode, ownerOnly: true });
   registerCommand({ name: "weather", aliases: [], category: "utility", description: "Get weather", handler: handleWeather, ownerOnly: false });
   registerCommand({ name: "translate", aliases: ["tr"], category: "utility", description: "Translate text", handler: handleTranslate, ownerOnly: false });
   registerCommand({ name: "news", aliases: [], category: "utility", description: "Get news summary", handler: handleNews, ownerOnly: false });
@@ -213,9 +215,9 @@ function registerBuiltinCommands() {
   registerCommand({ name: "sim", aliases: ["rehearse", "risk"], category: "utility", description: "Dry-run an action and see risk: !sim <action>", handler: handleSim, ownerOnly: false });
 
   // Dev / Advanced
-  registerCommand({ name: "build", aliases: ["agent"], category: "dev", description: "AI app builder", handler: handleBuild, ownerOnly: true });
+  registerCommand({ name: "build", aliases: [], category: "dev", description: "AI app builder: !build <description>", handler: handleBuild, ownerOnly: true });
   registerCommand({ name: "continue", aliases: ["resume"], category: "dev", description: "Continue a project", handler: handleContinue, ownerOnly: true });
-  registerCommand({ name: "status", aliases: ["project"], category: "dev", description: "Project status", handler: handleProjectStatus, ownerOnly: false });
+  registerCommand({ name: "status", aliases: [], category: "dev", description: "Project status: !status <id>", handler: handleProjectStatus, ownerOnly: false });
   registerCommand({ name: "projects", aliases: ["mylist"], category: "dev", description: "List projects", handler: handleProjectList, ownerOnly: false });
   registerCommand({ name: "cancelbuild", aliases: ["cancel"], category: "dev", description: "Cancel a project", handler: handleProjectCancel, ownerOnly: true });
   registerCommand({ name: "edit", aliases: [], category: "dev", description: "Edit a project file", handler: handleEditFile, ownerOnly: true });
@@ -232,7 +234,9 @@ function registerBuiltinCommands() {
   registerCommand({ name: "grant", aliases: [], category: "admin", description: "Grant a capability to a user", handler: handleGrant, ownerOnly: true });
   registerCommand({ name: "revoke", aliases: [], category: "admin", description: "Revoke a capability", handler: handleRevoke, ownerOnly: true });
   registerCommand({ name: "caps", aliases: ["permissions"], category: "admin", description: "View granted capabilities", handler: handleCaps, ownerOnly: true });
-  registerCommand({ name: "learn", aliases: ["teach"], category: "dev", description: "Teach a fact", handler: handleLearn, ownerOnly: false });
+  // 'teach' belongs to !explain (teach-it-back). Removing it here avoids the
+  // ambiguous alias collision between explain.teach and learn.teach.
+  registerCommand({ name: "learn", aliases: [], category: "dev", description: "Teach a fact: !learn <fact>", handler: handleLearn, ownerOnly: false });
   registerCommand({ name: "facts", aliases: ["memory", "whatiknow"], category: "dev", description: "View learned facts", handler: handleFacts, ownerOnly: false });
   registerCommand({ name: "forget", aliases: [], category: "dev", description: "Forget a fact", handler: handleForget, ownerOnly: false });
   registerCommand({ name: "evolve", aliases: ["selfimprove"], category: "dev", description: "Run self-improvement", handler: handleSelfCheck, ownerOnly: true });

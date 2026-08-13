@@ -134,6 +134,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "academyboard", aliases: ["lb", "aleaderboard"], category: "utility", description: "Global academy leaderboard by XP", handler: handleAcademyLeaderboard, ownerOnly: false });
   registerCommand({ name: "digest", aliases: ["learning", "weekly"], category: "utility", description: "Your weekly learning digest: !digest", handler: handleLearningDigest, ownerOnly: false });
   registerCommand({ name: "learner", aliases: ["myspot", "learnerspace"], category: "utility", description: "Your ARIA Learner Space: !learner", handler: handleLearnerSpace, ownerOnly: false });
+  registerCommand({ name: "portal", aliases: ["academyportal", "learnportal"], category: "utility", description: "Open and link your ARIA learner portal", handler: handlePortal, ownerOnly: false });
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
@@ -803,6 +804,20 @@ async function handleLearnerSpace(sock, msg, args, ctx) {
   return reply(sock, msg, learnerSpaceView(space));
 }
 
+async function handlePortal(sock, msg, args, ctx) {
+  const { reply, react } = require("../utils/baileysHelpers");
+  const { issueCode } = require("../tools/portalLinking");
+  const base = String(process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:3001").replace(/\/+$/, "");
+  try {
+    const { code, expiresAt } = issueCode(ctx.senderJid);
+    const expires = Math.max(1, Math.ceil((expiresAt - Date.now()) / 60000));
+    await react(sock, msg, "🔗");
+    return reply(sock, msg, `🎓 *ARIA Learner Portal*\n\nOpen: ${base}/portal/login\n\nAfter creating or logging in to your account, enter this link code: *${code}*\n\nIt expires in ${expires} minutes and connects the portal to your WhatsApp academy progress.`);
+  } catch (e) {
+    return reply(sock, msg, "❌ I couldn't create a portal link code yet. Please try again when your WhatsApp identity is available.");
+  }
+}
+
 // Fun handlers
 async function handleMood(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
@@ -1223,7 +1238,7 @@ async function handleBackup(sock, msg, args, ctx) {
 // Public base URL for link-dropping (follows the learnerPortal convention:
 // RENDER_EXTERNAL_URL is auto-injected on Render, falling back to a sensible dev host).
 function animeBase() {
-  return String(process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:3000").replace(/\/+$/, "");
+  return String(process.env.ANIME_PUBLIC_URL || process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:3001").replace(/\/+$/, "");
 }
 
 async function handleAnimeSearch(sock, msg, args, ctx) {
@@ -1243,15 +1258,15 @@ async function handleAnimeInfo(sock, msg, args, ctx) {
   // Resolve the best-matching id so we can deep-link to its title page.
   const { searchAnime: searchAnimeUnified } = require("../tools/animeService");
   let id = /^\d+$/.test(args) ? args : null;
+  let provider = "anilist";
   if (!id) {
     try {
       const found = await searchAnimeUnified(args);
-      if (found && found[0] && found[0].id != null) id = found[0].id;
+      if (found && found[0] && found[0].id != null) { id = found[0].id; provider = found[0].provider || provider; }
     } catch (_) {}
   }
   if (!id) return reply(sock, msg, "❌ Couldn't find that anime.");
-  // Just drop the title page link — details & episodes live there.
-  await reply(sock, msg, `📺 *${args.trim()}*\n\n🔗 ${base}/anime/title/${encodeURIComponent(id)}\n\nDetails, episodes, watch & download on the site.`);
+  await reply(sock, msg, `📺 *${args.trim()}*\n\n🔗 ${base}/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}\n\nDetails, episodes, watch & download on the site.`);
 }
 
 async function handleAnimeEps(sock, msg, args, ctx) {
@@ -1260,53 +1275,34 @@ async function handleAnimeEps(sock, msg, args, ctx) {
   await react(sock, msg, "📋");
   const base = animeBase();
   let id = /^\d+$/.test(args) ? args : null;
+  let provider = "anilist";
   if (!id) {
     try {
       const { searchAnime: searchAnimeUnified } = require("../tools/animeService");
       const found = await searchAnimeUnified(args);
-      if (found && found[0] && found[0].id != null) id = found[0].id;
+      if (found && found[0] && found[0].id != null) { id = found[0].id; provider = found[0].provider || provider; }
     } catch (_) {}
   }
   if (!id) return reply(sock, msg, "❌ Couldn't find that anime.");
-  // Drop the title page link — the episode list lives there.
-  await reply(sock, msg, `📋 *${args.trim()}*\n\n🔗 ${base}/anime/title/${encodeURIComponent(id)}\n\nPick an episode to watch or download.`);
+  await reply(sock, msg, `📋 *${args.trim()}*\n\n🔗 ${base}/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}\n\nPick an episode to watch or download.`);
 }
 
 async function handleAnimePlay(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !watch <anime name> <episode> — e.g. !watch solo leveling ep1");
-  await react(sock, msg, "🎬");
-  const base = animeBase();
-
-  // Optional quality token (360/480/720/1080/best) at the end.
+  if (!args) return reply(sock, msg, "Usage: !animedl <anime name> <episode> [quality] — e.g. !animedl solo leveling ep1 720");
+  await react(sock, msg, "⏬");
   const qMatch = args.match(/\s(360|480|720|1080|best)\s*$/i);
-  let baseArgs = qMatch ? args.slice(0, qMatch.index).trim() : args.trim();
-
-  // Extract the episode number from ep1 / episode 1 / #1 / ' episode 1 '
+  const quality = qMatch ? qMatch[1].toLowerCase() : "best";
+  const baseArgs = qMatch ? args.slice(0, qMatch.index).trim() : args.trim();
   const epMatch = baseArgs.match(/(?:ep|episode|ep\.)?\s*#?\s*(\d{1,4})\s*$/i);
-  const episode = epMatch ? parseInt(epMatch[1]) : NaN;
-  if (!episode || episode < 1) {
-    return reply(sock, msg, "🤨 Which episode? Try: !watch solo leveling ep1");
-  }
-
-  // Strip the episode token from the name
-  let name = baseArgs.replace(/(?:ep|episode)\s*#?\s*\d{1,4}\s*$/i, "").replace(/\s+$/, "").trim();
-  if (!name) return reply(sock, msg, "🤨 What anime? Try: !watch solo leveling ep1");
-
-  // Resolve the anime id so we can deep-link to the watch page.
-  const { searchAnime: searchAnimeUnified } = require("../tools/animeService");
-  let id = /^\d+$/.test(name) ? name : null;
-  if (!id) {
-    try {
-      const found = await searchAnimeUnified(name);
-      if (found && found[0] && found[0].id != null) id = found[0].id;
-    } catch (_) {}
-  }
-  if (!id) return reply(sock, msg, "❌ Couldn't find that anime.");
-
-  // Just drop the watch + download links — the site streams it in the browser.
-  const enc = encodeURIComponent(id);
-  await reply(sock, msg, `🎬 *${name}* — Ep ${episode}\n\n▶ Watch: ${base}/anime/watch/${enc}?ep=${episode}\n⬇ Download: ${base}/anime/dl/${enc}?ep=${episode}\n\nStreams in the browser, no download needed.`);
+  const episode = epMatch ? parseInt(epMatch[1], 10) : NaN;
+  if (!episode || episode < 1) return reply(sock, msg, "🤨 Which episode? Try: !animedl solo leveling ep1 (or add 720/1080 for quality)");
+  const name = baseArgs.replace(/(?:ep|episode)\s*#?\s*\d{1,4}\s*$/i, "").replace(/\s+$/, "").trim();
+  if (!name) return reply(sock, msg, "🤨 What anime? Try: !animedl solo leveling ep1");
+  const { enqueueAnimeJob } = require("../tools/animeJobManager");
+  const job = enqueueAnimeJob({ name, episode, quality, sock, chatId: ctx.chatId, quotedMsg: msg });
+  try { require("../tools/animeService").trackProgress({ id: "wa:" + name, provider: "whatsapp", title: name, episode, quality, status: "watching" }); } catch (_) {}
+  return reply(sock, msg, `⏳ *${name}* Ep ${episode} queued (job \`${job.id}\`)${quality !== "best" ? " at " + quality + "p" : ""}.\nI'll report progress here and send the video when it is ready.`);
 }
 
 async function handleTrending(sock, msg, args, ctx) {

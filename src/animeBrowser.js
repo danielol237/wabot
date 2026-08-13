@@ -7,9 +7,12 @@
 const express = require("express");
 const path = require("path");
 const crypto = require("crypto");
+const http = require("http");
+const https = require("https");
 const router = express.Router();
 const service = require("./tools/animeService");
 const { enqueueAnimeJob, retryJob, snapshot } = require("./tools/animeJobManager");
+const { resolveEpisode } = require("./tools/sourceResolver");
 
 router.use(express.urlencoded({ extended: true }));
 
@@ -331,18 +334,22 @@ async function detailPage(provider, id, req) {
   html += `<div class="section-h">📺 Episodes${eps.length ? ` (${eps.length})` : ""}</div>`;
   if (eps.length) {
     html += `<div class="epgrid">${eps.map((ep) => `
-      <form method="post" action="/dashboard/anime/download" class="ep" style="display:flex;flex-direction:column">
-        ${csrfField(req)}
-        <input type="hidden" name="provider" value="${esc(d.provider)}" />
-        <input type="hidden" name="id" value="${esc(d.id)}" />
-        <input type="hidden" name="title" value="${esc(d.title)}" />
-        <input type="hidden" name="episode" value="${ep.number}" />
-        <button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;width:100%">
-          <div class="n">${ep.number}</div>
-          <div class="e">${esc(ep.title)}</div>
-        </button>
-        ${qualitySelect}
-      </form>`).join("")}</div>`;
+      <div class="ep" style="display:flex;flex-direction:column">
+        <a class="n" style="display:block;text-align:center;font-weight:800;font-size:15px" href="/dashboard/anime/watch/${esc(d.provider)}/${encodeURIComponent(d.id)}?ep=${ep.number}&quality=${encodeURIComponent(defaultQuality)}">▶ ${ep.number}</a>
+        <div class="e" style="margin-top:3px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ep.title)}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <a class="watch" style="flex:1;justify-content:center;padding:6px 4px;font-size:11px;text-decoration:none" href="/dashboard/anime/watch/${esc(d.provider)}/${encodeURIComponent(d.id)}?ep=${ep.number}&quality=${encodeURIComponent(defaultQuality)}">Watch</a>
+          <form method="post" action="/dashboard/anime/download" style="flex:1;display:flex">
+            ${csrfField(req)}
+            <input type="hidden" name="provider" value="${esc(d.provider)}" />
+            <input type="hidden" name="id" value="${esc(d.id)}" />
+            <input type="hidden" name="title" value="${esc(d.title)}" />
+            <input type="hidden" name="episode" value="${ep.number}" />
+            ${qualitySelect}
+            <button type="submit" class="watch" style="flex:1;justify-content:center;padding:6px 4px;font-size:11px">DL</button>
+          </form>
+        </div>
+      </div>`).join("")}</div>`;
   } else {
     html += `<div class="empty">Couldn't load episodes for this provider. Try another entry.</div>`;
   }
@@ -379,6 +386,72 @@ router.get("/file/:id", (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent((job.name || "anime") + "-ep" + (job.episode || "") + ".mp4")}"`);
     fs.createReadStream(job.result.filePath).pipe(res);
   } catch (e) { res.status(500).send(esc(e.message)); }
+});
+
+// ── Watch online (stream) ────────────────────────────────────────
+// Resolves the episode's HLS m3u8 via the same engine WhatsApp uses, then shows
+// an embedded player. `/proxy` relays the m3u8 + segments so protected streams
+// (referer/UA-gated) actually play in the browser.
+async function watchPage(provider, id, req) {
+  const entry = { provider, id, title: "" };
+  const wl = service.loadWatchlist().find((e) => e.id === id && e.provider === provider);
+  Object.assign(entry, wl || {});
+  const d = await service.getDetails(entry);
+  const ep = Number(req.query.ep) || 1;
+  const quality = req.query.quality || "best";
+
+  const report = await resolveEpisode(d.title, ep, { preference: provider === "jikan" ? null : provider, quality });
+  const src = report?.selected;
+
+  if (!src || !src.url) {
+    const why = report?.error || "no stream found";
+    return layout("Watch", { html: `<h1>${esc(d.title)}</h1><div class="empty">Couldn't resolve a stream for ep ${ep}. ${esc(why)}</div>` });
+  }
+
+  // Proxy URL that adds the right headers + CORS so hls.js can fetch it.
+  const proxied = `/dashboard/anime/proxy?u=${encodeURIComponent(src.url)}&r=${encodeURIComponent(src.headers?.Referer || src.headers?.referer || "")}`;
+
+  return layout("Watch", { html: `
+    <h1>${esc(d.title)} — Ep ${ep}</h1>
+    <div class="sub">Streaming via ${esc(PROVIDER_LABEL[src.provider] || src.provider)} · ${esc(src.quality || "auto")}${src.height ? " · " + src.height + "p" : ""}</div>
+    <div style="background:#000;border:1px solid var(--line);border-radius:14px;overflow:hidden;max-width:900px;aspect-ratio:16/9;margin-top:14px">
+      <video id="v" controls autoplay style="width:100%;height:100%;display:block"></video>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <a class="watch" href="/dashboard/anime/${esc(provider)}/${encodeURIComponent(id)}">← Episodes</a>
+      <a class="watch" style="text-decoration:none" href="/dashboard/anime/watch/${esc(provider)}/${encodeURIComponent(id)}?ep=${ep + 1}&quality=${esc(quality)}">Next ep ▶</a>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+    <script>
+      var url = ${JSON.stringify(proxied)};
+      var v = document.getElementById('v');
+      if (Hls.isSupported()) { var h = new Hls(); h.loadSource(url); h.attachMedia(v); }
+      else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = url; }
+    </script>` });
+}
+
+// Relay an m3u8/segment, preserving the provider's required headers (referer).
+router.get("/proxy", (req, res) => {
+  const target = req.query.u;
+  const referer = req.query.r || "";
+  if (!target || !/^https?:\/\//i.test(target)) return res.status(400).send("bad url");
+  const lib = target.startsWith("https:") ? https : http;
+  const headers = {};
+  if (referer) headers.Referer = referer;
+  headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
+  const p = lib.get(target, { headers }, (up) => {
+    res.status(up.statusCode || 200);
+    res.setHeader("Content-Type", up.headers["content-type"] || "application/vnd.apple.mpegurl");
+    if (up.headers["content-length"]) res.setHeader("Content-Length", up.headers["content-length"]);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    up.pipe(res);
+  });
+  p.on("error", (e) => { if (!res.headersSent) res.status(502).send("proxy error: " + e.message); else res.end(); });
+});
+
+router.get("/watch/:provider/:id", async (req, res) => {
+  try { res.send(await watchPage(req.params.provider, req.params.id, req)); }
+  catch (e) { res.status(500).send(esc(e.message)); }
 });
 
 router.get("/:provider/:id", async (req, res) => {

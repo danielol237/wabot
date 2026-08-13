@@ -210,7 +210,12 @@ async function watchPage(req) {
   const ep = Number(req.query.ep) || 1;
   const entry = { id, provider, title: "" };
   const d = await service.getDetails(entry).catch(() => ({}));
-  const report = await resolveEpisode(d.title || id, ep, { preference: provider === "jikan" ? null : provider });
+  // Resolve the stream with a hard timeout so a slow/hung provider can't freeze
+  // the watch page — the page always renders (player or a retry message).
+  const report = await Promise.race([
+    resolveEpisode(d.title || id, ep, { preference: provider === "jikan" ? null : provider }),
+    new Promise((r) => setTimeout(() => r(null), 8000)),
+  ]);
   const src = report?.selected;
   if (!src || !src.url) {
     return layout("Watch", `<div class="sec-h">${esc(d.title || "Anime")} — Ep ${ep}</div><div class="empty">Couldn't resolve a stream. ${esc(report?.error || "no source")}</div>`);

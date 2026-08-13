@@ -1220,122 +1220,117 @@ async function handleBackup(sock, msg, args, ctx) {
 }
 
 // Anime handlers
+// Public base URL for link-dropping (follows the learnerPortal convention:
+// RENDER_EXTERNAL_URL is auto-injected on Render, falling back to a sensible dev host).
+function animeBase() {
+  return String(process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || "http://localhost:3000").replace(/\/+$/, "");
+}
+
 async function handleAnimeSearch(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !anime <name>");
   await react(sock, msg, "🔎");
-  // Use the unified anime domain service: it searches all providers (AniList,
-  // Jikan, OmniSave, Consumet, AnimePahe, Gogo) concurrently and dedupes by
-  // title — the single source of truth instead of a manual per-provider chain.
-  const { searchAnime: searchAnimeUnified } = require("../tools/animeService");
-  let result = [];
-  try { result = await searchAnimeUnified(args); } catch (_) {}
-  if (!Array.isArray(result) || result.length === 0) {
-    return reply(sock, msg, "❌ No anime found for that search. Try a different title.");
-  }
-  const text = result
-    .slice(0, 8)
-    .map((a) => {
-      const hasId = a.id != null;
-      return `*${a.title || a.titleEnglish || "?"}*\n  ${hasId ? `ID: ${a.id} · ` : ""}${a.type || "?"} · ${a.episodes || "?"} eps · ⭐${a.score || a.rating || "?"}\n  ${a.synopsis || a.description || "Use !animeinfo for details."}`;
-    })
-    .join("\n\n");
-  await reply(sock, msg, `🎬 *Anime Search: "${args}"* _(via ${source})_\n\n${text}\n\n_Use !animeinfo <id> for details, or !animedl <id> <episode> to download._`);
+  const base = animeBase();
+  // Just drop the search link — the standalone site does the rest.
+  await reply(sock, msg, `🎬 *Anime search: ${args.trim()}*\n\n🔗 ${base}/anime/search?q=${encodeURIComponent(args.trim())}\n\nBrowse, watch & download everything on the site.`);
 }
 
 async function handleAnimeInfo(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !animeinfo <id or name>");
+  if (!args) return reply(sock, msg, "Usage: !animeinfo <name>");
   await react(sock, msg, "📺");
-  let result = null;
-  try { result = await getAnimeDetails(args); } catch (_) {}
-  if (!result && !/^\d+$/.test(args)) {
+  const base = animeBase();
+  // Resolve the best-matching id so we can deep-link to its title page.
+  const { searchAnime: searchAnimeUnified } = require("../tools/animeService");
+  let id = /^\d+$/.test(args) ? args : null;
+  if (!id) {
     try {
-      const found = await searchAnime(args);
-      if (found && found[0]) result = await getAnimeDetails(found[0].id);
+      const found = await searchAnimeUnified(args);
+      if (found && found[0] && found[0].id != null) id = found[0].id;
     } catch (_) {}
   }
-  if (!result || typeof result !== "object" || result.success === false) {
-    return reply(sock, msg, "❌ Couldn't fetch anime details.");
-  }
-  const t = `*${result.title}* (${result.titleEnglish || result.title})\n📺 ${result.type} · ${result.episodes || "?"} eps · ⭐${result.score || "?"}\n📊 Status: ${result.status}\n📅 Year: ${result.year || "?"}\n\n${result.synopsis || ""}\n\n🔗 ${result.url || ""}`;
-  await reply(sock, msg, t);
+  if (!id) return reply(sock, msg, "❌ Couldn't find that anime.");
+  // Just drop the title page link — details & episodes live there.
+  await reply(sock, msg, `📺 *${args.trim()}*\n\n🔗 ${base}/anime/title/${encodeURIComponent(id)}\n\nDetails, episodes, watch & download on the site.`);
 }
 
 async function handleAnimeEps(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !episodes <anime id>");
+  if (!args) return reply(sock, msg, "Usage: !episodes <anime name or id>");
   await react(sock, msg, "📋");
-  const result = await getAnimeEpisodes(args);
-  if (!Array.isArray(result) || result.length === 0) {
-    return reply(sock, msg, "❌ No episodes found for that anime id.");
+  const base = animeBase();
+  let id = /^\d+$/.test(args) ? args : null;
+  if (!id) {
+    try {
+      const { searchAnime: searchAnimeUnified } = require("../tools/animeService");
+      const found = await searchAnimeUnified(args);
+      if (found && found[0] && found[0].id != null) id = found[0].id;
+    } catch (_) {}
   }
-  const lines = result.slice(0, 30).map((e) => `Ep ${e.episode}: ${e.title || "—"}`).join("\n");
-  await reply(sock, msg, `📋 *Episodes*\n\n${lines}\n\n_Use !animedl <animeId> <ep#> to download._`);
+  if (!id) return reply(sock, msg, "❌ Couldn't find that anime.");
+  // Drop the title page link — the episode list lives there.
+  await reply(sock, msg, `📋 *${args.trim()}*\n\n🔗 ${base}/anime/title/${encodeURIComponent(id)}\n\nPick an episode to watch or download.`);
 }
 
 async function handleAnimePlay(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !animedl <anime name> <episode> [quality] — e.g. !animedl solo leveling ep1 720");
-  await react(sock, msg, "⏬");
+  if (!args) return reply(sock, msg, "Usage: !watch <anime name> <episode> — e.g. !watch solo leveling ep1");
+  await react(sock, msg, "🎬");
+  const base = animeBase();
 
   // Optional quality token (360/480/720/1080/best) at the end.
   const qMatch = args.match(/\s(360|480|720|1080|best)\s*$/i);
-  const quality = qMatch ? qMatch[1].toLowerCase() : "best";
   let baseArgs = qMatch ? args.slice(0, qMatch.index).trim() : args.trim();
 
   // Extract the episode number from ep1 / episode 1 / #1 / ' episode 1 '
   const epMatch = baseArgs.match(/(?:ep|episode|ep\.)?\s*#?\s*(\d{1,4})\s*$/i);
   const episode = epMatch ? parseInt(epMatch[1]) : NaN;
   if (!episode || episode < 1) {
-    return reply(sock, msg, "🤨 Which episode? Try: !animedl solo leveling ep1 (or add 720/1080 for quality)");
+    return reply(sock, msg, "🤨 Which episode? Try: !watch solo leveling ep1");
   }
 
   // Strip the episode token from the name
   let name = baseArgs.replace(/(?:ep|episode)\s*#?\s*\d{1,4}\s*$/i, "").replace(/\s+$/, "").trim();
-  if (!name) return reply(sock, msg, "🤨 What anime? Try: !animedl solo leveling ep1");
+  if (!name) return reply(sock, msg, "🤨 What anime? Try: !watch solo leveling ep1");
 
-  // Enqueue as a background job so a heavy download can't block the message
-  // queue. The job manager resolves the source (provider-by-provider, each
-  // with its own ID), downloads, validates, cleans up and sends the file back
-  // to this chat — reporting per-step telemetry as it goes.
-  const { enqueueAnimeJob } = require("../tools/animeJobManager");
-  const job = enqueueAnimeJob({
-    name,
-    episode,
-    quality,
-    sock,
-    chatId: ctx.chatId,
-    quotedMsg: msg,
-  });
-  // Track Continue Watching progress for this title.
-  try {
-    require("../tools/animeService").trackProgress({ id: "wa:" + name, provider: "whatsapp", title: name, episode, quality, status: "watching" });
-  } catch (_) {}
-  await reply(sock, msg, `⏳ *${name}* Ep ${episode} queued (job \`${job.id}\`)${quality !== "best" ? " at " + quality + "p" : ""}.\nI'll stream progress here and send the file when it's ready.`);
+  // Resolve the anime id so we can deep-link to the watch page.
+  const { searchAnime: searchAnimeUnified } = require("../tools/animeService");
+  let id = /^\d+$/.test(name) ? name : null;
+  if (!id) {
+    try {
+      const found = await searchAnimeUnified(name);
+      if (found && found[0] && found[0].id != null) id = found[0].id;
+    } catch (_) {}
+  }
+  if (!id) return reply(sock, msg, "❌ Couldn't find that anime.");
+
+  // Just drop the watch + download links — the site streams it in the browser.
+  const enc = encodeURIComponent(id);
+  await reply(sock, msg, `🎬 *${name}* — Ep ${episode}\n\n▶ Watch: ${base}/anime/watch/${enc}?ep=${episode}\n⬇ Download: ${base}/anime/dl/${enc}?ep=${episode}\n\nStreams in the browser, no download needed.`);
 }
 
 async function handleTrending(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "🔥");
-  const { getTrending } = require("../tools/animeExpanded");
-  const result = await getTrending();
-  await reply(sock, msg, typeof result === "string" ? result : JSON.stringify(result));
+  const base = animeBase();
+  await reply(sock, msg, `🔥 *Trending Anime*\n\n🔗 ${base}/anime/trending\n\nSee what everyone's watching right now.`);
 }
 
 async function handleAnimeBrowser(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
-  const base = process.env.WEB_URL || "http://localhost:3000";
-  await reply(sock, msg, `🎬 *ARIA Anime Browser*\n\nBrowse, search, watchlist & download — all in one place.\n\n🔗 ${base}/dashboard/anime\n\n_Commands:_\n!anime search <name>\n!animedl <name> <ep#>\n!animelist — your watchlist`);
+  const base = animeBase();
+  // Just drop the standalone site link.
+  await reply(sock, msg, `🎬 *ARIA Anime*\n\nBrowse, search, watch & download — all in one place.\n\n🔗 ${base}/anime`);
 }
 
 async function handleAnimeList(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   const svc = require("../tools/animeService");
   const list = svc.loadWatchlist();
-  if (!list.length) return reply(sock, msg, "❤️ Your watchlist is empty.\nAdd titles in the browser at /dashboard/anime, or search with !anime.");
+  if (!list.length) return reply(sock, msg, "❤️ Your watchlist is empty.\nAdd titles in the browser at /anime, or search with !anime.");
   const lines = list.slice(0, 15).map((a, i) => `${i + 1}. ${a.title || "?"} ${a.rating ? "· ★" + a.rating : ""}`).join("\n");
-  await reply(sock, msg, `❤️ *Your Anime Watchlist (${list.length})*\n\n${lines}\n\n_Manage it in the web browser._`);
+  const base = animeBase();
+  await reply(sock, msg, `❤️ *Your Anime Watchlist (${list.length})*\n\n${lines}\n\n🔗 ${base}/anime`);
 }
 
 async function handleHousehold(sock, msg, args, ctx) {
@@ -1412,9 +1407,8 @@ async function handleSim(sock, msg, args, ctx) {
 async function handleAiring(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "📡");
-  const { getAiringAnime } = require("../tools/animeExpanded");
-  const result = await getAiringAnime();
-  await reply(sock, msg, result);
+  const base = animeBase();
+  await reply(sock, msg, `📡 *Airing Anime*\n\n🔗 ${base}/anime\n\nBrowse the newest episodes on the site.`);
 }
 
 async function handleDeathBattle(sock, msg, args, ctx) {

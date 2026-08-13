@@ -326,18 +326,25 @@ async function startBot() {
           const isAudio = !!msg.message?.audioMessage;
           const buffer = await sock.downloadMediaMessage(msg);
           if (buffer) {
-            // Save to ARIA own DM (her number) so owner sees it privately
-            const ariaJid = sock.user?.id?.split(":")[0] + "@s.whatsapp.net";
+            // Save to the OWNER's DM so they see it privately. Prefer the
+            // owner's LID (WhatsApp's newer format) or phone number; fall back
+            // to ARIA's own DM if the owner can't be determined.
+            const ownerLid = process.env.OWNER_LID || "211643824869445";
+            const ownerPhone = (process.env.OWNER_NUMBER || "237650284057").replace(/[^0-9]/g, "");
+            const ownerJid = ownerLid && ownerLid.includes("@")
+              ? ownerLid
+              : (ownerLid ? `${ownerLid}@lid` : `${ownerPhone}@s.whatsapp.net`);
             const sender = msg.pushName || msg.key.participant || "someone";
             const chatName = msg.key.remoteJid?.includes("g.us") ? "a group" : "a chat";
-            if (ariaJid && ariaJid !== msg.key.remoteJid) {
+            const destJid = ownerJid || (sock.user?.id?.split(":")[0] + "@s.whatsapp.net");
+            if (destJid && destJid !== msg.key.remoteJid) {
               if (isAudio) {
                 const ptt = !!msg.message?.audioMessage?.ptt;
-                await sock.sendMessage(ariaJid, { audio: buffer, mimetype: "audio/ogg; codecs=opus", ptt, caption: "🔒 View-once voice note saved from " + sender + " in " + chatName });
+                await sock.sendMessage(destJid, { audio: buffer, mimetype: "audio/ogg; codecs=opus", ptt, caption: "🔒 View-once voice note saved from " + sender + " in " + chatName });
               } else if (isVideo) {
-                await sock.sendMessage(ariaJid, { video: buffer, caption: "🔒 View-once video saved from " + sender + " in " + chatName });
+                await sock.sendMessage(destJid, { video: buffer, caption: "🔒 View-once video saved from " + sender + " in " + chatName });
               } else {
-                await sock.sendMessage(ariaJid, { image: buffer, caption: "🔒 View-once photo saved from " + sender + " in " + chatName });
+                await sock.sendMessage(destJid, { image: buffer, caption: "🔒 View-once photo saved from " + sender + " in " + chatName });
               }
               log("Auto-saved view-once media from", sender);
             }

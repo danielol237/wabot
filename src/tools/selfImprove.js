@@ -52,6 +52,35 @@ function getCodeStats() {
 // Scan for potential improvements
 async function scanForImprovements() {
   const stats = getCodeStats();
+
+  // Ground the AI in ACTUAL source, not just counts. Read a sample of the
+  // smallest JS files (plus any with TODO/FIXME) so suggestions target real code.
+  let codeSnippets = [];
+  try {
+    const samples = [];
+    const all = [];
+    const walk = (dir) => {
+      for (const f of fs.readdirSync(dir)) {
+        const fp = path.join(dir, f);
+        if (["node_modules", ".git", "sessions", "temp", "data", "data"].includes(f)) continue;
+        if (fs.statSync(fp).isDirectory()) { walk(fp); continue; }
+        if (f.endsWith(".js")) {
+          const c = fs.readFileSync(fp, "utf8");
+          const hasMark = c.includes("TODO") || c.includes("FIXME");
+          all.push({ fp, c, hasMark });
+          if (hasMark && samples.length < 6) samples.push({ fp, c });
+        }
+      }
+    };
+    walk(SRC_DIR);
+    // If no marked files, take the smallest files (bounded token use).
+    for (const f of all.sort((a, b) => a.c.length - b.c.length)) {
+      if (samples.length >= 8) break;
+      if (!samples.some((s) => s.fp === f.fp)) samples.push({ fp: f.fp, c: f.c });
+    }
+    codeSnippets = samples.map((s) => `=== ${s.fp} ===\n${s.c.slice(0, 1200)}`).join("\n\n");
+  } catch (_) {}
+
   const prompt = `You are an expert code reviewer. Here are stats about a WhatsApp bot project:
 
 - ${stats.totalFiles} JavaScript files
@@ -59,6 +88,7 @@ async function scanForImprovements() {
 ${stats.errors.length > 0 ? `- Known issues: ${stats.errors.join("; ")}` : "- No known issues"}
 
 The project is at: ${SRC_DIR}
+${codeSnippets ? `\nSample of actual source code (ground your suggestions in the real code, reference real function/class names):\n\n${codeSnippets}\n` : ""}
 
 Give me 3 specific, actionable improvements that could be made to this codebase. Focus on:
 1. Performance optimizations 

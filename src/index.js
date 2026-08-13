@@ -52,6 +52,11 @@ let pairingCodeRequested = false; // prevents re-requesting a new code on every 
 let isReady = false;
 let lastError = null;
 let sock = null;
+// Boot-once guard: socket-INDEPENDENT services (session backup, task poller,
+// memory curator) must init exactly once at the first connection, NOT on every
+// WhatsApp reconnect (audit #35). Reconnects only need to re-wire the socket-
+// dependent services (autonomous, missions, scheduler, heartbeat, ...).
+let servicesStarted = false;
 // Centralized heartbeat tracking — the interval is attached to a socket for
 // convenience, but we clear the previous one on close/reconnect so repeated
 // reconnects never stack up orphaned ping timers.
@@ -166,10 +171,23 @@ async function startBot() {
       isReady = true;
       latestQrDataUrl = null;
       lastError = null;
-      // Keep the session backed up so restarts don't force a QR re-scan
-      sessionPersistence.startAutoSync();
-      sessionPersistence.backupSession().catch((e) => warn("Initial session backup:", e.message));
-      startTaskPoller(sock);
+      // ── Boot-once services (socket-independent) ──────────────────────────
+      // These don't need a socket and must NOT re-run on every reconnect.
+      if (!servicesStarted) {
+        servicesStarted = true;
+        // Keep the session backed up so restarts don't force a QR re-scan
+        sessionPersistence.startAutoSync();
+        sessionPersistence.backupSession().catch((e) => warn("Initial session backup:", e.message));
+        startTaskPoller(sock);
+
+        // Start periodic memory curation (keeps long-term memory clean)
+        try {
+          const { startCurator } = require("./tools/memoryCurator");
+          startCurator();
+        } catch (e) {
+          error("Memory curator init error:", e.message);
+        }
+      }
 
       // Start autonomous mode — ARIA sends proactive messages
       try {
@@ -195,14 +213,6 @@ async function startBot() {
         startMonitor(holder);
       } catch (e) {
         error("Proactive monitor init error:", e.message);
-      }
-
-      // Start periodic memory curation (keeps long-term memory clean)
-      try {
-        const { startCurator } = require("./tools/memoryCurator");
-        startCurator();
-      } catch (e) {
-        error("Memory curator init error:", e.message);
       }
 
       // Log the connection as an event

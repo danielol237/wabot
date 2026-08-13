@@ -16,7 +16,11 @@ const router = express.Router();
 
 const SESSION_TTL = 12 * 60 * 60 * 1000;
 const SESSIONS_FILE = path.join(__dirname, "../data/dashboardSessions.json");
-const CSRF_SECRET = process.env.DASHBOARD_CSRF_SECRET || process.env.DASHBOARD_PASSWORD || "aria-csrf";
+const CSRF_SECRET = process.env.DASHBOARD_CSRF_SECRET || process.env.DASHBOARD_PASSWORD || "";
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 
 // ── Persisted sessions ────────────────────────────────────────────
 // Sessions survive process restarts and are shared across instances by
@@ -107,7 +111,7 @@ function constantTimeEqual(a, b) {
 
 function checkAuth(req, res, next) {
   const pw = process.env.DASHBOARD_PASSWORD;
-  if (!pw) return res.send(renderPage("Locked", "", true));
+  if (!pw) return res.status(503).send(renderPage("Configuration required", loginForm(), false, true));
   const token = req.cookies?.["aria_session"];
   const h = hashToken(token);
   if (token && sessions.get(h) && sessions.get(h) > Date.now()) return next();
@@ -117,16 +121,18 @@ function checkAuth(req, res, next) {
       const t = crypto.randomBytes(24).toString("hex");
       sessions.set(hashToken(t), Date.now() + SESSION_TTL);
       persistSessions();
-      res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax" });
+      res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
       return next();
     }
   } else if (auth.startsWith("Basic ")) {
     try {
       const decoded = Buffer.from(auth.slice(6), "base64").toString("utf8");
-      if (constantTimeEqual(decoded.split(":")[1] || "", pw)) {
+      const separator = decoded.indexOf(":");
+      const supplied = separator >= 0 ? decoded.slice(separator + 1) : "";
+      if (constantTimeEqual(supplied, pw)) {
         const t = crypto.randomBytes(24).toString("hex");
         sessions.set(hashToken(t), Date.now() + SESSION_TTL);
-        res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax" });
+        res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
         return next();
       }
     } catch (_) {}
@@ -136,14 +142,17 @@ function checkAuth(req, res, next) {
 
 function loginForm() {
   return `<div class="login">
-    <div class="login-logo">◢</div>
-    <h1>ARIA</h1>
-    <p>personal intelligence cockpit</p>
+    <div class="login-logo" aria-hidden="true">◢</div>
+    <div class="login-kicker">OWNER CONTROL CENTER</div>
+    <h1>Welcome back.</h1>
+    <p class="login-lede">Monitor ARIA, inspect activity, manage downloads, and keep the bot healthy from one private workspace.</p>
     <form method="POST" action="/dashboard/login">
-      <input type="password" name="password" placeholder="access key" autofocus required />
-      <button class="btn btn-primary btn-block" type="submit">Enter</button>
+      <label class="login-label" for="dashboard-password">Owner access key</label>
+      <input id="dashboard-password" type="password" name="password" placeholder="Enter your access key" autocomplete="current-password" autofocus required />
+      <button class="btn btn-primary btn-block" type="submit">Unlock control center</button>
     </form>
-    ${process.env.DASHBOARD_PASSWORD ? "" : '<p class="hint">Set DASHBOARD_PASSWORD in env</p>'}
+    <div class="login-foot"><span>Private owner session</span><a href="/portal/login">Learner portal →</a></div>
+    ${process.env.DASHBOARD_PASSWORD ? "" : '<p class="hint">Dashboard is locked until DASHBOARD_PASSWORD is configured.</p>'}
   </div>`;
 }
 
@@ -162,7 +171,7 @@ router.post("/login", (req, res) => {
       const t = crypto.randomBytes(24).toString("hex");
       sessions.set(hashToken(t), Date.now() + SESSION_TTL);
       persistSessions();
-      res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax" });
+      res.cookie("aria_session", t, { httpOnly: true, maxAge: SESSION_TTL, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
       return res.redirect("/dashboard");
     }
     recordLoginAttempt(ip);
@@ -377,26 +386,34 @@ function bar(value, max = 100, color = "var(--accent)") {
 
 // Real-time ARIA status strip (rendered live via /api/live).
 function renderLiveStrip(ls) {
-  const provBadge = (p) => `<span class="badge ${p && p !== "none" ? "b-accent" : "b-muted"}">${p || "none"}</span>`;
+  const configured = ls.primary && ls.primary !== "none";
+  const modelLabel = configured ? ls.primary : "Not configured";
+  const fallbackLabel = ls.fallback && ls.fallback !== "none" ? ls.fallback : "—";
   return `
     <div class="pane show" id="pane-home">
-      <div class="page-title">Command</div><div class="page-sub">ARIA core · live telemetry</div>
-      <div class="hero" style="background:linear-gradient(120deg,#0f1230,#1a1d45)">
+      <div class="page-title">Command center</div><div class="page-sub">A calm overview of ARIA’s current state and the next useful action.</div>
+      <div class="hero command-hero">
         <div class="hrow">
           <div class="avatar">◢</div>
-          <div style="color:#fff"><h2 style="color:#fff">ARIA CORE <span class="badge b-green" id="core-badge">● ONLINE</span></h2>
-            <div class="sub" style="color:#9aa3c9">model <b style="color:#cdd3f0">${ls.primary}</b> · fallback <b style="color:#cdd3f0">${ls.fallback}</b> · pid ${process.pid}</div>
+          <div><h2>ARIA core <span class="badge ${configured ? "b-green" : "b-amber"}" id="core-badge">● ${configured ? "ONLINE" : "NEEDS AI CONFIG"}</span></h2>
+            <div class="sub">Primary model <b>${modelLabel}</b> · fallback <b>${fallbackLabel}</b></div>
           </div>
         </div>
         <div class="stats" style="margin-top:18px;background:transparent">
           <div class="stat dark"><div class="n" id="lv-memory">${ls.memoryCount}</div><div class="l">memories</div></div>
           <div class="stat dark"><div class="n" id="lv-missions">${ls.activeMissions}</div><div class="l">active missions</div></div>
-          <div class="stat dark"><div class="n" id="lv-msg">${ls.msgsPerMin}</div><div class="l">msgs / min</div></div>
-          <div class="stat dark"><div class="n" id="lv-lat">${ls.lastLatency}ms</div><div class="l">latency</div></div>
+          <div class="stat dark"><div class="n" id="lv-msg">${ls.msgsPerMin}</div><div class="l">messages / min</div></div>
+          <div class="stat dark"><div class="n" id="lv-lat">${ls.lastLatency}ms</div><div class="l">last latency</div></div>
           <div class="stat dark"><div class="n" id="lv-err">${ls.errors5m}</div><div class="l">errors / 5m</div></div>
         </div>
-        <div style="color:#9aa3c9;font-size:12px;margin-top:6px">uptime ${ls.uptimeHrs}h · ${ls.memMB}MB · ${ls.cpuCores} cores · <span id="lv-last">last AI: ${ls.lastProvider} in ${ls.lastLatency}ms</span></div>
+        <div class="hero-meta">Uptime ${ls.uptimeHrs}h · ${ls.memMB}MB memory · ${ls.cpuCores} CPU cores · <span id="lv-last">Last AI: ${ls.lastProvider} in ${ls.lastLatency}ms</span></div>
       </div>
+      <div class="quick-grid">
+        <a class="quick-card" href="/anime"><span class="quick-icon">A</span><span><b>Open anime</b><small>Search, watch, and download episodes</small></span><strong>→</strong></a>
+        <a class="quick-card" href="/portal/login"><span class="quick-icon">L</span><span><b>Open learner portal</b><small>View progress and link WhatsApp history</small></span><strong>→</strong></a>
+        <button class="quick-card" data-pane="health"><span class="quick-icon">H</span><span><b>Check system health</b><small>Inspect media runtimes and provider status</small></span><strong>→</strong></button>
+      </div>
+      ${configured ? "" : `<div class="card callout-warning"><strong>AI is not configured yet.</strong><span>Add at least one AI provider key in the deployment environment, then restart ARIA. The rest of the cockpit can be explored, but replies will fail until a model is available.</span></div>`}
     </div>`;
 }
 
@@ -451,24 +468,24 @@ function renderLearnerSpacePane(space, selfUid) {
 
   const insightCards = (space.insights || []).map((i) => {
     const tagColor = i.tag === "focus" ? "var(--amber)" : i.tag === "nudge" ? "var(--cyan)" : i.tag === "strength" ? "var(--green)" : "var(--accent)";
-    return `<div class="feed-item"><div class="feed-ico" style="color:${tagColor};background:var(--panel2)">💭</div><div class="feed-body"><div class="m">${i.text}</div><div class="s">${i.tag}</div></div></div>`;
+    return `<div class="feed-item"><div class="feed-ico" style="color:${tagColor};background:var(--panel2)">💭</div><div class="feed-body"><div class="m">${esc(i.text)}</div><div class="s">${esc(i.tag)}</div></div></div>`;
   }).join("") || `<div class="empty">No insights yet — start learning and I'll begin reading you.</div>`;
 
-  const skillChips = (arr, emoji) => arr.length ? arr.map((s) => `<span class="badge b-muted">${emoji} ${s.skill} · ${Math.round(s.confidence)}%</span>`).join(" ") : `<span class="badge b-muted">—</span>`;
+  const skillChips = (arr, emoji) => arr.length ? arr.map((s) => `<span class="badge b-muted">${emoji} ${esc(s.skill)} · ${Math.round(s.confidence)}%</span>`).join(" ") : `<span class="badge b-muted">—</span>`;
 
-  const goalRows = (space.goals || []).map((g) => `<div class="row"><span class="k">🎯</span><span class="v">${g}</span></div>`).join("") || `<div class="empty">Set a goal and I'll help you chase it.</div>`;
+  const goalRows = (space.goals || []).map((g) => `<div class="row"><span class="k">🎯</span><span class="v">${esc(g)}</span></div>`).join("") || `<div class="empty">Set a goal and I'll help you chase it.</div>`;
 
-  const noteRows = (space.ariaNotes || []).map((n) => `<div class="feed-item"><div class="feed-ico">📝</div><div class="feed-body"><div class="m">${n.text}</div><div class="s">${new Date(n.ts).toLocaleString()}</div></div></div>`).join("") || `<div class="empty">No notes yet.</div>`;
+  const noteRows = (space.ariaNotes || []).map((n) => `<div class="feed-item"><div class="feed-ico">📝</div><div class="feed-body"><div class="m">${esc(n.text)}</div><div class="s">${esc(new Date(n.ts).toLocaleString())}</div></div></div>`).join("") || `<div class="empty">No notes yet.</div>`;
 
   const recentText = space.recency == null ? "never" : space.recency === 0 ? "today" : `${space.recency}d ago`;
 
   return `
-    <div class="pane" id="pane-learnerspace"><div class="page-title">Learner Space</div><div class="page-sub">ARIA knows you · your spot · ${id.tier}</div>
+    <div class="pane" id="pane-learnerspace"><div class="page-title">Learner Space</div><div class="page-sub">ARIA knows you · your spot · ${esc(id.tier)}</div>
       <div class="hero" style="background:linear-gradient(120deg,#13153a,#1c2050)">
         <div class="hrow">
           <div class="avatar" style="background:linear-gradient(135deg,#8b5cf6,#3b82f6)">${name.slice(0, 1).toUpperCase()}</div>
-          <div style="color:#fff"><h2 style="color:#fff">${name}</h2>
-            <div class="sub" style="color:#9aa3c9"><span class="badge" style="background:${tierColor};color:#fff">${id.tier}</span> ${id.xp} XP · ${id.streak}d streak ${space.recency == null ? "" : "· last seen " + recentText}</div>
+          <div style="color:#fff"><h2 style="color:#fff">${esc(name)}</h2>
+            <div class="sub" style="color:#9aa3c9"><span class="badge" style="background:${tierColor};color:#fff">${esc(id.tier)}</span> ${Number(id.xp) || 0} XP · ${Number(id.streak) || 0}d streak ${space.recency == null ? "" : "· last seen " + recentText}</div>
           </div>
         </div>
       </div>
@@ -482,19 +499,19 @@ function renderLearnerSpacePane(space, selfUid) {
       </div>
       <div class="grid2" style="margin-top:16px">
         <div class="card"><div class="h">How you learn</div>
-          <div class="row"><span class="k">Pace</span><span class="v">${space.pace.label}</span></div>
-          <div class="row"><span class="k">Best time</span><span class="v">${space.bestTime ? space.bestTime.time : "—"}</span></div>
-          <div class="row"><span class="k">Style</span><span class="v">${space.style || "learning…"}</span></div>
-          <div style="color:var(--faint);font-size:11px;margin-top:8px">${space.pace.detail}</div>
+          <div class="row"><span class="k">Pace</span><span class="v">${esc(space.pace.label)}</span></div>
+          <div class="row"><span class="k">Best time</span><span class="v">${esc(space.bestTime ? space.bestTime.time : "—")}</span></div>
+          <div class="row"><span class="k">Style</span><span class="v">${esc(space.style || "learning…")}</span></div>
+          <div style="color:var(--faint);font-size:11px;margin-top:8px">${esc(space.pace.detail)}</div>
         </div>
         <div class="card"><div class="h">Goals</div>${goalRows}</div>
       </div>
-      <div class="card" style="margin-top:16px"><div class="h">➡️ What's next</div><div class="row"><span class="k">Recommendation</span><span class="v">${space.next.text}</span></div></div>
+      <div class="card" style="margin-top:16px"><div class="h">➡️ What's next</div><div class="row"><span class="k">Recommendation</span><span class="v">${esc(space.next.text)}</span></div></div>
       <div class="card" style="margin-top:16px"><div class="h">ARIA's notes</div>${noteRows}</div>
       <div class="card" style="margin-top:16px"><div class="h">💬 Tell this learner something (ARIA delivers)</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input id="ls-msg" placeholder="A note or encouragement for ${name}…" style="flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:10px;font-size:13px;outline:none">
-          <button class="qbtn" onclick="sendLearnerNote('${id.uid}')">Send ➤</button>
+          <input id="ls-msg" placeholder="A note or encouragement for ${esc(name)}…" style="flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:10px;font-size:13px;outline:none">
+          <button class="qbtn" onclick='sendLearnerNote(${JSON.stringify(String(id.uid))})'>Send ➤</button>
         </div>
         <div id="ls-msg-result" style="color:var(--faint);font-size:11px;margin-top:8px"></div>
       </div>
@@ -518,15 +535,15 @@ function renderLearnerSpacePane(space, selfUid) {
 function renderAcademyPane(ad, selfUid, profile) {
   const track = ad.mostActiveTrack;
   const trackRow = track
-    ? `<div class="row"><span class="k">Most active</span><span class="v">${track[0]} · ${track[1]} attempts</span></div>${bar(track[1], Math.max(1, track[1]))}`
+    ? `<div class="row"><span class="k">Most active</span><span class="v">${esc(track[0])} · ${Number(track[1]) || 0} attempts</span></div>${bar(track[1], Math.max(1, track[1]))}`
     : `<div class="empty">No activity yet.</div>`;
   const weak = ad.weakestSkill;
   const weakRow = weak
-    ? `<div class="row"><span class="k">Weakest skill</span><span class="v">${weak[0]} · ${weak[1].confidence}%</span></div>${bar(100 - weak[1].confidence, 100, "var(--red)")}`
+    ? `<div class="row"><span class="k">Weakest skill</span><span class="v">${esc(weak[0])} · ${Number(weak[1].confidence) || 0}%</span></div>${bar(100 - weak[1].confidence, 100, "var(--red)")}`
     : `<div class="empty">Not enough data.</div>`;
   const topRows = ad.top.map((l, i) => {
-    const name = l.uid === selfUid ? "*you*" : l.uid.split("@")[0];
-    return `<div class="row"><span class="k">${i + 1}. ${name}</span><span class="v">${l.xp} XP${l.streak ? ` · ${l.streak}d 🔥` : ""}</span></div>`;
+    const name = l.uid === selfUid ? "*you*" : esc(l.uid.split("@")[0]);
+    return `<div class="row"><span class="k">${i + 1}. ${name}</span><span class="v">${Number(l.xp) || 0} XP${l.streak ? ` · ${Number(l.streak)}d 🔥` : ""}</span></div>`;
   }).join("");
   return `
     <div class="pane" id="pane-academy"><div class="page-title">Academy</div><div class="page-sub">intelligence · learners · mastery</div>
@@ -545,11 +562,11 @@ function renderAcademyPane(ad, selfUid, profile) {
         <div class="card"><div class="h">Top learners</div>${topRows || `<div class="empty">No ranked learners yet.</div>`}</div>
       </div>
       <div class="card" style="margin-top:16px"><div class="h">Weakest skill (needs attention)</div>${weakRow}</div>
-      <div class="card" style="margin-top:16px"><div class="h">Engineering DNA <span class="badge b-accent">${profile?.uid === selfUid ? "you" : profile?.uid?.split("@")[0] || "learner"}</span><button class="qbtn" style="padding:5px 10px;font-size:11px" onclick="openLearner('${profile?.uid || ""}')">Drill down ▸</button></div>
+      <div class="card" style="margin-top:16px"><div class="h">Engineering DNA <span class="badge b-accent">${profile?.uid === selfUid ? "you" : esc(profile?.uid?.split("@")[0] || "learner")}</span><button class="qbtn" style="padding:5px 10px;font-size:11px" onclick='openLearner(${JSON.stringify(String(profile?.uid || ""))})'>Drill down ▸</button></div>
         <div id="dna-clusters">
-        ${profile && profile.dna.length ? profile.dna.map((c) => `<div class="row"><span class="k">${c.cluster}</span><span class="v">${c.score}%</span></div>${bar(c.score, 100, c.score >= 60 ? "var(--green)" : c.score >= 35 ? "var(--amber)" : "var(--red)")}`).join("") : `<div class="empty">No DNA yet — start !academy.</div>`}
-        ${profile?.career ? `<div class="row"><span class="k">Best-fit</span><span class="v">${profile.career.emoji} ${profile.career.role} (${profile.career.fit}%)</span></div>` : ""}
-        ${profile?.roadmapList && profile.roadmapList.length ? `<div class="row"><span class="k">Next</span><span class="v">${profile.roadmapList.slice(0, 4).join(", ")}</span></div>` : ""}
+        ${profile && profile.dna.length ? profile.dna.map((c) => `<div class="row"><span class="k">${esc(c.cluster)}</span><span class="v">${Number(c.score) || 0}%</span></div>${bar(c.score, 100, c.score >= 60 ? "var(--green)" : c.score >= 35 ? "var(--amber)" : "var(--red)")}`).join("") : `<div class="empty">No DNA yet — start !academy.</div>`}
+        ${profile?.career ? `<div class="row"><span class="k">Best-fit</span><span class="v">${profile?.career.emoji} ${esc(profile.career.role)} (${Number(profile.career.fit) || 0}%)</span></div>` : ""}
+        ${profile?.roadmapList && profile.roadmapList.length ? `<div class="row"><span class="k">Next</span><span class="v">${esc(profile.roadmapList.slice(0, 4).join(", "))}</span></div>` : ""}
         </div>
         <div class="feed-item" style="margin-top:8px"><div class="feed-ico">🧬</div><div class="feed-body"><div class="m">Click <b>Drill down</b> for the full learner view — evidence, attempts, weaknesses, recommended drills.</div></div></div>
       </div>
@@ -574,10 +591,10 @@ function renderIncidentsPane(id) {
         <div class="stat"><div class="n" style="color:var(--amber)">${id.active}</div><div class="l">active</div></div>
         <div class="stat"><div class="n" style="color:var(--red)">${id.critical}</div><div class="l">critical</div></div>
       </div>
-      <div class="card"><div class="h">Latest scenario ${latest ? `<span class="badge b-accent">${latest.difficulty}</span>` : ""}</div>
+      <div class="card"><div class="h">Latest scenario ${latest ? `<span class="badge b-accent">${esc(latest.difficulty)}</span>` : ""}</div>
         ${latest ? `
-          <div class="row"><span class="k">${latest.title}</span></div>
-          <div class="row"><span class="k">Skills</span><span class="v">${latest.skills.join(", ")}</span></div>
+          <div class="row"><span class="k">${esc(latest.title)}</span></div>
+          <div class="row"><span class="k">Skills</span><span class="v">${esc(latest.skills.join(", "))}</span></div>
         ` : `<div class="empty">No incident scenarios loaded.</div>`}
         <div class="feed-item" style="margin-top:8px"><div class="feed-ico">🚨</div><div class="feed-body"><div class="m">Run <b>!incident</b> in a chat to diagnose a live incident. Grades your root-cause + fix.</div></div></div>
       </div>
@@ -680,6 +697,14 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .page-sub{color:var(--muted);font-size:13px;margin-bottom:24px}
 
 .hero{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px;margin-bottom:22px;box-shadow:var(--shadow)}
+.command-hero{background:linear-gradient(135deg,#11183e,#202454 68%,#1c3c53);border-color:rgba(165,180,252,.24)}
+.hero-meta{color:#aeb7d1;font-size:12px;margin-top:8px}
+.quick-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 16px}
+.quick-card{display:flex;align-items:center;gap:11px;text-align:left;width:100%;padding:15px;border:1px solid var(--line);border-radius:13px;background:var(--panel);color:var(--text);text-decoration:none;cursor:pointer;transition:.15s}
+.quick-card:hover{transform:translateY(-1px);border-color:var(--line2);box-shadow:var(--shadow)}
+.quick-card>span:nth-child(2){flex:1;min-width:0}.quick-card b{display:block;font-size:13px}.quick-card small{display:block;color:var(--muted);font-size:11px;margin-top:3px;line-height:1.35}.quick-card>strong{color:var(--accent);font-size:18px}.quick-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--brand-soft);color:var(--accent);font-weight:800;font-size:12px;flex-shrink:0}
+.callout-warning{display:flex;gap:10px;align-items:flex-start;border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.07)}.callout-warning strong{color:var(--amber);font-size:13px;white-space:nowrap}.callout-warning span{color:var(--muted);font-size:12px}
+
 .hero .hrow{display:flex;align-items:center;gap:14px}
 .hero .avatar{width:52px;height:52px;border-radius:15px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0;color:#fff}
 .hero h2{font-size:18px;font-weight:800;display:flex;align-items:center;gap:10px;color:var(--text)}
@@ -729,7 +754,7 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .login{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line2);border-radius:22px;padding:38px 30px;text-align:center;box-shadow:var(--shadow)}
 .login-logo{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--cyan));display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:800}
 .login h1{font-size:20px;font-weight:800}
-.login p{color:var(--muted);font-size:13px;margin:8px 0 22px}
+.login p{color:var(--muted);font-size:13px;margin:8px 0 22px}.login-kicker{font-size:10px;letter-spacing:.14em;color:var(--accent);font-weight:800;margin-bottom:14px}.login-lede{line-height:1.55;max-width:300px;margin-left:auto!important;margin-right:auto!important}.login-label{display:block;text-align:left;color:var(--muted);font-size:12px;font-weight:700;margin:0 0 7px}.login-foot{display:flex;justify-content:space-between;gap:12px;margin-top:16px;color:var(--faint);font-size:11px}.login-foot a{color:var(--accent);text-decoration:none;font-weight:700}
 .login input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:13px;border-radius:11px;font-size:15px;outline:none;margin-bottom:12px}
 .login input:focus{border-color:var(--accent)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 18px;border-radius:11px;border:none;font-size:14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}
@@ -739,13 +764,8 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .hint{color:var(--faint);margin-top:12px;font-size:11px}
 
 @media(max-width:820px){
-  .sidebar{width:72px;padding:18px 8px}
-  .sb-name,.sb-group,.navitem span:not(.ico),.sb-online span{display:none}
-  .navitem{justify-content:center;padding:12px}
-  .navitem .ico{font-size:20px}
-  .sb-brand{justify-content:center;padding:0}
-  .main{padding:20px 16px 60px}
-  .grid2{grid-template-columns:1fr}
+  .sidebar{width:100%;height:auto;position:sticky;top:0;z-index:40;padding:10px 12px;border-right:0;border-bottom:1px solid var(--line);display:block}
+  .app{display:block}.sb-brand{padding:0 4px;margin-bottom:10px}.sb-name,.sb-group,.sb-online span{display:none}.sb-bottom{position:absolute;right:12px;top:12px;border:0;padding:0}.logout{width:auto;padding:7px 10px;font-size:11px}.navitem{display:inline-flex;justify-content:center;padding:8px 10px;margin:2px;font-size:11px}.navitem span:not(.ico){display:inline}.navitem .ico{font-size:14px;width:auto}.main{max-width:none;padding:22px 16px 50px}.grid2{grid-template-columns:1fr}.quick-grid{grid-template-columns:1fr}.theme-toggle{top:12px;right:12px}
 }
 </style>
 </head>
@@ -1098,39 +1118,39 @@ router.get("/", checkAuth, (req, res) => {
       const { buildLearnerSpace } = require("./tools/academy/learnerSpace");
       content += renderLearnerSpacePane(buildLearnerSpace(selfUid), selfUid);
     } catch (e) {
-      content += `<div class="pane" id="pane-learnerspace"><div class="page-title">Learner Space</div><div class="page-sub">ARIA knows you</div><div class="card"><div class="empty">Learner Space unavailable: ${e.message}</div></div></div>`;
+      content += `<div class="pane" id="pane-learnerspace"><div class="page-title">Learner Space</div><div class="page-sub">ARIA knows you</div><div class="card"><div class="empty">Learner Space unavailable: ${esc(e.message)}</div></div></div>`;
     }
     content += renderIncidentsPane(id);
     content += renderBrainPane(b);
     content += `
     <div class="pane" id="pane-missions"><div class="page-title">Missions</div><div class="page-sub">what ARIA is building</div>
       ${d.missions.length ? `<div class="grid2">${d.missions.slice(0,12).map(m=>`
-        <div class="card"><div class="h"><span>${m.id||"mission"}</span><span class="badge ${m.status==='completed'?'b-green':m.status==='running'?'b-accent':m.status==='failed'?'b-red':'b-muted'}">${m.status}</span></div>
-          <div class="row"><span class="k">${m.objective||"Untitled"}</span></div>
-          <div class="row"><span class="k">Progress</span><span class="v">${m.progress||"—"}</span></div>
+        <div class="card"><div class="h"><span>${esc(m.id || "mission")}</span><span class="badge ${m.status==='completed'?'b-green':m.status==='running'?'b-accent':m.status==='failed'?'b-red':'b-muted'}">${esc(m.status)}</span></div>
+          <div class="row"><span class="k">${esc(m.objective || "Untitled")}</span></div>
+          <div class="row"><span class="k">Progress</span><span class="v">${esc(m.progress || "—")}</span></div>
         </div>`).join("")}</div>` : `<div class="card"><div class="empty">No missions yet.</div></div>`}
     </div>`;
 
     content += `
     <div class="pane" id="pane-memory"><div class="page-title">Memory</div><div class="page-sub">what she remembers</div>
       <div class="card"><div class="h">Long-term memories (${d.memories.length})</div>
-        ${d.memories.length ? d.memories.slice(-12).reverse().map(m=>`<div class="feed-item"><div class="feed-ico">🧠</div><div class="feed-body"><div class="t">${m.text}</div><div class="s">${new Date(m.ts||Date.now()).toLocaleString()}</div></div></div>`).join("") : `<div class="empty">No memories yet.</div>`}
+        ${d.memories.length ? d.memories.slice(-12).reverse().map(m=>`<div class="feed-item"><div class="feed-ico">🧠</div><div class="feed-body"><div class="t">${esc(m.text)}</div><div class="s">${esc(new Date(m.ts||Date.now()).toLocaleString())}</div></div></div>`).join("") : `<div class="empty">No memories yet.</div>`}
       </div>
     </div>`;
 
     content += `
     <div class="pane" id="pane-media"><div class="page-title">Media</div><div class="page-sub">images & voice</div>
       <div class="card"><div class="h">Media remembered (${d.mediaMem.length})</div>
-        ${d.mediaMem.length ? d.mediaMem.map(m=>`<div class="feed-item"><div class="feed-ico">${m.kind==='image'?'🖼️':'🎤'}</div><div class="feed-body"><div class="m">${(m.summary||"").slice(0,110)}</div><div class="s">${m.kind} · ${new Date(m.ts).toLocaleString()}</div></div></div>`).join("") : `<div class="empty">Send ARIA an image or voice note.</div>`}
+        ${d.mediaMem.length ? d.mediaMem.map(m=>`<div class="feed-item"><div class="feed-ico">${m.kind==='image'?'🖼️':'🎤'}</div><div class="feed-body"><div class="m">${esc((m.summary||"").slice(0,110))}</div><div class="s">${esc(m.kind)} · ${esc(new Date(m.ts).toLocaleString())}</div></div></div>`).join("") : `<div class="empty">Send ARIA an image or voice note.</div>`}
       </div>
     </div>`;
 
     content += `
     <div class="pane" id="pane-household"><div class="page-title">Household</div><div class="page-sub">shared space</div>
-      ${d.households.length ? d.households.map(h=>`<div class="card"><div class="h">🏠 ${h.name}</div>
+      ${d.households.length ? d.households.map(h=>`<div class="card"><div class="h">🏠 ${esc(h.name)}</div>
         <div class="row"><span class="k">Members</span><span class="v">${h.members.length}</span></div>
         <div class="row"><span class="k">Tasks</span><span class="v">${h.sharedTasks.length}</span></div>
-        ${h.sharedTasks.length ? h.sharedTasks.slice(-5).map(t=>`<div class="feed-item"><div class="feed-ico">${t.done?'✅':'⬜'}</div><div class="feed-body"><div class="m">${t.text}</div></div></div>`).join("") : ""}
+        ${h.sharedTasks.length ? h.sharedTasks.slice(-5).map(t=>`<div class="feed-item"><div class="feed-ico">${t.done?'✅':'⬜'}</div><div class="feed-body"><div class="m">${esc(t.text)}</div></div></div>`).join("") : ""}
       </div>`).join("") : `<div class="card"><div class="empty">No households. In a group: !household create</div></div>`}
     </div>`;
 

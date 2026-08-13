@@ -621,60 +621,81 @@ function renderBrainPane(b) {
 
 function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "") {
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>${title} · ARIA</title>
 <style>
 :root{
-  --bg:#0b0f17; --panel:#121827; --panel2:#0f1522; --panel3:#182131; --line:#1e2939; --line2:#2a3a50;
-  --text:#e2e8f0; --muted:#8b97ab; --faint:#5a6b8a;
-  --accent:#22d3ee; --accent2:#818cf8; --cyan:#22d3ee; --green:#34d399; --amber:#fbbf24; --red:#f87171;
-  --shadow:0 1px 3px rgba(0,0,0,.5),0 8px 24px rgba(0,0,0,.45);
+  /* Brand — professional indigo/violet */
+  --brand:#6366f1; --brand2:#8b5cf6; --brand-soft:rgba(99,102,241,.12);
+  /* Theme-agnostic status colors */
+  --green:#22c55e; --amber:#f59e0b; --red:#ef4444;
+  --radius:14px; --radius-sm:10px;
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 8px 24px rgba(16,24,40,.06);
+  --shadow-lg:0 2px 4px rgba(16,24,40,.06),0 16px 40px rgba(16,24,40,.1);
+}
+[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0b0f1a; --panel:#141a29; --panel2:#0f1522; --panel3:#1b2334; --line:#222c42; --line2:#2e3a55;
+  --text:#e7ecf5; --muted:#93a0b8; --faint:#5d6b88;
+  --accent:#a5b4fc; --accent2:#c4b5fd; --cyan:#67e8f9;
+}
+[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f6f7fb; --panel:#ffffff; --panel2:#f1f3f9; --panel3:#e9ecf5; --line:#e2e6f0; --line2:#cdd3e5;
+  --text:#1a2130; --muted:#5b6678; --faint:#8a93a8;
+  --accent:#6366f1; --accent2:#8b5cf6; --cyan:#0891b2;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.07);
+  --shadow-lg:0 2px 4px rgba(16,24,40,.07),0 16px 40px rgba(16,24,40,.1);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:radial-gradient(1200px 600px at 20% -10%,rgba(34,211,238,.08),transparent),radial-gradient(1000px 500px at 90% 0%,rgba(129,140,248,.08),transparent),linear-gradient(160deg,#0b0f17 0%,#0e1320 50%,#0b0f17 100%);color:var(--text);min-height:100vh;background-attachment:fixed}
+body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
 .mono{font-family:ui-monospace,Consolas,monospace}
 
+/* Theme toggle — fixed top-right, styled for both themes */
+.theme-toggle{position:fixed;top:16px;right:18px;z-index:60;width:38px;height:38px;border-radius:11px;border:1px solid var(--line2);background:var(--panel);color:var(--text);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:.15s}
+.theme-toggle:hover{transform:translateY(-1px);box-shadow:var(--shadow-lg)}
+
 .app{display:flex;min-height:100vh}
-.sidebar{width:236px;flex-shrink:0;background:#fff;border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
-.sb-brand{display:flex;align-items:center;gap:10px;padding:0 8px;margin-bottom:24px}
-.sb-logo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:800}
-.sb-name{font-size:17px;font-weight:800;color:var(--text)}
+.sidebar{width:240px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.sb-brand{display:flex;align-items:center;gap:11px;padding:0 8px;margin-bottom:26px}
+.sb-logo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:19px;font-weight:800;box-shadow:0 4px 12px var(--brand-soft)}
+.sb-name{font-size:16px;font-weight:800;color:var(--text);letter-spacing:-.01em}
 .sb-name small{display:block;font-size:11px;color:var(--muted);font-weight:600}
-.sb-group{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:700;padding:0 10px;margin:14px 0 6px}
-.navitem{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:10px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;transition:.15s;border:1px solid transparent}
+.sb-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint);font-weight:700;padding:0 10px;margin:16px 0 6px}
+.navitem{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:10px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;transition:.14s;border:1px solid transparent}
 .navitem .ico{font-size:16px;width:20px;text-align:center}
 .navitem:hover{background:var(--panel2);color:var(--text)}
-.navitem.active{background:rgba(124,92,255,.1);color:var(--accent);border-color:rgba(124,92,255,.18)}
+.navitem.active{background:var(--brand-soft);color:var(--accent);border-color:var(--brand-soft)}
 .sb-bottom{margin-top:auto;padding-top:16px;border-top:1px solid var(--line)}
 .sb-online{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:0 12px;margin-bottom:12px}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
-.logout{width:100%;background:none;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(34,197,94,.15)}
+.logout{width:100%;background:none;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;transition:.14s}
 .logout:hover{color:var(--red);border-color:rgba(239,68,68,.4)}
 
-.main{flex:1;padding:30px 34px 60px;max-width:1100px}
-.page-title{font-size:26px;font-weight:800;color:var(--text)}
-.page-sub{color:var(--muted);font-size:13px;margin-bottom:22px}
+.main{flex:1;padding:32px 36px 60px;max-width:1120px}
+.page-title{font-size:24px;font-weight:800;color:var(--text);letter-spacing:-.02em}
+.page-sub{color:var(--muted);font-size:13px;margin-bottom:24px}
 
-.hero{background:linear-gradient(120deg,#fff 0%,#f7f8ff 100%);border:1px solid var(--line);border-radius:18px;padding:22px;margin-bottom:20px;box-shadow:var(--shadow)}
+.hero{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px;margin-bottom:22px;box-shadow:var(--shadow)}
 .hero .hrow{display:flex;align-items:center;gap:14px}
-.hero .avatar{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--cyan));display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0;color:#fff}
-.hero h2{font-size:18px;font-weight:800;display:flex;align-items:center;gap:10px}
+.hero .avatar{width:52px;height:52px;border-radius:15px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0;color:#fff}
+.hero h2{font-size:18px;font-weight:800;display:flex;align-items:center;gap:10px;color:var(--text)}
 .hero .sub{color:var(--muted);font-size:13px;margin-top:3px}
 .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
-.qbtn{display:inline-flex;align-items:center;gap:7px;padding:10px 16px;border-radius:11px;font-size:13px;font-weight:700;cursor:pointer;border:none;background:var(--panel2);color:var(--text);transition:.15s}
+.qbtn{display:inline-flex;align-items:center;gap:7px;padding:10px 16px;border-radius:11px;font-size:13px;font-weight:700;cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--text);transition:.14s}
 .qbtn:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
-.qbtn.purple{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff}
+.qbtn.purple{background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff;border:none}
 
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:20px}
-.stat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
-.stat .n{font-size:26px;font-weight:800}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:22px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+.stat .n{font-size:26px;font-weight:800;color:var(--text);letter-spacing:-.02em}
 .stat .l{color:var(--muted);font-size:12px;margin-top:3px}
 
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
 .card .h{font-size:13px;font-weight:800;color:var(--text);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
 .card .h .badge{font-size:10px;padding:2px 9px;border-radius:99px}
 .row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
@@ -731,6 +752,7 @@ body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:radial
 <body>
 ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 <div class="app">
+  <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
   <aside class="sidebar">
     <div class="sb-brand"><div class="sb-logo">◢</div><div class="sb-name">ARIA<small>control center</small></div></div>
     <div class="sb-group">Overview</div>
@@ -746,7 +768,6 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="navitem" data-pane="learnerspace"><span class="ico">🧑‍🎓</span><span>Learners</span></div>
     <div class="sb-group">Automation</div>
     <div class="navitem" data-pane="missions"><span class="ico">◆</span><span>Missions</span></div>
-    <a class="navitem" style="text-decoration:none" href="/dashboard/anime"><span class="ico">🎬</span><span>Anime</span></a>
     <div class="navitem" data-pane="downloads"><span class="ico">⬇️</span><span>Downloads</span></div>
     <div class="navitem" data-pane="sources"><span class="ico">🧩</span><span>Sources</span></div>
     <div class="sb-group">Operations</div>
@@ -779,6 +800,22 @@ function showPane(p){
 }
 navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
 showPane('home');
+// ── Theme toggle (light/dark) — persisted in localStorage ──
+(function(){
+  const root=document.documentElement;
+  const btn=document.getElementById('themeToggle');
+  const saved=localStorage.getItem('aria-theme');
+  const prefersDark=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const theme=saved||(prefersDark?'dark':'light');
+  root.setAttribute('data-theme',theme);
+  if(btn)btn.textContent=theme==='dark'?'☀️':'🌙';
+  if(btn)btn.addEventListener('click',()=>{
+    const next=root.getAttribute('data-theme')==='dark'?'light':'dark';
+    root.setAttribute('data-theme',next);
+    localStorage.setItem('aria-theme',next);
+    btn.textContent=next==='dark'?'☀️':'🌙';
+  });
+})();
 // Learner drill-down — fetch full profile + evidence and open the modal.
 async function openLearner(uid){
   const modal=document.getElementById('learner-modal');

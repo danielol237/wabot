@@ -25,20 +25,22 @@ const { log, error, warn } = require("../utils/logger");
 const TEMP_DIR = path.join(__dirname, "../../temp");
 const QUEUE_FILE = path.join(__dirname, "../../data/animeQueue.json");
 
-// yt-dlp is an external binary (not an npm dep). Verify it's present and
-// report clearly so a deploy without it fails loudly instead of silently
-// breaking every download at the yt-dlp step.
+// yt-dlp is an external binary (not an npm dep). Cache the check so every
+// queued job fails quickly and consistently when deployment dependencies are missing.
+let ytDlpCheck = null;
 function checkYtDlp() {
-  return new Promise((resolve) => {
+  if (ytDlpCheck) return ytDlpCheck;
+  ytDlpCheck = new Promise((resolve) => {
     execFile("yt-dlp", ["--version"], { timeout: 8000 }, (err, stdout) => {
       if (err) {
-        error("yt-dlp binary NOT available — anime downloads will fail at the download step. Install yt-dlp on the host (e.g. pip install yt-dlp) or add it to the deployment.");
+        error("yt-dlp binary NOT available — install yt-dlp before using anime downloads.");
         return resolve(false);
       }
       log(`[anime] yt-dlp ${String(stdout).trim()} ready`);
       resolve(true);
     });
   });
+  return ytDlpCheck;
 }
 
 // Probe a single external binary and report availability. Used by the dashboard
@@ -469,6 +471,20 @@ async function runJob(job) {
   };
 
   try {
+    const [ytReady, ffprobeReady, ffmpegReady] = await Promise.all([
+      checkYtDlp(),
+      checkBinary("ffprobe", ["-version"]),
+      checkBinary("ffmpeg", ["-version"]),
+    ]);
+    if (!ytReady || !ffprobeReady || !ffmpegReady) {
+      const missing = [!ytReady ? "yt-dlp" : null, !ffprobeReady ? "ffprobe" : null, !ffmpegReady ? "ffmpeg" : null].filter(Boolean).join(", ");
+      const message = `Anime downloads are unavailable because ${missing} ${missing.includes(",") ? "are" : "is"} not installed. Ask the operator to install the media runtime and retry.`;
+      job.status = "failed";
+      job.finishedAt = Date.now();
+      job.error = jobError("DEPENDENCY_MISSING", "runtime", "preflight", message, false);
+      step("runtime", "preflight", false, message);
+      return job;
+    }
     send(`⏬ *${job.name}* — Ep ${job.episode}\nResolving a playable source…`);
 
     // ── SOURCE RESOLUTION ENGINE ──

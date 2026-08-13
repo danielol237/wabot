@@ -12,14 +12,17 @@
 # Use Node 20 LTS slim — small footprint (matters on 256–512MB free tiers).
 FROM node:20-slim
 
-# Runtime tools ARIA needs (media/anime). ffmpeg for HLS merge, yt-dlp for downloads.
-# python3 for the sandbox fallback + gstt.py voice. Kept minimal.
+# Runtime tools ARIA needs (media/anime). ffmpeg/ffprobe merge and validate media;
+# yt-dlp resolves and downloads HLS/MP4 sources; python3 supports voice/sandbox helpers.
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       ffmpeg \
       python3 \
+      python3-pip \
       ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir yt-dlp 2>/dev/null || true
+    && pip3 install --break-system-packages --no-cache-dir yt-dlp \
+    && command -v yt-dlp >/dev/null \
+    && command -v ffprobe >/dev/null \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

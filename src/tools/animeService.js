@@ -28,6 +28,7 @@ function fromAnilist(page) {
     title: a.title?.english || a.title?.romaji || a.title?.native || "Untitled",
     cover: a.coverImage?.extraLarge || a.coverImage?.large || "",
     description: a.description ? a.description.replace(/<[^>]+>/g, "").slice(0, 400) : "",
+    overview: a.description ? a.description.replace(/<[^>]+>/g, "").slice(0, 400) : "",
     genres: a.genres || [],
     status: a.status ? a.status.replace(/_/g, " ") : "",
     year: a.seasonYear,
@@ -258,10 +259,19 @@ async function getDetails(entry) {
     } catch (_) {}
   }
 
+  if (provider === "anilist") {
+    const data = await anilist(`query($id:Int){Media(id:$id,type:ANIME){id title{english romaji native} coverImage{extraLarge large} description genres status seasonYear averageScore episodes format}}`, { id: Number(id) });
+    const a = data?.Media;
+    if (a) {
+      const description = a.description ? a.description.replace(/<[^>]+>/g, "").slice(0, 800) : "";
+      return { id: String(a.id), title: a.title?.english || a.title?.romaji || a.title?.native || "Untitled", cover: a.coverImage?.extraLarge || a.coverImage?.large || "", description, overview: description, genres: a.genres || [], status: a.status ? a.status.replace(/_/g, " ") : "", year: a.seasonYear, rating: a.averageScore ? a.averageScore / 10 : null, episodes: a.episodes, type: a.format, provider: "anilist" };
+    }
+  }
+
   // Fall back to whatever we already know about it.
   return {
-    id, title: entry.title || "Unknown", cover: entry.cover || "", description: entry.description || "",
-    genres: entry.genres || [], status: entry.status || "", year: entry.year || "",
+    id, title: entry.title || "Untitled", cover: entry.cover || "", description: entry.description || "",
+    overview: entry.overview || entry.description || "", genres: entry.genres || [], status: entry.status || "", year: entry.year || "",
     rating: entry.rating || null, episodes: entry.episodes || null, type: entry.type || "",
     provider,
   };
@@ -280,6 +290,12 @@ async function getEpisodes(entry) {
     } catch (_) { return []; }
   }
 
+  if (provider === "anilist") {
+    const data = await anilist(`query($id:Int){Media(id:$id,type:ANIME){episodes}}`, { id: Number(id) });
+    const count = Number(data?.Media?.episodes || entry.episodes || 0);
+    if (count > 0) return Array.from({ length: Math.min(count, 300) }, (_, i) => ({ number: i + 1, title: `Episode ${i + 1}` }));
+  }
+
   if (provider === "consumet" && entry._consumetSource) {
     try {
       const { consumetEpisodeStream } = require("./animeConsumet");
@@ -294,9 +310,10 @@ async function getEpisodes(entry) {
     } catch (_) {}
   }
 
-  // Generic fallback: list count range.
-  const n = entry.episodes || 12;
-  return Array.from({ length: Math.min(n, 200) }, (_, i) => ({ number: i + 1, title: `Episode ${i + 1}` }));
+  // Never invent an episode count. Unknown or ongoing series should expose a
+  // manual episode picker in the UI rather than misleading users with 12 items.
+  const n = Number(entry.episodes) || 0;
+  return n > 0 ? Array.from({ length: Math.min(n, 200) }, (_, i) => ({ number: i + 1, title: `Episode ${i + 1}` })) : [];
 }
 
 // ── Browse with filters (AniList) ─────────────────────────────────
@@ -307,8 +324,8 @@ async function browseAnime({ genre, status, year, type, sort = "POPULARITY_DESC"
   if (status) args.push(`status:${status}`);
   if (year) args.push(`seasonYear:${Number(year)}`);
   if (type) args.push(`format:${type}`);
-  const filterStr = args.join(",");
-  const query = `query($page:Int){Page(page:$page,perPage:${perPage}){media(${filterStr},type:ANIME,sort:${sort}){id
+  const filterStr = args.length ? args.join(",") + "," : "";
+  const query = `query($page:Int){Page(page:$page,perPage:${perPage}){media(${filterStr}type:ANIME,sort:${sort}){id
     title{english romaji native} coverImage{extraLarge large} description genres status
     seasonYear averageScore episodes format}}}`;
   const data = await anilist(query, { page: 1 });

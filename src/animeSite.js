@@ -14,12 +14,13 @@
 //   /anime/proxy           → HLS relay (referer-gated streams)
 
 const express = require("express");
+const fs = require("fs");
 const http = require("http");
 const https = require("https");
 const router = express.Router();
 const service = require("./tools/animeService");
 const { resolveEpisode } = require("./tools/sourceResolver");
-const { enqueueAnimeJob, snapshot, retryJob } = require("./tools/animeJobManager");
+const { enqueueAnimeJob, snapshot, retryJob, getJob } = require("./tools/animeJobManager");
 
 router.use(express.urlencoded({ extended: true }));
 
@@ -28,6 +29,16 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 const PROVIDER_LABEL = { jikan: "MAL", anilist: "AniList", consumet: "Consumet", animepahe: "AnimePahe", gogoanime: "Gogoanime" };
+
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+function detailsFast(entry) {
+  return withTimeout(service.getDetails(entry), 5000, { id: entry.id, provider: entry.provider, title: entry.title || "Anime" });
+}
 
 function layout(title, inner) {
   return `<!DOCTYPE html><html lang="en" data-theme="dark">
@@ -87,7 +98,7 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .eprow{display:flex;gap:8px;margin-top:9px}
 .player{background:#000;border:1px solid var(--line);border-radius:16px;overflow:hidden;max-width:960px;aspect-ratio:16/9;margin:16px 0}
 .player video{width:100%;height:100%;display:block}
-.job{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+.job{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}.manual{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.manual input{width:130px;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 11px;border-radius:10px}.manual .btn{flex:0 0 auto}
 .job .row{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:4px 0}
 .job .k{color:var(--muted)}
 .footer{border-top:1px solid var(--line);padding:24px;text-align:center;color:var(--faint);font-size:12px}
@@ -172,8 +183,10 @@ async function titlePage(req) {
   const id = req.params.id;
   const provider = req.query.prov || "anilist";
   const entry = { id, provider, title: "" };
-  const d = await service.getDetails(entry).catch(() => ({}));
-  const eps = await service.getEpisodes(entry).catch(() => []);
+  const [d, eps] = await Promise.all([
+    detailsFast(entry),
+    withTimeout(service.getEpisodes(entry), 7000, []),
+  ]);
   const html = `
     <div class="detail">
       ${d.cover ? `<img class="poster" src="${esc(d.cover)}" onerror="this.style.visibility='hidden'" />` : `<div class="poster"></div>`}
@@ -191,7 +204,7 @@ async function titlePage(req) {
         ${d.description ? `<div class="desc">${esc(d.description.slice(0, 700))}</div>` : ""}
       </div>
     </div>
-    <div class="sec-h">Episodes${eps.length ? ` (${eps.length})` : ""}</div>
+    <div class="sec-h">Episodes${d.episodes ? ` (${esc(d.episodes)})` : eps.length ? ` (${eps.length})` : ""}</div>
     ${eps.length ? `<div class="epgrid">${eps.map((ep) => `
       <div class="ep">
         <div class="n">Ep ${ep.number}</div>
@@ -200,8 +213,9 @@ async function titlePage(req) {
           <a class="btn btn-watch" href="/anime/watch/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep.number}">▶ Watch</a>
           <a class="btn btn-dl" href="/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep.number}">DL</a>
         </div>
-      </div>`).join("")}</div>` : `<div class="empty">Couldn't load episodes. Try another provider.</div>`}`;
-  return layout(d.title || "Anime", html);
+      </div>`).join("")}</div>` : `<div class="empty">Episode list is not available from this provider. You can still enter an episode number below and ARIA will resolve it on demand.<div class="manual"><input id="manual-ep" type="number" min="1" value="1" aria-label="Episode number"><a id="manual-watch" class="btn btn-watch" href="/anime/watch/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=1">▶ Watch</a><a id="manual-dl" class="btn btn-dl" href="/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=1">Download</a></div></div>`}`;
+  const withManualScript = html.includes("manual-ep") ? `${html}<script>(function(){var i=document.getElementById('manual-ep'),w=document.getElementById('manual-watch'),d=document.getElementById('manual-dl');function sync(){var n=Math.max(1,parseInt(i.value||'1',10));w.href='/anime/watch/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep='+n;d.href='/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep='+n;}i.addEventListener('input',sync);})();</script>` : html;
+  return layout(d.title || "Anime", withManualScript);
 }
 
 async function watchPage(req) {
@@ -209,7 +223,7 @@ async function watchPage(req) {
   const provider = req.query.prov || "anilist";
   const ep = Number(req.query.ep) || 1;
   const entry = { id, provider, title: "" };
-  const d = await service.getDetails(entry).catch(() => ({}));
+  const d = await detailsFast(entry);
   // Resolve the stream with a hard timeout so a slow/hung provider can't freeze
   // the watch page — the page always renders (player or a retry message).
   const report = await Promise.race([
@@ -233,22 +247,30 @@ async function watchPage(req) {
     <script>var u=${JSON.stringify(proxied)},v=document.getElementById('v');if(Hls.isSupported()){var h=new Hls();h.loadSource(u);h.attachMedia(v)}else if(v.canPlayType('application/vnd.apple.mpegurl')){v.src=u}</script>`);
 }
 
-async function dlPage(req) {
+async function dlPage(req, res) {
   const id = req.params.id;
   const provider = req.query.prov || "anilist";
   const ep = Number(req.query.ep) || 1;
   const entry = { id, provider, title: "" };
-  const d = await service.getDetails(entry).catch(() => ({}));
-  const title = d.title || "Anime";
-  const job = enqueueAnimeJob({ name: title, episode: ep, preferred: provider === "jikan" ? null : provider, quality: "best", sock: null, chatId: null, quotedMsg: null });
-  return layout("Download", `
-    <div class="sec-h">Download — ${esc(title)} Ep ${ep}</div>
-    <div class="job">
-      <div class="row"><span class="k">Job</span><span>${esc(job.id)}</span></div>
-      <div class="row"><span class="k">Status</span><span>${esc(job.status)}</span></div>
-      <div class="row"><span class="k">Quality</span><span>best</span></div>
-    </div>
-    <div class="empty">Refresh this page to check status. When ready, the file downloads here. This is queued in the background — check /anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep} to track.</div>`);
+  const d = await detailsFast(entry);
+  const title = d.title || `Anime ${id}`;
+  let job = req.query.job ? getJob(String(req.query.job)) : null;
+  if (req.query.retry === "1" && job?.status === "failed") {
+    job = retryJob(job.id) || job;
+    return res.redirect(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep}&job=${encodeURIComponent(job.id)}`);
+  }
+  if (!job) {
+    job = enqueueAnimeJob({ name: title, episode: ep, preferred: provider === "jikan" ? null : provider, quality: "best", sock: null, chatId: null, quotedMsg: null });
+    return res.redirect(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep}&job=${encodeURIComponent(job.id)}`);
+  }
+  const status = job.status === "done" ? "Ready" : job.status === "failed" ? "Download failed" : job.status === "running" ? "Downloading" : "Queued";
+  const progress = job.progress?.percent != null ? `<div class="row"><span class="k">Progress</span><span>${Math.round(job.progress.percent)}%${job.progress.speed ? ` · ${esc(job.progress.speed)}` : ""}</span></div>` : "";
+  const result = job.status === "done" && job.result?.filePath && fs.existsSync(job.result.filePath)
+    ? `<a class="btn btn-watch" href="/anime/file/${encodeURIComponent(job.id)}" style="margin-top:12px">Download ${esc(title)} — episode ${ep}</a>`
+    : "";
+  const error = job.status === "failed" ? `<div class="empty" style="color:var(--red)">${esc(job.error?.code || "DOWNLOAD_FAILED")}: ${esc(job.error?.message || "The download could not be completed.")}<br><a class="btn btn-dl" href="/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep}&job=${encodeURIComponent(job.id)}&retry=1" style="margin-top:12px">Retry</a></div>` : "";
+  const refresh = ["queued", "running"].includes(job.status) ? `<script>setTimeout(()=>location.reload(),4000)</script>` : "";
+  return layout("Download", `<div class="sec-h">Download — ${esc(title)} · episode ${ep}</div><div class="job"><div class="row"><span class="k">Status</span><strong>${status}</strong></div><div class="row"><span class="k">Job</span><span>${esc(job.id)}</span></div><div class="row"><span class="k">Quality</span><span>best</span></div>${progress}</div>${result}${error}${!result && !error ? `<div class="empty">This page updates automatically while the source is resolved and the file is prepared.</div>` : ""}${refresh}`);
 }
 
 // HLS relay for protected streams (referer-gated).
@@ -277,6 +299,18 @@ router.get("/latest", async (req, res) => { try { res.send(await latestPage()); 
 router.get("/browse", async (req, res) => { try { res.send(await browsePage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
 router.get("/title/:id", async (req, res) => { try { res.send(await titlePage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
 router.get("/watch/:id", async (req, res) => { try { res.send(await watchPage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/dl/:id", async (req, res) => { try { res.send(await dlPage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
+router.get("/dl/:id", async (req, res) => { try { const page = await dlPage(req, res); if (!res.headersSent && page) res.send(page); } catch (e) { if (!res.headersSent) res.status(500).send(esc(e.message)); } });
+router.get("/file/:id", (req, res) => {
+  try {
+    const job = getJob(String(req.params.id));
+    const fp = job?.result?.filePath;
+    if (!job || job.status !== "done" || !fp || !fs.existsSync(fp)) return res.status(404).send("File not found or no longer available.");
+    const safe = `${job.name || "anime"}-ep${job.episode || ""}.mp4`.replace(/[^a-z0-9._-]+/gi, "_");
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Content-Disposition", `attachment; filename="${safe}"`);
+    res.setHeader("Content-Length", String(job.result.size || fs.statSync(fp).size));
+    fs.createReadStream(fp).pipe(res);
+  } catch (e) { res.status(500).send(esc(e.message)); }
+});
 
 module.exports = router;

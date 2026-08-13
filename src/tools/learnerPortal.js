@@ -17,8 +17,30 @@ const fs = require("fs");
 const path = require("path");
 
 const router = express.Router();
+const linking = require("./portalLinking");
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function inlineText(value) {
+  return esc(value).replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\*([^*]+)\*/g, "<code>$1</code>");
+}
+function portalCsrf(req) {
+  const session = req.cookies?.aria_portal || "";
+  return crypto.createHmac("sha256", SESSION_SECRET || "missing").update(session).digest("hex").slice(0, 32);
+}
+function portalCsrfOk(req) {
+  return !!req.body?._csrf && req.body._csrf === portalCsrf(req);
+}
+function linkedUid(accountId) {
+  return linking.getLinkedUid(accountId) || String(accountId || "");
+}
+function issuePortalToken(account) {
+  return signToken({ sub: account.id, name: account.name, email: account.email, exp: Date.now() + 7 * 86400000 });
+}
 
 // Cookie reader (populates req.cookies) — must run before any route uses it.
+router.use(express.urlencoded({ extended: false }));
 router.use((req, res, next) => {
   const raw = req.headers.cookie || "";
   req.cookies = req.cookies || {};
@@ -37,7 +59,7 @@ router.use((req, res, next) => {
 // into the Client ID field). Google rejects an invalid_client otherwise.
 const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || "").replace(/^https?:\/\//i, "").trim();
 const GOOGLE_CLIENT_SECRET = String(process.env.GOOGLE_CLIENT_SECRET || "").replace(/^https?:\/\//i, "").trim();
-const SESSION_SECRET = process.env.PORTAL_SESSION_SECRET || process.env.DASHBOARD_CSRF_SECRET || "aria-portal-secret";
+const SESSION_SECRET = process.env.PORTAL_SESSION_SECRET || process.env.DASHBOARD_CSRF_SECRET || "";
 // Public URL of this bot, used for the OAuth redirect URI.
 const BASE_URL = String(process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
 
@@ -55,13 +77,32 @@ function save() {
 }
 load();
 
-function hashPw(pw) { return crypto.createHash("sha256").update(pw + "|aria").digest("hex"); }
+function hashPw(pw, salt = crypto.randomBytes(16).toString("hex")) {
+  const digest = crypto.scryptSync(String(pw), salt, 32).toString("hex");
+  return `${salt}:${digest}`;
+}
+function verifyPw(pw, stored) {
+  const value = String(stored || "");
+  if (value.includes(":")) {
+    const [salt, expected] = value.split(":");
+    try {
+      const actual = crypto.scryptSync(String(pw), salt, 32).toString("hex");
+      return actual.length === expected.length && crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
+    } catch (_) { return false; }
+  }
+  // Backward compatibility for accounts created before the salted format.
+  const legacy = crypto.createHash("sha256").update(String(pw) + "|aria").digest("hex");
+  return value === legacy;
+}
 function signToken(payload) {
+  if (!SESSION_SECRET) throw new Error("PORTAL_SESSION_SECRET is not configured");
+
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const sig = crypto.createHmac("sha256", SESSION_SECRET).update(body).digest("base64url");
   return `${body}.${sig}`;
 }
 function verifyToken(token) {
+  if (!SESSION_SECRET) return null;
   try {
     const [body, sig] = String(token || "").split(".");
     const expect = crypto.createHmac("sha256", SESSION_SECRET).update(body).digest("base64url");
@@ -75,8 +116,9 @@ function verifyToken(token) {
 // Auth middleware for portal pages.
 function portalAuth(req, res, next) {
   const payload = verifyToken(req.cookies?.aria_portal);
-  if (!payload) return res.redirect("/portal/login");
-  req.learner = payload;
+  const account = payload?.sub ? accounts[payload.sub] : null;
+  if (!payload || !account) return res.redirect("/portal/login?error=session-invalid");
+  req.learner = { ...payload, uid: linkedUid(account.id), linked: !!linking.getLinkedUid(account.id) };
   next();
 }
 
@@ -118,7 +160,7 @@ router.get("/auth/google/callback", async (req, res) => {
       save();
     }
     const learner = accounts[sub];
-    const token = signToken({ sub, name: learner.name, email: learner.email, exp: Date.now() + 7 * 86400000 });
+    const token = issuePortalToken(learner);
     res.cookie("aria_portal", token, { httpOnly: true, sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
     return res.redirect("/portal");
   } catch (e) {
@@ -137,52 +179,46 @@ router.post("/auth/email", express.json(), (req, res) => {
   if (mode === "signup") {
     if (existing) return res.status(409).json({ error: "account already exists — log in" });
     const id = "em_" + crypto.randomBytes(6).toString("hex");
-    accounts[id] = { id, name: name || clean.split("@")[0], email: clean, passwordHash: hashPw(password), createdAt: Date.now() };
+    accounts[id] = { id, name: String(name || clean.split("@")[0]).trim().slice(0, 80), email: clean, passwordHash: hashPw(password), createdAt: Date.now() };
     save();
     const learner = accounts[id];
-    const token = signToken({ sub: id, name: learner.name, email: learner.email, exp: Date.now() + 7 * 86400000 });
+    const token = issuePortalToken(learner);
     res.cookie("aria_portal", token, { httpOnly: true, sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
     return res.json({ ok: true });
   }
   // login
   if (!existing) return res.status(401).json({ error: "no account with that email" });
-  if (existing.passwordHash !== hashPw(password)) return res.status(401).json({ error: "wrong password" });
-  const token = signToken({ sub: existing.id, name: existing.name, email: existing.email, exp: Date.now() + 7 * 86400000 });
+  if (!verifyPw(password, existing.passwordHash)) return res.status(401).json({ error: "wrong password" });
+  const token = issuePortalToken(existing);
   res.cookie("aria_portal", token, { httpOnly: true, sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
   return res.json({ ok: true });
 });
 
+router.post("/link", portalAuth, (req, res) => {
+  if (!portalCsrfOk(req)) return res.status(403).send("Invalid or missing form token.");
+  const uid = linking.consumeCode(req.body.code);
+  if (!uid) return res.redirect("/portal?error=invalid-link-code");
+  linking.linkAccount(req.learner.sub, uid);
+  res.redirect("/portal?linked=1");
+});
+
 router.get("/logout", (req, res) => {
   res.clearCookie("aria_portal", { path: "/portal" });
-  res.redirect("/portal/login");
+  res.redirect("/portal/login?error=logged-out");
 });
 
 // ── Portal pages ────────────────────────────────────────────────
 const PAGE = (title, body) => `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title} · ARIA Academy</title>
+<title>${esc(title)} · ARIA Academy</title>
 <style>
-  *{box-sizing:border-box;margin:0}
-  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:linear-gradient(160deg,#0a1628,#0f3a3f 60%,#135d5d);min-height:100vh;color:#e8f1f0;display:flex;align-items:center;justify-content:center;padding:24px}
-  .card{background:#0d1b2bcc;backdrop-filter:blur(10px);border:1px solid #2a4a5a;border-radius:20px;padding:32px;width:100%;max-width:420px;box-shadow:0 20px 60px #0009}
-  h1{font-size:26px;margin-bottom:4px}
-  .sub{color:#8fb3b0;font-size:14px;margin-bottom:22px}
-  .gbtn{width:100%;display:flex;align-items:center;justify-content:center;gap:12px;background:#fff;color:#1a1a1a;border:none;border-radius:12px;padding:13px;font-size:15px;font-weight:600;cursor:pointer;text-decoration:none}
-  .gbtn svg{width:20px;height:20px}
-  .or{display:flex;align-items:center;gap:12px;color:#6b8a87;font-size:11px;letter-spacing:1px;margin:22px 0 18px}
-  .or::before,.or::after{content:"";flex:1;height:1px;background:#26434a}
-  label{display:block;font-size:13px;color:#bcd0cd;margin:14px 0 6px}
-  input{width:100%;background:#122433;border:1px solid #2c4c58;border-radius:12px;padding:12px 14px;color:#eef6f5;font-size:14px;outline:none}
-  input:focus{border-color:#37b7a3}
-  .hint{color:#6b8a87;font-size:11px;margin-top:6px}
-  .btn{width:100%;background:#2dd4bf;color:#06211d;border:none;border-radius:12px;padding:13px;font-size:15px;font-weight:700;cursor:pointer;margin-top:20px}
-  .foot{color:#8fb3b0;font-size:13px;text-align:center;margin-top:20px}
-  .foot a{color:#4fd6c3;text-decoration:none}
-  .err{background:#3a1218;border:1px solid #7a2633;color:#ffb3bd;font-size:13px;padding:10px 12px;border-radius:10px;margin-bottom:16px}
-  .tag{display:inline-block;background:#123a36;color:#6fe3cf;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:600;margin-top:10px}
+:root{--bg:#071018;--panel:#0d1b28;--panel2:#102534;--line:#1e3a4b;--text:#eff8f6;--muted:#9db7b5;--faint:#6b8a87;--accent:#57e0c4;--accent2:#52a8ff;--danger:#ff8d9a;--shadow:0 24px 70px rgba(0,0,0,.28)}
+*{box-sizing:border-box}html{background:var(--bg)}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:radial-gradient(900px 520px at 10% -10%,rgba(82,168,255,.16),transparent 65%),radial-gradient(800px 520px at 100% 0%,rgba(87,224,196,.13),transparent 60%),var(--bg);color:var(--text);min-height:100vh;line-height:1.5}a{color:inherit}.auth-shell{min-height:100vh;display:grid;place-items:center;padding:28px}.auth-layout{width:min(920px,100%);display:grid;grid-template-columns:1fr 1.05fr;overflow:hidden;border:1px solid var(--line);border-radius:26px;background:rgba(13,27,40,.88);box-shadow:var(--shadow)}.auth-aside{padding:42px;background:linear-gradient(145deg,rgba(82,168,255,.14),rgba(87,224,196,.06) 60%,transparent)}.brand{display:flex;align-items:center;gap:10px;font-weight:850;letter-spacing:-.02em;font-size:18px}.brand-mark{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#04211f;font-weight:900}.brand-accent{color:var(--accent)}.eyebrow{text-transform:uppercase;letter-spacing:.16em;color:var(--accent);font-size:11px;font-weight:800}.auth-aside h1{font-size:38px;line-height:1.06;letter-spacing:-.04em;margin:48px 0 14px}.auth-aside p{color:var(--muted);max-width:330px}.benefits{display:grid;gap:12px;margin-top:32px}.benefit{display:flex;gap:10px;align-items:flex-start;color:var(--muted);font-size:13px}.benefit b{display:block;color:var(--text);font-size:13px}.auth-form{padding:42px;background:rgba(7,16,24,.36)}.auth-form h2{font-size:26px;letter-spacing:-.03em;margin:28px 0 5px}.sub{color:var(--muted);font-size:14px;margin:0 0 22px}.gbtn,.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:12px;padding:12px 16px;font-size:14px;font-weight:750;cursor:pointer;text-decoration:none;transition:transform .15s,border-color .15s,background .15s}.gbtn{width:100%;background:#fff;color:#14202a;border:1px solid #fff}.gbtn:hover,.btn:hover{transform:translateY(-1px)}.gbtn svg{width:19px;height:19px}.or{display:flex;align-items:center;gap:12px;color:var(--faint);font-size:10px;letter-spacing:.13em;margin:22px 0 14px}.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}.field{display:grid;gap:6px;margin:14px 0}.field label{font-size:12px;color:var(--muted);font-weight:700}.field input,.link-input{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:12px 13px;color:var(--text);font-size:14px;outline:none}.field input:focus,.link-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(87,224,196,.12)}.hint{color:var(--faint);font-size:11px}.btn{border:1px solid transparent;background:linear-gradient(100deg,var(--accent),var(--accent2));color:#06211d;width:100%;margin-top:10px}.foot{color:var(--muted);font-size:13px;text-align:center;margin-top:20px}.foot a{color:var(--accent);font-weight:700;text-decoration:none}.err{background:rgba(255,80,100,.1);border:1px solid rgba(255,141,154,.35);color:#ffc0c7;font-size:13px;padding:11px 12px;border-radius:11px;margin-bottom:15px}.ok{background:rgba(87,224,196,.1);border:1px solid rgba(87,224,196,.3);color:#b8ffed;font-size:13px;padding:11px 12px;border-radius:11px;margin-bottom:15px}.portal-shell{width:min(1080px,100%);margin:0 auto;padding:28px 20px 64px}.portal-top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:30px}.portal-top .actions{display:flex;gap:8px;flex-wrap:wrap}.portal-top .btn{width:auto;margin:0;padding:9px 13px;font-size:12px;background:var(--panel);border-color:var(--line);color:var(--text)}.portal-top .btn.primary{background:linear-gradient(100deg,var(--accent),var(--accent2));color:#06211d;border-color:transparent}.portal-title{font-size:clamp(28px,4vw,42px);letter-spacing:-.045em;line-height:1.05;margin:0 0 6px}.portal-sub{color:var(--muted);font-size:14px}.portal-card{background:rgba(13,27,40,.86);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.16)}.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}.metric{padding:18px;border-radius:15px;background:linear-gradient(145deg,var(--panel2),rgba(16,37,52,.55));border:1px solid var(--line)}.metric .value{font-size:27px;font-weight:850;letter-spacing:-.04em;color:var(--accent)}.metric .label{font-size:11px;color:var(--muted);margin-top:3px}.portal-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.portal-section{margin-top:14px}.section-title{font-size:13px;font-weight:800;margin-bottom:12px}.section-title span{color:var(--accent)}.note{padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}.note:last-child{border-bottom:0}.notice{display:flex;gap:12px;align-items:flex-start;padding:15px;border-radius:14px;background:rgba(87,224,196,.08);border:1px solid rgba(87,224,196,.22);color:var(--muted);font-size:13px}.notice strong{display:block;color:var(--text);margin-bottom:3px}.link-card{margin-top:14px}.link-form{display:flex;gap:8px;flex-wrap:wrap}.link-form .link-input{flex:1;min-width:190px}.link-form .btn{width:auto;margin:0}.empty{color:var(--faint);padding:24px;text-align:center;font-size:13px}.leaderboard{display:grid;gap:8px}.leader-row{display:grid;grid-template-columns:38px 1fr auto auto;gap:10px;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}.leader-row .rank{color:var(--accent);font-weight:800}.leader-row .name{font-weight:700}.leader-row .muted{color:var(--muted);font-size:12px}.tag{display:inline-flex;background:rgba(87,224,196,.1);color:var(--accent);border:1px solid rgba(87,224,196,.2);border-radius:99px;padding:4px 10px;font-size:11px;font-weight:700}
+@media(max-width:760px){.auth-layout{grid-template-columns:1fr}.auth-aside{padding:28px}.auth-aside h1{font-size:31px;margin:28px 0 12px}.benefits{grid-template-columns:1fr 1fr;margin-top:22px}.auth-form{padding:28px}.portal-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:1fr 1fr}.portal-top{align-items:flex-start;flex-direction:column}.leader-row{grid-template-columns:30px 1fr auto}.leader-row .muted{display:none}}
+@media(max-width:430px){.auth-shell{padding:14px}.benefits{grid-template-columns:1fr}.metric-grid{grid-template-columns:1fr}.portal-shell{padding:20px 14px 40px}}
 </style></head><body>${body}</body></html>`;
 
-function googleSvg() { return `<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>`; }
+function googleSvg() { return `<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98-.66-2.23-1.06-3.71-1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>`; }
 
 // ── Login / Signup page (matches the CoreRipper-style screen) ──
 router.get("/login", (req, res) => {
@@ -191,84 +227,72 @@ router.get("/login", (req, res) => {
     err === "no-code" || err === "oauth-failed" ? "Google sign-in didn't complete. Please try again." :
     err === "logged-out" ? "You've been logged out." : "";
   const body = `
-  <div class="card">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
-      <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#2dd4bf,#0e7490);display:flex;align-items:center;justify-content:center;font-weight:800;color:#042">A</div>
-      <div style="font-size:20px;font-weight:800"><span style="color:#fff">ARIA</span> <span style="color:#2dd4bf">Academy</span></div>
-    </div>
-    <h1>Create your account</h1>
-    <div class="sub">Get started free. No credit card required.</div>
-    ${errMsg ? `<div class="err">${errMsg}</div>` : ""}
-    <a class="gbtn" href="/portal/auth/google">${googleSvg()} Continue with Google</a>
-    <div class="or">OR SIGN UP WITH EMAIL</div>
-    <div id="emsg"></div>
-    <label>Email</label>
-    <input id="em" type="email" placeholder="you@example.com">
-    <label>Password</label>
-    <input id="pw" type="password" placeholder="••••••••">
-    <div class="hint">At least 8 characters.</div>
-    <button class="btn" onclick="submit('signup')">Create account →</button>
-    <div class="foot">Already have an account? <a href="#" onclick="submit('login');return false">Log in</a></div>
-  </div>
+  <div class="auth-shell"><div class="auth-layout">
+    <section class="auth-aside">
+      <div class="brand"><span class="brand-mark">A</span><span>ARIA <span class="brand-accent">Academy</span></span></div>
+      <div class="eyebrow" style="margin-top:42px">Learner account</div>
+      <h1>A learning space that remembers your progress.</h1>
+      <p>Connect the portal to your WhatsApp academy identity and turn every lesson, challenge, and project into a clear next step.</p>
+      <div class="benefits">
+        <div class="benefit"><span class="tag">01</span><span><b>One progress view</b>XP, streaks, mastery, and recommendations in one place.</span></div>
+        <div class="benefit"><span class="tag">02</span><span><b>Private by default</b>Your learner space is protected by your own session.</span></div>
+        <div class="benefit"><span class="tag">03</span><span><b>Link when ready</b>Use <b>!portal</b> in WhatsApp to connect existing progress.</span></div>
+      </div>
+    </section>
+    <section class="auth-form">
+      <div class="eyebrow">ARIA Academy</div>
+      <h2 id="auth-title">Create your account</h2>
+      <p class="sub" id="auth-sub">Start with email, then link your WhatsApp learning history.</p>
+      ${errMsg ? `<div class="err" role="alert">${esc(errMsg)}</div>` : ""}
+      <a class="gbtn" href="/portal/auth/google" aria-label="Continue with Google">${googleSvg()} Continue with Google</a>
+      <div class="or">OR USE EMAIL</div>
+      <div id="emsg" role="status" aria-live="polite"></div>
+      <div class="field" id="name-field"><label for="nm">Name</label><input id="nm" name="name" autocomplete="name" placeholder="Alex"></div>
+      <div class="field"><label for="em">Email</label><input id="em" name="email" type="email" autocomplete="email" placeholder="you@example.com" required></div>
+      <div class="field"><label for="pw">Password</label><input id="pw" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" required><div class="hint">Use at least 8 characters.</div></div>
+      <button id="submitBtn" class="btn" type="button" onclick="submitEmail()">Create account</button>
+      <div class="foot"><span id="toggle-copy">Already have an account?</span> <a id="toggle-link" href="#" onclick="toggleMode();return false">Log in</a></div>
+    </section>
+  </div></div>
   <script>
-    async function submit(mode){
-      const email=document.getElementById('em').value.trim();
-      const password=document.getElementById('pw').value;
-      const el=document.getElementById('emsg');
-      if(!email||!password){el.innerHTML='<div class="err">Fill in both fields.</div>';return;}
-      if(password.length<8){el.innerHTML='<div class="err">Password must be at least 8 characters.</div>';return;}
-      try{
-        const r=await fetch('/portal/auth/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,mode})});
-        const j=await r.json();
-        if(r.ok){location.href='/portal';}
-        else{el.innerHTML='<div class="err">'+j.error+'</div>';}
-      }catch(e){el.innerHTML='<div class="err">'+e.message+'</div>';}
-    }
+    let mode='signup';
+    const nameField=document.getElementById('name-field'), nameInput=document.getElementById('nm'), titleEl=document.getElementById('auth-title'), subEl=document.getElementById('auth-sub'), buttonEl=document.getElementById('submitBtn'), toggleCopy=document.getElementById('toggle-copy'), toggleLink=document.getElementById('toggle-link'), msgEl=document.getElementById('emsg');
+    function showError(text){msgEl.className='err';msgEl.textContent=text;}
+    function toggleMode(){mode=mode==='signup'?'login':'signup';const signup=mode==='signup';nameField.style.display=signup?'grid':'none';nameInput.disabled=!signup;nameInput.required=signup;titleEl.textContent=signup?'Create your account':'Welcome back';subEl.textContent=signup?'Start with email, then link your WhatsApp learning history.':'Continue where you left off in your learner space.';buttonEl.textContent=signup?'Create account':'Log in';toggleCopy.textContent=signup?'Already have an account?':'New to ARIA Academy?';toggleLink.textContent=signup?'Log in':'Create an account';msgEl.textContent='';msgEl.className='';}
+    async function submitEmail(){const email=document.getElementById('em').value.trim();const password=document.getElementById('pw').value;if(!email||!password){showError('Enter your email and password.');return;}if(password.length<8){showError('Your password must be at least 8 characters.');return;}buttonEl.disabled=true;buttonEl.textContent=mode==='signup'?'Creating…':'Signing in…';try{const r=await fetch('/portal/auth/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name:nameInput.value.trim(),mode})});const j=await r.json().catch(()=>({error:'The server returned an invalid response.'}));if(r.ok){location.href='/portal';return;}showError(j.error||'Unable to complete this request.');}catch(e){showError('Network error. Check your connection and try again.');}finally{buttonEl.disabled=false;buttonEl.textContent=mode==='signup'?'Create account':'Log in';}}
   </script>`;
   res.send(PAGE("Create your account", body));
 });
 
 // ── Learner home — their OWN Learner Space ──────────────────────
 router.get("/", portalAuth, (req, res) => {
-  let space;
+  let space = null;
   try {
     const ls = require("./academy/learnerSpace");
-    space = ls.buildLearnerSpace(req.learner.sub);
-  } catch (_) {
-    space = null;
-  }
-  const name = req.learner.name || "Learner";
-  const card = (t, b) => `<div class="card" style="margin-top:14px"><div style="font-weight:700;margin-bottom:8px;font-size:13px;color:#6fe3cf">${t}</div><div style="font-size:14px;color:#e8f1f0">${b}</div></div>`;
-  const stat = (k, v) => `<div style="flex:1;min-width:120px;background:#10283a;border:1px solid #1e4650;border-radius:14px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800;color:#2dd4bf">${v}</div><div style="color:#8fb3b0;font-size:12px;margin-top:4px">${k}</div></div>`;
-  const body = `
-  <div class="card" style="max-width:720px">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#2dd4bf,#0e7490);display:flex;align-items:center;justify-content:center;font-weight:800;color:#042;font-size:18px">${name[0]||"A"}</div>
-        <div>
-          <div style="font-size:18px;font-weight:800">Hi, ${name} 👋</div>
-          <div class="tag">${req.learner.email}</div>
-        </div>
-      </div>
-      <div style="display:flex;gap:10px">
-        <a class="gbtn" style="padding:8px 14px;font-size:13px;width:auto" href="/portal/leaderboard">🏆 Leaderboard</a>
-        <a class="gbtn" style="padding:8px 14px;font-size:13px;width:auto;background:#1a3040;color:#cfe0dd" href="/portal/logout">Log out</a>
-      </div>
+    space = ls.buildLearnerSpace(req.learner.uid);
+  } catch (_) {}
+  const name = String(req.learner.name || space?.identity?.name || "Learner").trim() || "Learner";
+  const stats = space?.identity || { xp: 0, streak: 0, tier: "beginner" };
+  const sessions = space?.engagement?.totalSessions || 0;
+  const notes = space?.ariaNotes || [];
+  const linkedNotice = req.query.linked === "1" ? `<div class="ok" role="status">Your WhatsApp academy progress is now connected to this learner space.</div>` : "";
+  const linkError = req.query.error === "invalid-link-code" ? `<div class="err" role="alert">That link code is invalid or expired. Send <code>!portal</code> in WhatsApp to create a new one.</div>` : "";
+  const linkPanel = req.learner.linked ? `<div class="notice"><span class="tag">Linked</span><div><strong>WhatsApp progress connected</strong>Your XP, lessons, streaks, and ARIA notes are sourced from learner ID <code>${esc(req.learner.uid)}</code>.</div></div>` : `
+    <div class="portal-card link-card"><div class="section-title">Connect your WhatsApp progress <span>recommended</span></div><p class="portal-sub">Open WhatsApp, send <code>!portal</code> to ARIA, then paste the one-time code here. This keeps your account separate while connecting your existing academy history.</p><form class="link-form" method="post" action="/portal/link"><input type="hidden" name="_csrf" value="${portalCsrf(req)}"><input class="link-input" name="code" inputmode="text" autocomplete="one-time-code" placeholder="e.g. 4F8A2C19" maxlength="12" required><button class="btn" type="submit">Link progress</button></form></div>`;
+  const card = (title, content) => `<section class="portal-card portal-section"><div class="section-title">${esc(title)}</div>${content}</section>`;
+  const notesHtml = notes.length ? notes.slice(0, 6).map((n) => `<div class="note">${inlineText(n.text)}<div class="hint">${esc(new Date(n.ts).toLocaleDateString())}</div></div>`).join("") : `<div class="empty">No notes yet. ARIA will add observations as you study.</div>`;
+  const strengths = space?.skills?.strong?.length ? space.skills.strong.map((s) => `<span class="tag">${esc(s.skill)} · ${Math.round(s.confidence)}%</span>`).join(" ") : `<div class="empty">Your strengths appear after a few attempts.</div>`;
+  const focus = space?.skills?.focus?.length ? space.skills.focus.map((s) => `<span class="tag">${esc(s.skill)} · ${Math.round(s.confidence)}%</span>`).join(" ") : `<div class="empty">No focus areas yet.</div>`;
+  const next = space?.next?.text ? inlineText(space.next.text) : "Start with your first academy track.";
+  const body = `<div class="portal-shell">
+    <header class="portal-top"><div><div class="brand"><span class="brand-mark">A</span><span>ARIA <span class="brand-accent">Academy</span></span></div><div class="eyebrow" style="margin-top:24px">Learner space</div><h1 class="portal-title">Welcome, ${esc(name)}.</h1><p class="portal-sub">A private view of your learning rhythm, evidence, and next move.</p></div><div class="actions"><a class="btn primary" href="/portal/leaderboard">Leaderboard</a><a class="btn" href="/portal/logout">Log out</a></div></header>
+    ${linkedNotice}${linkError}${linkPanel}
+    <div class="metric-grid"><div class="metric"><div class="value">${Number(stats.xp) || 0}</div><div class="label">XP earned</div></div><div class="metric"><div class="value">${Number(stats.streak) || 0}d</div><div class="label">Current streak</div></div><div class="metric"><div class="value">${Number(sessions) || 0}</div><div class="label">Study attempts</div></div></div>
+    <div class="portal-grid">
+      <div>${card("What’s next", `<div class="notice"><div><strong>${req.learner.linked ? "A recommendation based on your activity" : "Start with a connected learner profile"}</strong>${next}</div></div>`)}${card("ARIA’s notes", notesHtml)}</div>
+      <div>${card("Strengths", strengths)}${card("Needs focus", focus)}${card("How you learn", `<div class="note"><b>Pace</b><br>${esc(space?.pace?.label || "New")}${space?.pace?.detail ? ` — ${esc(space.pace.detail)}` : ""}</div><div class="note"><b>Best study time</b><br>${esc(space?.bestTime?.time || "Not enough data yet")}</div>`)}</div>
     </div>
-    ${space ? `
-      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:24px">
-        ${stat("XP", space.identity.xp)}${stat("Streak", space.identity.streak+"d")}${stat("Tier", space.identity.tier)}
-      </div>
-      ${space.bestTime ? card("Best time to study", `${space.bestTime.time} — ${space.bestTime.share}% of sessions`) : ""}
-      ${space.skills?.strong?.length ? card("Your strengths", space.skills.strong.map(s=>s.skill).join(" · ")) : ""}
-      ${space.skills?.focus?.length ? card("Keep an eye on", space.skills.focus.map(s=>s.skill).join(" · ")) : ""}
-      ${space.next?.text ? card("What's next", space.next.text) : ""}
-      <div class="card" style="background:#10283a;border-color:#1e4650;margin-top:14px"><div style="font-weight:700;margin-bottom:10px">💭 ARIA's notes for you</div>
-        ${space.ariaNotes?.length ? space.ariaNotes.slice(0,5).map(n=>`<div style="padding:8px 0;border-bottom:1px solid #1a3a44;font-size:13px;color:#cfe0dd">${n.text}</div>`).join("") : '<div style="color:#8fb3b0;font-size:13px">Start a lesson in WhatsApp with <b>!academy</b> and ARIA will start building your space.</div>'}
-      </div>
-    ` : `<div class="card" style="margin-top:20px"><div class="empty">No learning data yet. Reply <b>!academy</b> in WhatsApp to start.</div></div>`}
-  </div>
-  `;
+  </div>`;
   res.send(PAGE("My Learner Space", body));
 });
 
@@ -288,25 +312,9 @@ router.get("/leaderboard", portalAuth, (req, res) => {
       .sort((a, b) => b.xp - a.xp)
       .slice(0, 20);
   } catch (_) { rows = []; }
-  const medals = ["🥇", "🥈", "🥉"];
-  const body = `
-  <div class="card" style="max-width:680px">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-      <div>
-        <div style="font-size:22px;font-weight:800">🏆 Academy Leaderboard</div>
-        <div class="sub">Top learners by XP this season</div>
-      </div>
-      <a class="gbtn" style="padding:8px 14px;font-size:13px;width:auto" href="/portal">← My Space</a>
-    </div>
-    ${rows.length ? `<div style="margin-top:20px">
-      ${rows.map((r, i) => `
-        <div style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;background:#10283a;border:1px solid #1e4650;margin-bottom:8px">
-          <div style="width:30px;text-align:center;font-size:18px">${medals[i] || i + 1}</div>
-          <div style="flex:1;font-weight:600">${r.name}${r.uid === req.learner.sub ? ' <span style="color:#2dd4bf;font-size:11px">(you)</span>' : ""}</div>
-          <div style="color:#6fe3cf;font-weight:700">${r.xp} XP</div>
-          <div style="color:#8fb3b0;font-size:12px">🔥 ${r.streak}d</div>
-        </div>`).join("")}
-    </div>` : '<div class="card" style="margin-top:20px"><div class="empty">No learners with XP yet. The competition starts when the first lessons are done!</div></div>'}
+  const body = `<div class="portal-shell">
+    <header class="portal-top"><div><div class="eyebrow">Community progress</div><h1 class="portal-title">Academy leaderboard</h1><p class="portal-sub">A lightweight view of learners who have started building momentum.</p></div><div class="actions"><a class="btn primary" href="/portal">My learner space</a><a class="btn" href="/portal/logout">Log out</a></div></header>
+    <section class="portal-card">${rows.length ? `<div class="leaderboard">${rows.map((r, i) => `<div class="leader-row"><div class="rank">${i + 1}</div><div class="name">${esc(r.name)}${r.uid === req.learner.uid ? ' <span class="tag">you</span>' : ""}</div><div class="muted">${Number(r.streak) || 0}d streak</div><strong>${Number(r.xp) || 0} XP</strong></div>`).join("")}</div>` : `<div class="empty">No learners have earned XP yet. Start with <code>!academy</code> in WhatsApp, then return here to see progress appear.</div>`}</section>
   </div>`;
   res.send(PAGE("Leaderboard", body));
 });

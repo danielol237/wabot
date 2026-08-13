@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { lessonAt, allTrackOverviews, levelLessons, CURRICULUM_VERSION, LEVEL_DEFS } = require("./curriculumEngine");
 const { gradeQuiz, gradeChallenge, XP_QUIZ, XP_CHALLENGE } = require("./assessmentEngine");
-const { addXp, setMastery, getMastery, getStats } = require("./learnerModel");
+const { addXp, setMastery, getMastery, getStats, hasCompletedAssessment, markAssessmentCompleted } = require("./learnerModel");
 const { recomputeMastery, evidenceReport, isEvidenceMastered } = require("./evidenceEngine");
 const { levelUpText } = require("./xpSystem");
 const { recommend } = require("./adaptiveTutor");
@@ -170,14 +170,20 @@ async function handleReply(chatId, uid, input) {
       // Anti-farming (#fix): only award XP the FIRST time this quiz section is
       // answered correctly. Repeated correct answers (A A A A) used to grant XP
       // every time because nothing marked the section as answered.
-      const alreadyAnswered = !!(st.answeredSections?.[lesson.id] || []).includes(st.sectionIdx);
       const g = gradeQuiz(st.uid, {
         track: st.track, level: st.level, lessonId: lesson.id, skill: lesson.skill,
       }, section, input.trim());
       if (g.correct) {
+        // Anti-farming: durable learner-level ledger (survives academy restart).
+        // The chat-scoped answeredSections resets on a new session, so a learner
+        // could re-earn XP for the same quiz by restarting — this ledger keys on
+        // the learner id + exact section and only awards XP once.
+        const doneDurable = hasCompletedAssessment(st.uid, st.track, st.level, lesson.id, st.sectionIdx);
+        const alreadyAnswered = doneDurable || !!(st.answeredSections?.[lesson.id] || []).includes(st.sectionIdx);
         st.answeredSections = st.answeredSections || {};
         st.answeredSections[lesson.id] = st.answeredSections[lesson.id] || [];
         if (!st.answeredSections[lesson.id].includes(st.sectionIdx)) st.answeredSections[lesson.id].push(st.sectionIdx);
+        if (!doneDurable) markAssessmentCompleted(st.uid, st.track, st.level, lesson.id, st.sectionIdx, { best: true, xpAwarded: g.xp });
         save();
         const up = alreadyAnswered ? null : addXp(st.uid, g.xp, "Quiz");
         const exp = alreadyAnswered ? "✅ Correct (already answered)" : `✅ Correct! +${g.xp} XP`;

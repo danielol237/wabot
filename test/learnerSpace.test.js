@@ -63,3 +63,16 @@ test("learnerSpace: recordAttempt auto-generates ARIA notes", () => {
   assert.ok(view.includes("closures"), "view mentions the weak skill");
   cleanup();
 });
+
+test("learnerSpace: durable assessment ledger prevents XP re-farming across sessions", () => {
+  const lm = require("../src/tools/academy/learnerModel");
+  const uid = "LS-ANTIFARM-" + Date.now();
+  // First completion records the durable ledger entry.
+  assert.strictEqual(lm.hasCompletedAssessment(uid, "js", "beginner", "lesson-a", 0), false);
+  lm.markAssessmentCompleted(uid, "js", "beginner", "lesson-a", 0, { xpAwarded: 20 });
+  // Simulate a NEW session (restart): the durable ledger must still say done.
+  assert.strictEqual(lm.hasCompletedAssessment(uid, "js", "beginner", "lesson-a", 0), true, "durable across restart");
+  // A different section is NOT falsely blocked.
+  assert.strictEqual(lm.hasCompletedAssessment(uid, "js", "beginner", "lesson-a", 1), false);
+  cleanup();
+});

@@ -58,12 +58,33 @@ function learner(uid) {
       misconceptions: {}, // { [skill]: count }
       xp: 0,
       xpLog: [],          // { ts, amt, reason } — for per-activity XP breakdown
+      completedAssessments: {}, // { "track:level:lessonId:sectionIdx": { best, xpAwarded, completedAt } } — durable anti-farm ledger
       streak: 0,
       lastStudy: null,
       profile: {},        // personalization: { name, nickname, goals[], style, bestTime, arriaNotes[] }
     };
   }
   return model.learners[uid];
+}
+
+// ── Durable anti-farming ledger ───────────────────────────────
+// The XP-award guard must survive a learner restarting the Academy (which resets
+// the chat-scoped session state). These keys live on the learner record, so a
+// quiz section only ever awards XP once per learner, regardless of session.
+function assessmentKey(track, level, lessonId, sectionIdx) {
+  return `${track}:${level}:${lessonId}:${sectionIdx}`;
+}
+
+function hasCompletedAssessment(uid, track, level, lessonId, sectionIdx) {
+  return !!learner(uid).completedAssessments?.[assessmentKey(track, level, lessonId, sectionIdx)];
+}
+
+function markAssessmentCompleted(uid, track, level, lessonId, sectionIdx, { best = true, xpAwarded = 0 } = {}) {
+  const l = learner(uid);
+  l.completedAssessments = l.completedAssessments || {};
+  const key = assessmentKey(track, level, lessonId, sectionIdx);
+  l.completedAssessments[key] = { best, xpAwarded, completedAt: Date.now() };
+  save();
 }
 
 // ── Learner Space personalization ─────────────────────────────
@@ -234,4 +255,4 @@ function computeMastery(uid, track, level) {
   return getMastery(uid, track, level);
 }
 
-module.exports = { recordAttempt, recordEvidence, addXp, setMastery, getMastery, evidenceFor, getStats, getAllLearners, skillProfile, skillConfidence, computeMastery, learner, getProfile, updateProfile, addAriaNote, LEVELS, tierFor };
+module.exports = { recordAttempt, recordEvidence, addXp, setMastery, getMastery, evidenceFor, getStats, getAllLearners, skillProfile, skillConfidence, computeMastery, learner, getProfile, updateProfile, addAriaNote, LEVELS, tierFor, hasCompletedAssessment, markAssessmentCompleted };

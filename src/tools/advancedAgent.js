@@ -1,13 +1,32 @@
 // ── Advanced AI Agent ───────────────────────────────────────
-// Executes multi-step plans: search → analyze → code → test → fix
-// Each step calls the AI with context from previous steps
+// Executes multi-step plans: SEARCH → SCRAPE → CODE → WRITE → THINK → DONE.
+// Each step calls the AI with context from previous steps. Every step the
+// planner can emit is actually executed here (audit #38/#39: WRITE and THINK
+// were advertised but dropped — now both are real).
 
 const { getAIResponse } = require("./ai");
 const { searchWeb } = require("./webSearch");
 const { scrapeUrl } = require("./scraper");
 const { runCode } = require("./codeRunner");
+const fs = require("fs");
+const path = require("path");
 
 const MAX_STEPS = 8;
+// Safe workspace for the agent's WRITE steps. Scoped to a temp dir so the agent
+// can't write anywhere it shouldn't.
+const AGENT_WS = path.join(__dirname, "../../temp/agent-workspace");
+try { fs.mkdirSync(AGENT_WS, { recursive: true }); } catch (_) {}
+
+// Parse `WRITE(file.xyz) <content>` — everything after the WRITE(...) token is
+// file content. Filename must be a bare basename (no slashes / traversal).
+function parseWriteStep(step) {
+  const m = step.match(/WRITE\(([^)]+)\)([\s\S]*)/i);
+  if (!m) return null;
+  const name = (m[1] || "").trim();
+  if (!/^[a-zA-Z0-9._-]+$/.test(name)) return null; // reject paths/traversal
+  const content = (m[2] || "").trim();
+  return { name, content };
+}
 
 async function runAgent(task, senderName, onProgress) {
   // Step 1: Plan
@@ -56,6 +75,27 @@ async function runAgent(task, senderName, onProgress) {
       if (url && onProgress) onProgress(`🌐 Loading: ${url}`);
       const result = await scrapeUrl(url);
       context += `\n[SCRAPED: ${url}]\n${result?.slice(0, 1000)}\n`;
+    }
+
+    if (upper.includes("WRITE(")) {
+      const w = parseWriteStep(step);
+      if (w) {
+        if (onProgress) onProgress(`📝 Writing ${w.name}...`);
+        const fp = path.join(AGENT_WS, w.name);
+        try {
+          fs.writeFileSync(fp, w.content);
+          context += `\n[WRITE ${w.name}]\nWrote ${w.content.length} bytes to temp/agent-workspace/${w.name}\n`;
+        } catch (e) {
+          context += `\n[WRITE ${w.name}]\nFailed to write: ${e.message}\n`;
+        }
+      } else {
+        context += `\n[WRITE]\nIgnored malformed WRITE step (must be WRITE(filename) with a plain filename).\n`;
+      }
+    }
+
+    if (upper.includes("THINK(")) {
+      const note = step.match(/THINK\(([^)]*)\)/i)?.[1]?.trim();
+      if (note) context += `\n[THINK] ${note}\n`;
     }
 
     if (upper.includes("CODE(")) {

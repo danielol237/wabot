@@ -237,7 +237,18 @@ function qualityRank(candidates, validations, preference, preferredQuality) {
 // ── Main entry ─────────────────────────────────────────────────
 // Resolve an episode to a validated, playable source.
 async function resolveEpisode(title, episode, { preference, quality } = {}) {
-  const report = { title, episode, canonical: null, confidence: null, candidates: [], diagnostics: [], selected: null, error: null };
+  const report = {
+    title,
+    episode,
+    canonical: { status: "pending", provider: "anilist" },
+    confidence: null,
+    candidates: [],
+    providers: {},
+    diagnostics: [],
+    validation: {},
+    selected: null,
+    error: null,
+  };
 
   // 1. Canonical identity — OPTIONAL enrichment, NOT a hard gate.
   // Canonical resolution improves source selection (season, episode count,
@@ -246,12 +257,16 @@ async function resolveEpisode(title, episode, { preference, quality } = {}) {
   // the raw title. Only a definitive "episode doesn't exist" (when we DO have
   // reliable metadata) short-circuits discovery.
   const canon = await resolveCanonical(title, episode);
-  report.canonical = canon.canonical || null;
-  report.confidence = canon.confidence || null;
   if (!canon.ok) {
+    report.canonical.status = canon.unavailable ? "unavailable" : "no-match";
+    report.canonical.reason = canon.reason;
     report.diagnostics.push(canon.unavailable
       ? `canonical unavailable (${canon.reason}) — continuing with provider-native resolution`
       : `canonical: ${canon.reason} — continuing with provider-native resolution`);
+  } else {
+    report.canonical.status = "ok";
+    report.canonical.identity = canon.canonical;
+    report.confidence = canon.confidence;
   }
   // Canonical episode validation: if metadata says the episode doesn't exist,
   // we can only trust that when canonical resolution actually SUCCEEDED.
@@ -266,6 +281,18 @@ async function resolveEpisode(title, episode, { preference, quality } = {}) {
   const disc = await discoverCandidates(title, episode, season);
   report.diagnostics = disc.diagnostics;
   report.candidates = disc.candidates;
+  // Clean per-provider outcome map (each provider = one entry), so diagnostics
+  // aren't a merged blob — "no sources" can be traced to which provider did what.
+  report.providers = {};
+  for (const d of disc.diagnostics) {
+    report.providers[d.provider] = {
+      attempted: true,
+      candidateCount: d.candidateCount || 0,
+      noResults: !!d.noResults,
+      error: d.error || null,
+      latencyMs: d.latencyMs,
+    };
+  }
   if (!disc.candidates.length) {
     report.error = "no provider produced a stream candidate";
     return report;

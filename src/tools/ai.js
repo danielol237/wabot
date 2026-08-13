@@ -2,6 +2,11 @@ const Groq = require("groq-sdk");
 const axios = require("axios");
 const { log, error, warn } = require("../utils/logger");
 
+// Tracks which provider ACTUALLY answered the last AI call (set right before each
+// successful return in getAIResponseImpl). The dashboard telemetry reads this so
+// it reports the real responder, not just the first configured key.
+let lastProvider = "unknown";
+
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 
 // Gemini's free tier: ~1,500 requests/day, 1M token context, no credit card.
@@ -162,6 +167,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
         if (finishReason === "length") {
           content += "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
         }
+        lastProvider = "cerebras";
         return content;
       } catch (err) {
         error(`Cerebras error (${model}):`, err.response?.data?.error?.message || err.message);
@@ -208,6 +214,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
         if (finishReason === "MAX_TOKENS" || finishReason === "STOP") {
           content += "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
         }
+        lastProvider = "gemini";
         return content;
       } catch (err) {
         error(`Gemini error (${model}):`, err.response?.data?.error?.message || err.message);
@@ -245,6 +252,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
         if (finishReason === "length") {
           content += "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
         }
+        lastProvider = "groq";
         return content;
       } catch (err) {
         error(`Groq error (${model}):`, err.message);
@@ -284,6 +292,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
             },
           }
         );
+        lastProvider = "openrouter";
         return res.data.choices[0]?.message?.content || "No response.";
       } catch (err) {
         error(`OpenRouter error (${model}):`, err.response?.data?.error?.message || err.message);
@@ -312,11 +321,12 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
 // infinite recursion → "Maximum call stack size exceeded" on every AI reply.
 async function getAIResponse(...args) {
   const t0 = Date.now();
+  lastProvider = "unknown";
   const out = await getAIResponseImpl(...args);
   try {
     const ok = typeof out === "string" && !out.startsWith("❌");
     const tel = require("./dashboardTelemetry");
-    tel.record("ai", { ok, latency: Date.now() - t0, provider: (process.env.CEREBRAS_API_KEY ? "cerebras" : process.env.GEMINI_API_KEY ? "gemini" : process.env.GROQ_API_KEY ? "groq" : "openrouter") });
+    tel.record("ai", { ok, latency: Date.now() - t0, provider: ok ? lastProvider : "failed" });
   } catch (_) {}
   return out;
 }

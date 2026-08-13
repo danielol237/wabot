@@ -1,18 +1,23 @@
 // ── ARIA Mission Orchestrator ──────────────────────────────────
-// The strategic planning layer of ARIA Aegis. Turns an objective into a
-// structured plan, assigns work to specialist agent roles, verifies results,
-// and manages handoffs — all running on top of the durable mission engine.
+// The planning layer of ARIA Aegis. Turns an objective into a structured plan,
+// runs a sequence of role-based passes, and synthesizes a result on top of the
+// durable mission engine.
 //
-// Agent roles (temporary, within a mission):
+// HONESTY NOTE (audit #37/#40): the "roles" below (planner, researcher,
+// builder, verifier, risk, reflector) are NOT separate agents. Each is a
+// different system prompt sent to the same AI function, with shared context.
+// This is a role-based prompt pipeline, not a multi-agent system. The
+// researcher is the one exception: it gets REAL web-search results injected
+// (searchWeb is actually called), so it has genuine tool grounding. The others
+// are single-LLM passes and are described as such.
+//
+// Roles (ordered prompt passes within a mission):
 //   planner    → decomposes the objective into a plan
-//   researcher → gathers info
+//   researcher → gathers info (REAL web search injected)
 //   builder    → produces artifacts/code/writing
 //   verifier   → checks the result against success criteria
 //   risk       → flags problems / needs approval
 //   reflector  → evaluates the finished mission
-//
-// Unlike persistentJobs' flat step list, this gives ARIA a real "org chart"
-// for each mission, with role-based context and handoffs.
 
 const { createMission, executeMission, getMission, setSock, formatMissionList } = require("./durableMissions");
 const { getAIResponse } = require("./ai");

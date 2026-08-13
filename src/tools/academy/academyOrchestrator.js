@@ -26,12 +26,20 @@ function save() { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } c
 load();
 
 // ── Flow helpers ──────────────────────────────────────────────
+// Per-learner session key: in a group, each learner needs their OWN flow. Key
+// by chatId + uid so two members studying simultaneously don't overwrite each
+// other's state (previously keyed by chatId only → concurrent learners clashed).
+function skey(chatId, uid) {
+  return chatId + "::" + (uid || "");
+}
+
 function hasActiveFlow(chatId) {
-  return !!(state.chats[chatId] && state.chats[chatId].step);
+  // Legacy: check any flow for this chat (kept for callers without a uid).
+  return Object.keys(state.chats).some((k) => k.startsWith(chatId + "::") && state.chats[k]?.step);
 }
 
 function startFlow(chatId, uid) {
-  state.chats[chatId] = { uid, step: "track" };
+  state.chats[skey(chatId, uid)] = { uid, step: "track" };
   save();
   return trackMenu();
 }
@@ -42,8 +50,8 @@ function trackMenu() {
   return `🎓 *ARIA Academy*\nPick a track:\n\n${lines.join("\n")}\n\nReply with a number (1-${overviews.length}).`;
 }
 
-function levelMenu(chatId) {
-  const st = state.chats[chatId];
+function levelMenu(chatId, uid) {
+  const st = state.chats[skey(chatId, uid)];
   const overview = allTrackOverviews().find((t) => t.id === st.track);
   const levels = Object.keys(LEVEL_DEFS);
   return `🎓 *${overview.name}*\nChoose your level:\n\n${levels.map((lv, i) => `${i + 1}. ${LEVEL_DEFS[lv]} ${lv}`).join("\n")}\n\nReply with a number (1-${levels.length}).`;
@@ -51,8 +59,8 @@ function levelMenu(chatId) {
 
 // Render a lesson section by section. Returns { text, awaiting } where
 // awaiting indicates the next expected input (e.g. "quiz" or "challenge").
-function renderLesson(chatId, sectionIdx) {
-  const st = state.chats[chatId];
+function renderLesson(chatId, uid, sectionIdx) {
+  const st = state.chats[skey(chatId, uid)];
   const { lesson, idx, lessons } = lessonAt(st.track, st.level, st.lessonIdx);
   const sections = lesson.sections || [];
   const si = Math.min(sectionIdx, sections.length - 1);
@@ -87,29 +95,29 @@ function renderLesson(chatId, sectionIdx) {
 }
 
 // Advance to the next section or lesson.
-function nextSection(chatId) {
-  const st = state.chats[chatId];
+function nextSection(chatId, uid) {
+  const st = state.chats[skey(chatId, uid)];
   const { lesson, lessons } = lessonAt(st.track, st.level, st.lessonIdx);
   const sections = lesson.sections || [];
   const si = (st.sectionIdx || 0);
   if (si < sections.length - 1) {
     st.sectionIdx = si + 1;
     save();
-    return renderLesson(chatId, st.sectionIdx);
+    return renderLesson(chatId, uid, st.sectionIdx);
   }
   // Section done → next lesson or track complete.
   if (st.lessonIdx < lessons.length - 1) {
     st.lessonIdx += 1;
     st.sectionIdx = 0;
     save();
-    return renderLesson(chatId, 0);
+    return renderLesson(chatId, uid, 0);
   }
   // Track level complete. Mastery is COMPUTED from demonstrated assessment
   // evidence (quizzes/challenges/projects) — never granted just for reaching
   // the end. "Finished the lessons" ≠ "mastered."
   const level = LEVEL_DEFS[st.level];
   const mastery = recomputeMastery(st.uid, st.track, st.level);
-  delete state.chats[chatId];
+  delete state.chats[skey(chatId, uid)];
   save();
   const rec = recommend(st.uid, { currentTrack: st.track, currentLevel: st.level });
   const passed = mastery >= 80;
@@ -121,7 +129,7 @@ function nextSection(chatId) {
 
 // Main reply handler. Returns { text } or null if not this user's flow.
 async function handleReply(chatId, uid, input) {
-  const st = state.chats[chatId];
+  const st = state.chats[skey(chatId, uid)];
   if (!st || st.uid !== uid) return null;
   const n = parseInt(input, 10);
 
@@ -129,7 +137,7 @@ async function handleReply(chatId, uid, input) {
     const overviews = allTrackOverviews();
     if (!Number.isFinite(n) || n < 1 || n > overviews.length) return { text: `Reply with a number 1-${overviews.length}.` };
     st.track = overviews[n - 1].id; st.step = "level"; save();
-    return { text: levelMenu(chatId) };
+    return { text: levelMenu(chatId, uid) };
   }
 
   if (st.step === "level") {
@@ -153,7 +161,7 @@ async function handleReply(chatId, uid, input) {
     st.level = requested; st.lessonIdx = 0; st.sectionIdx = 0; st.step = "lesson";
     // No XP for entering a level — XP must reward activity, not menu navigation.
     save();
-    return renderLesson(chatId, 0);
+    return renderLesson(chatId, uid, 0);
   }
 
   if (st.step === "lesson") {
@@ -192,19 +200,19 @@ async function handleReply(chatId, uid, input) {
       return { text: `❌ ${g.explanation || "Try again."}\n\n▸ reply *next* to continue` };
     }
 
-    if (/next|continue/i.test(input)) return nextSection(chatId);
-    if (/prev/i.test(input)) { st.sectionIdx = Math.max((st.sectionIdx || 0) - 1, 0); save(); return renderLesson(chatId, st.sectionIdx); }
-    if (/back/i.test(input)) { st.step = "level"; delete st.lessonIdx; save(); return { text: levelMenu(chatId) }; }
+    if (/next|continue/i.test(input)) return nextSection(chatId, uid);
+    if (/prev/i.test(input)) { st.sectionIdx = Math.max((st.sectionIdx || 0) - 1, 0); save(); return renderLesson(chatId, uid, st.sectionIdx); }
+    if (/back/i.test(input)) { st.step = "level"; delete st.lessonIdx; save(); return { text: levelMenu(chatId, uid) }; }
     if (/track|restart/i.test(input)) { st.step = "track"; delete st.level; delete st.lessonIdx; save(); return { text: trackMenu() }; }
     if (/done|exit/i.test(input)) {
       const stats = getStats(st.uid);
-      delete state.chats[chatId]; save();
+      delete state.chats[skey(chatId, uid)]; save();
       return { text: `Done! 🎉 XP: *${stats.xp}* · streak ${stats.streak} day${stats.streak === 1 ? "" : "s"}. Ping !academy anytime.` };
     }
     // numeric = jump to lesson
     const { lessons } = lessonAt(st.track, st.level, 0);
     if (Number.isFinite(n) && n >= 1 && n <= lessons.length) {
-      st.lessonIdx = n - 1; st.sectionIdx = 0; save(); return renderLesson(chatId, 0);
+      st.lessonIdx = n - 1; st.sectionIdx = 0; save(); return renderLesson(chatId, uid, 0);
     }
     return { text: "Reply: *next*, *prev*, a lesson number, *back*, *done*, or a quiz letter." };
   }
@@ -214,7 +222,7 @@ async function handleReply(chatId, uid, input) {
 
 // Handle a coding challenge submission via !run.
 async function handleRun(chatId, uid, code) {
-  const st = state.chats[chatId];
+  const st = state.chats[skey(chatId, uid)];
   if (!st || st.uid !== uid) return { text: "Start a session with !academy first." };
   const { lesson } = lessonAt(st.track, st.level, st.lessonIdx);
   const section = (lesson.sections || [])[st.sectionIdx || 0];
@@ -236,15 +244,11 @@ async function handleAcademyCommand(sock, msg, args, ctx) {
   const overviews = allTrackOverviews();
   const match = overviews.find((t) => t.id === arg || t.name.toLowerCase() === arg);
   if (match) {
-    // Anti-collision (#fix): in a group, don't let a second learner clobber an
-    // active session owned by someone else. They get a clear message instead.
-    const existing = state.chats[ctx.chatId];
-    if (existing && existing.step && existing.uid !== uid) {
-      return reply(sock, msg, `🔒 *${allTrackOverviews().find((t) => t.id === existing.track)?.name || ""}* is already active in this chat (started by another member). Finish or *done* it before starting a new one here.`);
-    }
-    state.chats[ctx.chatId] = { uid, step: "level", track: match.id };
+    // Per-learner flow: each member gets their own session keyed by chat+uid,
+    // so concurrent learners in a group don't clobber each other.
+    state.chats[skey(ctx.chatId, uid)] = { uid, step: "level", track: match.id };
     save();
-    return reply(sock, msg, levelMenu(ctx.chatId));
+    return reply(sock, msg, levelMenu(ctx.chatId, uid));
   }
   if (arg === "me" || arg === "stats") {
     const s = getStats(uid);
@@ -263,8 +267,8 @@ async function handleAcademyCommand(sock, msg, args, ctx) {
 
 async function handleAcademyRun(sock, msg, args, ctx) {
   const { reply } = require("../../utils/baileysHelpers");
-  if (!hasActiveFlow(ctx.chatId)) return reply(sock, msg, "Start with !academy first, then use !run <code> on a challenge.");
   const uid = (ctx.senderJid || "").split("@")[0];
+  if (!state.chats[skey(ctx.chatId, uid)]) return reply(sock, msg, "Start with !academy first, then use !run <code> on a challenge.");
   const code = (Array.isArray(args) ? args.join(" ") : args || "").trim();
   if (!code) return reply(sock, msg, "Usage: !run <code>");
   const result = await handleRun(ctx.chatId, uid, code);

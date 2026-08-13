@@ -10,6 +10,20 @@ function boot() {
   });
 }
 
+test("anime home exposes account entry and clear catalog actions", async () => {
+  const { base, server } = await boot();
+  try {
+    const response = await fetch(`${base}/`);
+    const html = await response.text();
+    assert.strictEqual(response.status, 200);
+    assert.ok(html.includes("Learner login"));
+    assert.ok(html.includes("Search anime"));
+    assert.ok(html.includes("Browse catalog"));
+  } finally {
+    server.close();
+  }
+});
+
 test("anime download status route returns a stable page for a tracked job", async () => {
   const { enqueueAnimeJob } = require("../src/tools/animeJobManager");
   const { base, server } = await boot();

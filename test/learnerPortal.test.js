@@ -69,6 +69,15 @@ test("portal: email signup sets session; unauthenticated / redirects to login", 
   } finally { server.close(); wipe(); }
 });
 
+test("portal: Google callback rejects invalid OAuth state", async () => {
+  const { base, server } = await boot();
+  try {
+    const r = await fetch(base + "/auth/google/callback?code=untrusted-code&state=invalid", { redirect: "manual" });
+    assert.strictEqual(r.status, 302);
+    assert.ok(r.headers.get("location").includes("oauth-state-invalid"));
+  } finally { server.close(); wipe(); }
+});
+
 test("portal: weak password rejected", async () => {
   const { base, server } = await boot();
   try {

@@ -52,22 +52,22 @@ function layout(title, inner) {
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
 .top{position:sticky;top:0;z-index:30;background:rgba(11,14,20,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
-.top-in{max-width:1200px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;gap:18px}
+.top-in{max-width:1200px;margin:0 auto;padding:14px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}.account-link{color:var(--muted);font-size:12px;font-weight:700;text-decoration:none;border:1px solid var(--line);padding:8px 11px;border-radius:9px;white-space:nowrap}.account-link:hover{color:var(--text);border-color:var(--brand)}
 .logo{font-weight:800;font-size:18px;letter-spacing:-.02em;display:flex;align-items:center;gap:9px;color:var(--text)}
 .logo .mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px}
 .logo span{color:var(--brand);}
-.search{flex:1;display:flex;gap:8px;max-width:480px;margin-left:auto}
+.search{flex:1;display:flex;gap:8px;max-width:520px;margin-left:auto;min-width:260px}
 .search input{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);padding:10px 14px;border-radius:10px;outline:none;font-size:14px}
 .search input:focus{border-color:var(--brand)}
 .search button{background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff;border:none;border-radius:10px;padding:0 18px;font-weight:700;cursor:pointer}
 .nav{display:flex;gap:4px}
 .nav a{color:var(--muted);font-size:13px;font-weight:600;padding:8px 12px;border-radius:9px;text-decoration:none}
 .nav a:hover{color:var(--text);background:var(--panel)}
-.main{max-width:1200px;margin:0 auto;padding:30px 22px 70px}
-.hero{background:linear-gradient(135deg,rgba(109,94,248,.12),transparent 60%),var(--panel);border:1px solid var(--line);border-radius:20px;padding:34px;margin-bottom:34px}
+.main{max-width:1200px;margin:0 auto;padding:34px 22px 70px}.eyebrow{text-transform:uppercase;letter-spacing:.16em;color:var(--accent);font-size:10px;font-weight:800}.home-hero{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(260px,.8fr);min-height:330px;overflow:hidden;position:relative}.hero-copy{position:relative;z-index:2;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;max-width:650px}.hero-copy h1{font-size:clamp(32px,5vw,58px);line-height:1.02;letter-spacing:-.05em}.hero-copy p{max-width:570px}.hero-media{min-height:260px;background:linear-gradient(90deg,var(--panel) 0%,rgba(18,23,34,.2) 42%,rgba(18,23,34,.02)),var(--panel2);position:absolute;inset:0 0 0 42%;overflow:hidden}.hero-media img{width:100%;height:100%;object-fit:cover;opacity:.75}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.hero-actions .btn{width:auto}.section-head{display:flex;align-items:end;justify-content:space-between;gap:14px}.section-head .sub{color:var(--muted);font-size:12px;margin:0}.rail{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px}
+.hero{background:linear-gradient(135deg,rgba(109,94,248,.12),transparent 60%),var(--panel);border:1px solid var(--line);border-radius:20px;padding:34px;margin-bottom:34px}.hero .eyebrow{margin-bottom:14px}
 .hero h1{font-size:34px;font-weight:800;letter-spacing:-.03em}
-.hero p{color:var(--muted);font-size:14px;margin-top:8px;max-width:520px}
-.hero .badge{display:inline-block;margin-top:16px;padding:6px 14px;border-radius:99px;background:var(--brand);color:#fff;font-size:12px;font-weight:700}
+.hero p{color:var(--muted);font-size:14px;margin-top:10px;max-width:520px;line-height:1.6}
+.hero .badge{display:inline-flex;align-items:center;margin-top:16px;padding:6px 14px;border-radius:99px;background:var(--brand);color:#fff;font-size:12px;font-weight:700}.hero-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px;color:var(--muted);font-size:12px}.hero-meta span{padding:5px 9px;border:1px solid var(--line);border-radius:99px;background:rgba(14,19,29,.65)}
 .sec-h{font-size:18px;font-weight:800;margin:34px 0 16px;display:flex;align-items:center;gap:9px}
 .sec-h::before{content:"";width:4px;height:18px;border-radius:2px;background:var(--brand)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px}
@@ -94,21 +94,22 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .ep .e{color:var(--muted);font-size:11px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 14px;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;border:none;text-decoration:none}
 .btn-watch{background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff;flex:1}
-.btn-dl{background:var(--panel2);border:1px solid var(--line);color:var(--text);flex:1}
+.btn-dl{background:var(--panel2);border:1px solid var(--line);color:var(--text);flex:1}.btn-dl:hover{border-color:var(--brand);background:rgba(109,94,248,.12)}.status-chip{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:99px;background:rgba(52,211,153,.12);color:var(--green);font-size:11px;font-weight:800}.status-chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.download-shell{max-width:780px;margin:0 auto}.download-shell .job{padding:22px}.progress-track{height:8px;border-radius:99px;background:var(--panel2);overflow:hidden;margin-top:8px}.progress-bar{height:100%;background:linear-gradient(90deg,var(--brand),var(--accent));border-radius:inherit}.download-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.download-actions .btn{width:auto;flex:0 0 auto}
 .eprow{display:flex;gap:8px;margin-top:9px}
 .player{background:#000;border:1px solid var(--line);border-radius:16px;overflow:hidden;max-width:960px;aspect-ratio:16/9;margin:16px 0}
 .player video{width:100%;height:100%;display:block}
-.job{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}.manual{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.manual input{width:130px;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 11px;border-radius:10px}.manual .btn{flex:0 0 auto}
+.job{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}.manual{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}.manual input{width:130px;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 11px;border-radius:10px}.manual .btn{flex:0 0 auto}.detail-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.detail-actions .btn{width:auto;flex:0 0 auto}.source-note{color:var(--faint);font-size:11px;margin-top:12px;line-height:1.5}
 .job .row{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:4px 0}
 .job .k{color:var(--muted)}
 .footer{border-top:1px solid var(--line);padding:24px;text-align:center;color:var(--faint);font-size:12px}
-@media(max-width:760px){.detail{flex-direction:column}.detail .poster{width:100%;max-width:230px}.nav a{padding:6px 8px;font-size:12px}}
+@media(max-width:760px){.top-in{padding:12px 14px;gap:10px}.logo{font-size:16px}.nav{order:3;width:100%;overflow:auto}.nav a{padding:6px 8px;font-size:12px}.search{order:2;min-width:0;max-width:none;width:100%}.account-link{margin-left:auto}.home-hero{grid-template-columns:1fr;min-height:420px}.hero-media{inset:35% 0 0 0;background:linear-gradient(0deg,var(--panel) 5%,rgba(18,23,34,.24) 80%,rgba(18,23,34,.05)),var(--panel2)}.hero-copy{justify-content:flex-end}.detail{flex-direction:column}.detail .poster{width:100%;max-width:230px}.download-shell{width:100%}}
 </style></head>
 <body>
 <header class="top"><div class="top-in">
   <a class="logo" href="/anime"><div class="mark">▶</div>ARIA<span>Anime</span></a>
   <nav class="nav"><a href="/anime/browse">Browse</a><a href="/anime/trending">Trending</a><a href="/anime/latest">Latest</a></nav>
-  <form class="search" action="/anime/search" method="get"><input name="q" placeholder="Search anime..." /><button>Search</button></form>
+  <form class="search" action="/anime/search" method="get"><input name="q" aria-label="Search anime" placeholder="Search anime, seasons, or characters…" /><button type="submit">Search</button></form>
+  <a class="account-link" href="/portal/login">Learner login ↗</a>
 </div></header>
 <div class="main">${inner}</div>
 <footer class="footer">ARIA Anime — watch online &amp; download. Streams resolved on demand from public sources.</footer>
@@ -132,14 +133,19 @@ async function homePage() {
   const latest = await service.getLatest().catch(() => []);
   const hero = trending[0];
   const heroHtml = hero ? `
-    <div class="hero">
-      <h1>${esc(hero.title)}</h1>
-      <p>${esc(hero.overview || hero.description || "Watch the latest episodes and download in HD.")}</p>
-      <a class="badge" href="/anime/title/${encodeURIComponent(hero.id)}?prov=${encodeURIComponent(hero.provider || "anilist")}">▶ Watch now</a>
-    </div>` : "";
+    <section class="hero home-hero">
+      <div class="hero-media">${hero.cover ? `<img src="${esc(hero.cover)}" alt="" loading="eager" onerror="this.style.display='none'">` : ""}</div>
+      <div class="hero-copy">
+        <div class="eyebrow">Featured this week · ${esc(PROVIDER_LABEL[hero.provider] || hero.provider || "catalog")}</div>
+        <h1>${esc(hero.title)}</h1>
+        <p>${esc(hero.overview || hero.description || "Find your next series and open a title to watch or download an episode.")}</p>
+        <div class="hero-meta"><span>${hero.rating ? `★ ${esc(hero.rating)}` : "Featured"}</span>${hero.year ? `<span>${esc(hero.year)}</span>` : ""}${hero.type ? `<span>${esc(hero.type)}</span>` : ""}</div>
+        <div class="hero-actions"><a class="btn btn-watch" href="/anime/title/${encodeURIComponent(hero.id)}?prov=${encodeURIComponent(hero.provider || "anilist")}">▶ Open title</a><a class="btn btn-dl" href="/anime/browse">Browse catalog</a></div>
+      </div>
+    </section>` : `<section class="hero"><div class="eyebrow">ARIA Anime</div><h1>Find your next story.</h1><p>Search the catalog or browse the latest titles.</p></section>`;
   return layout("Home", `${heroHtml}
-    <div class="sec-h">Trending</div>${cardGrid(trending.slice(0, 20))}
-    <div class="sec-h">Recently Updated</div>${cardGrid(latest.slice(0, 20))}`);
+    <div class="section-head"><div class="sec-h">Trending</div><div class="sub">Popular right now</div></div>${cardGrid(trending.slice(0, 20))}
+    <div class="section-head"><div class="sec-h">Recently Updated</div><div class="sub">New metadata and episodes</div></div>${cardGrid(latest.slice(0, 20))}`);
 }
 
 async function searchPage(q) {
@@ -202,6 +208,8 @@ async function titlePage(req) {
         </div>
         ${d.genres?.length ? `<div class="tags">${d.genres.slice(0, 8).map((g) => `<span class="tag">${esc(g)}</span>`).join("")}</div>` : ""}
         ${d.description ? `<div class="desc">${esc(d.description.slice(0, 700))}</div>` : ""}
+        <div class="detail-actions">${eps.length ? `<a class="btn btn-watch" href="/anime/watch/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${eps[0].number}">▶ Watch first episode</a>` : ""}<a class="btn btn-dl" href="/anime/browse">← Back to browse</a></div>
+        <div class="source-note">Metadata from ${esc(PROVIDER_LABEL[provider] || provider)}. Episode availability and media delivery depend on the configured, authorized source.</div>
       </div>
     </div>
     <div class="sec-h">Episodes${d.episodes ? ` (${esc(d.episodes)})` : eps.length ? ` (${eps.length})` : ""}</div>
@@ -211,7 +219,7 @@ async function titlePage(req) {
         <div class="e">${esc(ep.title)}</div>
         <div class="eprow">
           <a class="btn btn-watch" href="/anime/watch/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep.number}">▶ Watch</a>
-          <a class="btn btn-dl" href="/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep.number}">DL</a>
+          <a class="btn btn-dl" aria-label="Download episode ${ep.number}" href="/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep.number}">Download</a>
         </div>
       </div>`).join("")}</div>` : `<div class="empty">Episode list is not available from this provider. You can still enter an episode number below and ARIA will resolve it on demand.<div class="manual"><input id="manual-ep" type="number" min="1" value="1" aria-label="Episode number"><a id="manual-watch" class="btn btn-watch" href="/anime/watch/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=1">▶ Watch</a><a id="manual-dl" class="btn btn-dl" href="/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=1">Download</a></div></div>`}`;
   const withManualScript = html.includes("manual-ep") ? `${html}<script>(function(){var i=document.getElementById('manual-ep'),w=document.getElementById('manual-watch'),d=document.getElementById('manual-dl');function sync(){var n=Math.max(1,parseInt(i.value||'1',10));w.href='/anime/watch/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep='+n;d.href='/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep='+n;}i.addEventListener('input',sync);})();</script>` : html;
@@ -264,13 +272,15 @@ async function dlPage(req, res) {
     return res.redirect(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep}&job=${encodeURIComponent(job.id)}`);
   }
   const status = job.status === "done" ? "Ready" : job.status === "failed" ? "Download failed" : job.status === "running" ? "Downloading" : "Queued";
-  const progress = job.progress?.percent != null ? `<div class="row"><span class="k">Progress</span><span>${Math.round(job.progress.percent)}%${job.progress.speed ? ` · ${esc(job.progress.speed)}` : ""}</span></div>` : "";
+  const tone = job.status === "failed" ? "var(--red)" : job.status === "done" ? "var(--green)" : "var(--accent)";
+  const percent = job.progress?.percent != null ? Math.max(0, Math.min(100, Math.round(job.progress.percent))) : null;
+  const progress = percent != null ? `<div class="row"><span class="k">Progress</span><span>${percent}%${job.progress.speed ? ` · ${esc(job.progress.speed)}` : ""}</span></div><div class="progress-track" aria-label="Download progress"><div class="progress-bar" style="width:${percent}%;background:${tone}"></div></div>` : "";
   const result = job.status === "done" && job.result?.filePath && fs.existsSync(job.result.filePath)
-    ? `<a class="btn btn-watch" href="/anime/file/${encodeURIComponent(job.id)}" style="margin-top:12px">Download ${esc(title)} — episode ${ep}</a>`
+    ? `<div class="download-actions"><a class="btn btn-watch" href="/anime/file/${encodeURIComponent(job.id)}">Download file</a><a class="btn btn-dl" href="/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}">← Episodes</a></div>`
     : "";
   const error = job.status === "failed" ? `<div class="empty" style="color:var(--red)">${esc(job.error?.code || "DOWNLOAD_FAILED")}: ${esc(job.error?.message || "The download could not be completed.")}<br><a class="btn btn-dl" href="/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${ep}&job=${encodeURIComponent(job.id)}&retry=1" style="margin-top:12px">Retry</a></div>` : "";
   const refresh = ["queued", "running"].includes(job.status) ? `<script>setTimeout(()=>location.reload(),4000)</script>` : "";
-  return layout("Download", `<div class="sec-h">Download — ${esc(title)} · episode ${ep}</div><div class="job"><div class="row"><span class="k">Status</span><strong>${status}</strong></div><div class="row"><span class="k">Job</span><span>${esc(job.id)}</span></div><div class="row"><span class="k">Quality</span><span>best</span></div>${progress}</div>${result}${error}${!result && !error ? `<div class="empty">This page updates automatically while the source is resolved and the file is prepared.</div>` : ""}${refresh}`);
+  return layout("Download", `<div class="download-shell"><div class="eyebrow">Episode delivery</div><div class="sec-h">Download — ${esc(title)} · episode ${ep}</div><div class="job"><div class="row"><span class="k">Status</span><span class="status-chip" style="color:${tone};background:color-mix(in srgb, ${tone} 12%, transparent)">${esc(status)}</span></div><div class="row"><span class="k">Job</span><span>${esc(job.id)}</span></div><div class="row"><span class="k">Quality</span><span>Best available</span></div>${progress}</div>${result}${error}${!result && !error ? `<div class="empty">This page updates automatically while the source is resolved and the file is prepared.</div>` : ""}${refresh}<div class="source-note">Download controls are provided only for media you are authorized to access and save.</div></div>`);
 }
 
 // HLS relay for protected streams (referer-gated).

@@ -7,6 +7,9 @@ const fs = require("fs");
 const path = require("path");
 
 process.env.PORTAL_SESSION_SECRET = "test-portal-secret";
+process.env.GOOGLE_CLIENT_ID = "";
+process.env.GOOGLE_CLIENT_SECRET = "";
+process.env.BASE_URL = "";
 
 const STATE = path.join(__dirname, "../data/learnerAccounts.json");
 const LINKS = path.join(__dirname, "../data/portalLinks.json");
@@ -66,6 +69,15 @@ test("portal: email signup sets session; unauthenticated / redirects to login", 
     assert.ok(linked.headers.get("location").includes("linked=1"));
     const linkedHome = await fetch(base + "/", { headers: { Cookie: login.headers.get("set-cookie") } });
     assert.ok((await linkedHome.text()).includes("WhatsApp progress connected"));
+  } finally { server.close(); wipe(); }
+});
+
+test("portal: Google sign-in reports missing configuration", async () => {
+  const { base, server } = await boot();
+  try {
+    const r = await fetch(base + "/auth/google", { redirect: "manual" });
+    assert.strictEqual(r.status, 302);
+    assert.ok(r.headers.get("location").includes("google-not-configured"));
   } finally { server.close(); wipe(); }
 });
 

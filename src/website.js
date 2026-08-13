@@ -415,11 +415,18 @@ async function sendChat(){
 }
 function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
+// Helper: private sections need dashboard auth — show a friendly sign-in card
+// instead of "failed", so the public site doesn't advertise broken features.
+function privateCard(){
+  return '<div class="empty">🔒 This is private — <a href="/dashboard" style="color:var(--accent);font-weight:700">sign in to the dashboard</a> to view it.</div>';
+}
+
 // missions
 async function loadMissions(){
   const el=document.getElementById('missionList');
   try{
     const r=await fetch('/api/missions'); const d=await r.json(); const list=d.missions||[];
+    if(r.status===401){el.innerHTML=privateCard();return;}
     if(!list.length){el.innerHTML='<div class="empty">No missions yet. Start one above.</div>';return;}
     el.innerHTML=list.map(function(m){
       var st=m.status==='completed'?'b-green':m.status==='running'?'b-accent':m.status==='failed'?'b-red':'b-muted';
@@ -446,6 +453,7 @@ async function loadMemory(){
   const el=document.getElementById('memoryList');
   try{
     const r=await fetch('/api/memory'); const d=await r.json(); const list=d.memories||[];
+    if(r.status===401){el.innerHTML=privateCard();return;}
     if(!list.length){el.innerHTML='<div class="empty">Nothing remembered yet.</div>';return;}
     var html='<div class="card"><div class="h">Long-term memory ('+list.length+')</div><div class="feed">';
     list.slice(-15).reverse().forEach(function(m){ html+='<div class="feed-item"><div class="feed-ico">🧠</div><div class="feed-body"><div class="t">'+escapeHtml(m.text)+'</div><div class="s">'+new Date(m.ts||Date.now()).toLocaleString()+'</div></div></div>'; });
@@ -458,6 +466,7 @@ async function loadMedia(){
   const el=document.getElementById('mediaList');
   try{
     const r=await fetch('/api/media'); const d=await r.json(); const list=d.media||[];
+    if(r.status===401){el.innerHTML=privateCard();return;}
     if(!list.length){el.innerHTML='<div class="empty">Send ARIA an image or voice note — she\'ll remember it here.</div>';return;}
     var html='<div class="card"><div class="h">Media remembered ('+list.length+')</div><div class="feed">';
     list.forEach(function(m){ html+='<div class="feed-item"><div class="feed-ico">'+(m.kind==='image'?'🖼️':'🎤')+'</div><div class="feed-body"><div class="m">'+escapeHtml((m.summary||'').slice(0,110))+'</div><div class="s">'+m.kind+' · '+new Date(m.ts).toLocaleString()+'</div></div></div>'; });
@@ -470,6 +479,7 @@ async function loadAlerts(){
   const el=document.getElementById('alertList');
   try{
     const r=await fetch('/api/alerts'); const d=await r.json(); const list=d.alerts||[];
+    if(r.status===401){el.innerHTML=privateCard();return;}
     if(!list.length){el.innerHTML='<div class="empty">All quiet right now.</div>';return;}
     var icons={mission:'◆',error:'⚠️',command:'⚡',memory:'🧠',system:'▣',alert:'🔔'};
     var html='<div class="card"><div class="h">Recent events</div><div class="feed">';
@@ -483,6 +493,7 @@ async function loadSystem(){
   const el=document.getElementById('systemGrid');
   try{
     const r=await fetch('/api/system'); const s=await r.json();
+    if(r.status===401){el.innerHTML=privateCard();document.getElementById('uptimePill').textContent='sign in';return;}
     el.innerHTML='<div class="grid g3">'+
       '<div class="card"><div class="h">Uptime</div><div class="num">'+Math.floor(s.uptime/3600)+'h</div></div>'+
       '<div class="card"><div class="h">Memory</div><div class="num">'+s.memMB+'MB</div></div>'+

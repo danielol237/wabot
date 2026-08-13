@@ -329,7 +329,16 @@ async function executeMission(id, force = false) {
   // Reentrancy/duplicate-execution guard. force no longer bypasses safety —
   // it only allows a NEW lease after an expired/foreign one.
   if (executors.get(id)) return;
-  if (!acquireLease(mission)) return;
+  if (!acquireLease(mission)) {
+    // A foreign (e.g. pre-restart) lease is still active. Don't strand the
+    // mission: schedule a retry after the foreign lease expires so it resumes
+    // as soon as it can, instead of silently returning (restart edge case).
+    const remaining = mission.lease ? Math.max(mission.lease.expiresAt - Date.now(), 500) : 1000;
+    setTimeout(() => {
+      try { executeMission(id, true); } catch (_) {}
+    }, Math.min(remaining + 500, 60 * 1000));
+    return;
+  }
 
   const execPromise = (async () => {
     mission.status = "running";

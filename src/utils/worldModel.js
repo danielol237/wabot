@@ -11,13 +11,8 @@
 // was inferred or explicitly stated. Nothing is treated as permanent truth
 // unless the user confirms it.
 
-const fs = require("fs");
-const path = require("path");
 const { v4: uuidv4 } = require("uuid");
-const { log, error, warn } = require("../utils/logger");
-
-const DATA_DIR = path.join(__dirname, "../../data");
-const FILE = path.join(DATA_DIR, "worldModel.json");
+const { getSection, setSection, save } = require("./profileStore");
 
 // Structure:
 // {
@@ -28,24 +23,16 @@ const FILE = path.join(DATA_DIR, "worldModel.json");
 //     permissions: [ { id, action, scope, granted, ts } ],
 //   }
 // }
-let db = {};
-try {
-  if (fs.existsSync(FILE)) db = JSON.parse(fs.readFileSync(FILE, "utf8"));
-} catch (err) {
-  error("World model file corrupt, starting fresh:", err.message);
-  db = {};
-}
-
-function save() {
-  try { fs.writeFileSync(FILE, JSON.stringify(db, null, 2)); } catch (err) { error("Failed to save world model:", err.message); }
-}
-
+// Persistence flows through the unified ProfileStore (audit #18). The `world`
+// section of the user's single record holds { entities, relations, goals,
+// permissions }. getSection returns the live record; each mutation re-persists.
 function getUserModel(userId) {
-  if (!db[userId]) {
-    db[userId] = { entities: {}, relations: [], goals: [], permissions: [] };
-    save();
-  }
-  return db[userId];
+  const m = getSection(userId, "world");
+  if (!m.entities) m.entities = {};
+  if (!m.relations) m.relations = [];
+  if (!m.goals) m.goals = [];
+  if (!m.permissions) m.permissions = [];
+  return m;
 }
 
 // ── Entity management ─────────────────────────────────────────

@@ -175,6 +175,9 @@ async function startBot() {
       // These don't need a socket and must NOT re-run on every reconnect.
       if (!servicesStarted) {
         servicesStarted = true;
+        // One-time migration of any legacy per-store JSON files into the unified
+        // ProfileStore (audit #18). No-op once migrated.
+        try { require("./utils/profileStore").migrateLegacy(); } catch (_) {}
         // Keep the session backed up so restarts don't force a QR re-scan
         sessionPersistence.startAutoSync();
         sessionPersistence.backupSession().catch((e) => warn("Initial session backup:", e.message));

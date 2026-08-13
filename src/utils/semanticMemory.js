@@ -4,37 +4,27 @@
 // relevant. Unlike the per-chat text history (last 30 messages), this
 // survives and is retrieved by topic/keyword so ARIA remembers across days.
 
-const fs = require("fs");
-const path = require("path");
 const { log, error, warn } = require("../utils/logger");
-
-const DATA_DIR = path.join(__dirname, "../../data");
-const FILE = path.join(DATA_DIR, "semanticMemory.json");
-
-// { [userId]: { memories: [ {id, text, keywords[], type, importance, ts} ], profile: {...} } }
-let db = {};
-try {
-  if (fs.existsSync(FILE)) db = JSON.parse(fs.readFileSync(FILE, "utf8"));
-} catch (err) {
-  error("Semantic memory file corrupt, starting fresh:", err.message);
-  db = {};
-}
-
-function save() {
-  try { fs.writeFileSync(FILE, JSON.stringify(db, null, 2)); } catch (err) { error("Failed to save semantic memory:", err.message); }
-}
+// Persistence flows through the unified ProfileStore (audit #18). The `semantic`
+// section of each user's single record holds { memories, profile }.
+const { getSection, save, _getDb } = require("./profileStore");
 
 function getUserStore(userId) {
-  if (!db[userId]) {
-    db[userId] = { memories: [], profile: {} };
-    save();
-  }
-  return db[userId];
+  const s = getSection(userId, "semantic");
+  if (!s.memories) s.memories = [];
+  if (!s.profile) s.profile = {};
+  return s;
 }
 
-// Expose the raw store map so the memory curator can run a global pass over it.
+// Expose a semantic-only view (userId → { memories, profile }) so the memory
+// curator can run a global pass without seeing the other profile sections.
 function getAllStores() {
-  return db;
+  const db = _getDb();
+  const out = {};
+  for (const [userId, rec] of Object.entries(db || {})) {
+    out[userId] = rec.semantic || { memories: [], profile: {} };
+  }
+  return out;
 }
 
 // ── Core: store a memory with keyword extraction ───────────────

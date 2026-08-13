@@ -1,59 +1,27 @@
-const fs = require("fs");
-const path = require("path");
-const { log, error, warn } = require("./logger");
-
-const DATA_DIR = path.join(__dirname, "../../data");
-const PREFS_FILE = path.join(DATA_DIR, "userPreferences.json");
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-// Structure: { [userId]: { preferences: string[], lastUpdated } }
-// Preferences are stored as plain descriptive strings (e.g. "prefers React",
-// "prefers JavaScript over TypeScript") rather than rigid fields, since build
-// preferences are varied and free-form — this just gets fed into the planning
-// prompt as extra context, not parsed into strict categories.
-let prefs = {};
-
-try {
-  if (fs.existsSync(PREFS_FILE)) {
-    prefs = JSON.parse(fs.readFileSync(PREFS_FILE, "utf8"));
-  }
-} catch (err) {
-  error("Preferences file corrupt, starting fresh:", err.message);
-  prefs = {};
-}
-
-function save() {
-  try {
-    fs.writeFileSync(PREFS_FILE, JSON.stringify(prefs, null, 2));
-  } catch (err) {
-    error("Failed to save preferences:", err.message);
-  }
-}
+const { getSection, setSection } = require("./profileStore");
 
 const MAX_PREFS_PER_USER = 15; // keep this bounded — it's context for prompts, not a full profile
 
 function addPreference(userId, preference) {
-  if (!prefs[userId]) prefs[userId] = { preferences: [], lastUpdated: Date.now() };
-
-  // Avoid exact duplicates
-  if (!prefs[userId].preferences.includes(preference)) {
-    prefs[userId].preferences.push(preference);
-    if (prefs[userId].preferences.length > MAX_PREFS_PER_USER) {
-      prefs[userId].preferences.shift(); // drop oldest when full
+  const rec = getSection(userId, "prefs");
+  if (!rec.preferences) rec.preferences = [];
+  if (!rec.preferences.includes(preference)) {
+    rec.preferences.push(preference);
+    if (rec.preferences.length > MAX_PREFS_PER_USER) {
+      rec.preferences.shift(); // drop oldest when full
     }
   }
-  prefs[userId].lastUpdated = Date.now();
-  save();
+  rec.lastUpdated = Date.now();
+  setSection(userId, "prefs", rec);
 }
 
 function getPreferences(userId) {
-  return prefs[userId]?.preferences || [];
+  const rec = getSection(userId, "prefs");
+  return rec.preferences || [];
 }
 
 function clearPreferences(userId) {
-  delete prefs[userId];
-  save();
+  setSection(userId, "prefs", { preferences: [], lastUpdated: Date.now() });
 }
 
 // Formats preferences as a short string to inject into build/plan prompts
@@ -64,4 +32,3 @@ function getPreferencesContext(userId) {
 }
 
 module.exports = { addPreference, getPreferences, clearPreferences, getPreferencesContext };
-

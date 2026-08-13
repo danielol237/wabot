@@ -500,13 +500,20 @@ async function processProjectBatch(projectId, senderName, onProgress) {
 
   const projectContext = project.files.map((f) => `- ${f.path}: ${f.description}`).join("\n");
   const batchEnd = Math.min(project.currentIndex + FILES_PER_BATCH, project.files.length);
+  // Track which file paths have already been written so generateFileContent can
+  // include their ACTUAL content (cross-file consistency: shared class names,
+  // ids, function names, selectors) instead of guessing per-file.
+  const doneFiles = [];
+  for (let i = 0; i < project.currentIndex && i < project.files.length; i++) {
+    if (project.files[i]?.path) doneFiles.push(project.files[i].path);
+  }
 
   for (let i = project.currentIndex; i < batchEnd; i++) {
     const filePlan = project.files[i];
     if (onProgress) await onProgress(`👨‍💻 *Coder:* Writing ${i + 1}/${project.files.length} — ${filePlan.path}`);
 
     try {
-      let content = await generateFileContent(filePlan, projectContext, senderName);
+      let content = await generateFileContent(filePlan, projectContext, senderName, projectDir, doneFiles);
       let verification = verifyFile(filePlan.path, content);
 
       // One repair attempt if verification fails — keeps this bounded, not an infinite loop
@@ -527,6 +534,7 @@ async function processProjectBatch(projectId, senderName, onProgress) {
       const fullPath = path.join(projectDir, safeRel);
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, content, "utf8");
+      doneFiles.push(filePlan.path); // now available as context for the next files
 
       markFileStatus(project.id, i, verification.valid ? "done" : "done_with_warning", content);
     } catch (err) {

@@ -1566,19 +1566,19 @@ async function handleContinue(sock, msg, args, ctx) {
 
 async function handleProjectStatus(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
-  const result = await getProjectStatus(args);
+  const result = await getProjectStatus(ctx.chatId, args || null);
   await reply(sock, msg, result);
 }
 
 async function handleProjectList(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
-  const result = await listProjects();
+  const result = await listProjects(ctx.chatId);
   await reply(sock, msg, result);
 }
 
 async function handleProjectCancel(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
-  const result = await cancelProject(args);
+  const result = await cancelProject(ctx.chatId, args || null);
   await reply(sock, msg, result);
 }
 
@@ -1589,7 +1589,7 @@ async function handleEditFile(sock, msg, args, ctx) {
   const instruction = parts.slice(1).join(" ");
   if (!filename || !instruction) return reply(sock, msg, "Usage: !edit filename.js the change to make");
   await react(sock, msg, "✏️");
-  const result = await editProjectFile(filename, instruction);
+  const result = await editProjectFile(ctx.chatId, filename, instruction, ctx.senderName, args.slice(filename.length).trim() || null);
   await reply(sock, msg, result);
 }
 
@@ -1597,7 +1597,7 @@ async function handleThink(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !think <what to think about>");
   await react(sock, msg, "🧠");
-  const result = await thinkAboutProject(args);
+  const result = await thinkAboutProject(args, ctx.senderName, ctx.chatId);
   await reply(sock, msg, result);
 }
 

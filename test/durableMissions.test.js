@@ -40,3 +40,23 @@ test("durableMissions: http.request is a safe GET only (audit #12)", async () =>
   const empty = await executeAction("", mission);
   assert.strictEqual(typeof empty, "string");
 });
+
+test("durableMissions: stale approval is rejected as expired (audit #13)", async () => {
+  const dm = require("../src/tools/durableMissions");
+  const id = dm.createMission("x@s.whatsapp.net", "test", "test objective");
+  const m = dm.getMission(id);
+  // Force the mission into the awaiting-approval state with an ALREADY-EXPIRED
+  // request. decideApproval must refuse it and cancel the mission — this path
+  // returns before any executeMission side effects run.
+  m.status = "waiting_approval";
+  m.approvalRequest = { prompt: "approve me", stepIndex: 0, expiresAt: Date.now() - 1000 };
+  m.steps = [{ type: "ACTION", arg: "note: x", status: "pending" }];
+  dm.saveMission(m);
+
+  const r = await dm.decideApproval(id, "approve");
+  assert.strictEqual(r.ok, false, "expired approval is refused");
+  assert.match(r.msg, /expired/i, "message says expired");
+  const after = dm.getMission(id);
+  assert.strictEqual(after.status, "cancelled", "mission is cancelled, not executed");
+  assert.strictEqual(after.approvalRequest, null, "approval request cleared");
+});

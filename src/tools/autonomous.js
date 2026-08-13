@@ -106,4 +106,12 @@ function noteInteraction(senderJid) {
   specialUsers.set(senderJid, { ...(existing || {}), lastCheck: Date.now() });
 }
 
-module.exports = { init, stop, startAutonomousLoop, noteInteraction };
+// Test-only read helper: returns the last recorded interaction time for a JID,
+// or null if never seen. Exposed so the #16 fix (activity actually updates the
+// autonomy timer) is verifiable without reaching into the private map.
+function getLastInteraction(senderJid) {
+  const u = specialUsers.get(senderJid);
+  return u ? (u.lastCheck || null) : null;
+}
+
+module.exports = { init, stop, startAutonomousLoop, noteInteraction, getLastInteraction };

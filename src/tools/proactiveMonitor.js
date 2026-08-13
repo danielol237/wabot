@@ -55,12 +55,21 @@ async function runMonitorPass(holder) {
   } catch (_) {}
 
   try {
-    // 3. AI providers all down (a sign something's broken)
-    const aiKeys = ["OPENROUTER_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "GEMINI_API_KEY"];
-    const anyKey = aiKeys.some((k) => process.env[k]);
-    // We can't easily probe providers cheaply; only flag if NO keys configured at all.
-    if (!anyKey && shouldAlert("no-ai-keys")) {
-      alerts.push("🔌 I don't have any AI provider keys configured right now — I can't generate replies. Add one of OPENROUTER_API_KEY / GROQ_API_KEY / GEMINI_API_KEY.");
+    // 3. AI providers — ACTUALLY probe them (not just "is a key set"). Uses the
+    //    same providerHealth checker as the dashboard so a bad/expired key is
+    //    caught, not just a missing one.
+    const ph = safeReq("../tools/providerHealth");
+    if (ph && ph.checkAll) {
+      const results = await ph.checkAll();
+      const withKeys = (results || []).filter((r) => r.keySet !== false);
+      const down = withKeys.filter((r) => !r.ok);
+      const anyUp = withKeys.some((r) => r.ok);
+      if (withKeys.length && !anyUp && shouldAlert("ai-down")) {
+        alerts.push(`🔌 *All configured AI providers are failing.* ${down.map((d) => `${d.name} (${d.error || "error"})`).join(", ")} — replies may fail. Check the dashboard → Health.`);
+      }
+      if (withKeys.length === 0 && shouldAlert("no-ai-keys")) {
+        alerts.push("🔌 I don't have any AI provider keys configured right now — I can't generate replies. Add one of OPENROUTER_API_KEY / GROQ_API_KEY / GEMINI_API_KEY.");
+      }
     }
   } catch (_) {}
 

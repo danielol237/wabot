@@ -176,7 +176,7 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     try {
       const review = require("../tools/academy/reviewCourt");
       if (review.hasActiveFlow(chatId)) {
-        const out = review.handleReply(chatId, senderJid.split("@")[0], text.trim());
+        const out = await review.handleReply(chatId, senderJid.split("@")[0], text.trim());
         if (out) { await react(sock, msg, "⚖️"); return reply(sock, msg, out.text); }
       }
     } catch (_) {}

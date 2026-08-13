@@ -118,12 +118,24 @@ function hasActiveFlow(chatId) { return !!(state.chats[chatId] && state.chats[ch
 
 // Start: !review <code> — ARIA reviews the code.
 async function start(chatId, uid, code, context) {
-  const issues = staticChecks(code);
-  // If we have AI and want depth, also run AI review; else use static checks.
+  // Run the AI review (the real "hostile senior engineer" pass) AND layer the
+  // deterministic static checks on top so both depth and fast catches show up.
+  // Previously only staticChecks ran — the AI reviewer was never invoked here.
+  let issues = staticChecks(code);
+  try {
+    const ai = await reviewCode(code, context);
+    if (ai.issues?.length) {
+      // Merge: static first, then AI issues not already flagged by static.
+      const have = new Set(issues.map((i) => i.title.toLowerCase()));
+      for (const i of ai.issues) {
+        if (!have.has(String(i.title || "").toLowerCase())) { issues.push(i); have.add(String(i.title || "").toLowerCase()); }
+      }
+    }
+  } catch (_) {}
   state.chats[chatId] = { uid, step: "fixes", code, issues, fixesSubmitted: [] };
   save();
   const lines = issues.map((i, idx) => `${idx + 1}. [${i.severity.toUpperCase()}] ${i.title} — ${i.detail}`).join("\n");
-  const text = `⚖️ *Code Review Court*\n\nI reviewed your code like a hostile senior engineer.\n\n*Findings:*\n${lines || "No issues found by static checks. Nice work."}\n\nReply with your *fixes* (what you changed to address each issue), then I'll regrade.`;
+  const text = `⚖️ *Code Review Court*\n\nI reviewed your code like a hostile senior engineer.\n\n*Findings:*\n${lines || "No issues found. Nice work."}\n\nReply with your *fixes* (what you changed to address each issue), then I'll regrade.`;
   return { text, issues };
 }
 
@@ -139,10 +151,10 @@ async function submitFixes(chatId, uid, fixes) {
   return { text: `⚖️ *Regrade*\n\n${grade.feedback}\n\n*Score:* ${grade.score}/100\n\n${grade.passed ? "✅ Review passed! +80 XP" : "❌ Not yet — still missing:\n" + missLines}${levelUpText(up)}\n\nReply !review <code> to resubmit.`, grade };
 }
 
-function handleReply(chatId, uid, input) {
+async function handleReply(chatId, uid, input) {
   const st = state.chats[chatId];
   if (!st || st.uid !== uid) return null;
-  return submitFixes(chatId, uid, input);
+  return await submitFixes(chatId, uid, input);
 }
 
 // Command entry.

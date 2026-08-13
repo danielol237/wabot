@@ -38,8 +38,23 @@ async function runRole(role, mission, context, input) {
   const worldContext = getWorldContext(mission.creator);
   const memContext = getRelevantContext(mission.creator, mission.objective);
 
+  // ── Real tools for the researcher ─────────────────────────
+  // Give the researcher ACTUAL web results instead of just telling it to "Use
+  // SEARCH and SCRAPE" with no tools. Extract a concrete query from the plan and
+  // objective, run a live web search, and inject the real findings into context.
+  let toolContext = "";
+  if (role === "researcher") {
+    const query = (mission.objective || "").slice(0, 200);
+    try {
+      const search = await searchWeb(query).catch(() => null);
+      if (search && typeof search === "string") {
+        toolContext = `\n\n[LIVE WEB SEARCH for "${query}"]\n${search.slice(0, 4000)}\nUse these real search results as ground truth; do not fabricate facts, links, numbers or sources not present here.`;
+      }
+    } catch (_) {}
+  }
+
   return getAIResponse(
-    `You are the ${role.toUpperCase()} agent on this mission.\n\nMission: "${mission.objective}"\n\n${worldContext}\n${memContext}\n\nYour role: ${def}\n\nContext so far:\n${context.slice(-6000)}\n\nYour task input:\n${input}\n\nReturn your work as the ${role}. Be concrete and complete.`,
+    `You are the ${role.toUpperCase()} agent on this mission.\n\nMission: "${mission.objective}"\n\n${worldContext}\n${memContext}\n\nYour role: ${def}\n\nContext so far:\n${context.slice(-6000)}${toolContext}\n\nYour task input:\n${input}\n\nReturn your work as the ${role}. Be concrete and complete.`,
     "ARIA_ORCHESTRATOR",
     [],
     null,

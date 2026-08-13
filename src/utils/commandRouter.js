@@ -1241,16 +1241,12 @@ async function handleAnimeSearch(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !anime <name>");
   await react(sock, msg, "🔎");
-  // Try Jikan (MAL) first, fall back to AnimePahe, then OmniSave.
+  // Use the unified anime domain service: it searches all providers (AniList,
+  // Jikan, OmniSave, Consumet, AnimePahe, Gogo) concurrently and dedupes by
+  // title — the single source of truth instead of a manual per-provider chain.
+  const { searchAnime: searchAnimeUnified } = require("../tools/animeService");
   let result = [];
-  let source = "MyAnimeList";
-  try { result = await searchAnime(args); } catch (_) {}
-  if (!Array.isArray(result) || result.length === 0) {
-    try { result = await searchAnimePahe(args); source = "AnimePahe"; } catch (_) {}
-  }
-  if (!Array.isArray(result) || result.length === 0) {
-    try { result = await searchOmniSave(args); source = "OmniSave"; } catch (_) {}
-  }
+  try { result = await searchAnimeUnified(args); } catch (_) {}
   if (!Array.isArray(result) || result.length === 0) {
     return reply(sock, msg, "❌ No anime found for that search. Try a different title.");
   }
@@ -1258,7 +1254,7 @@ async function handleAnimeSearch(sock, msg, args, ctx) {
     .slice(0, 8)
     .map((a) => {
       const hasId = a.id != null;
-      return `*${a.title || a.titleEnglish || "?"}*\n  ${hasId ? `ID: ${a.id} · ` : ""}${a.type || "?"} · ${a.episodes || "?"} eps · ⭐${a.score || "?"}\n  ${a.synopsis || "Use !animeinfo for details."}`;
+      return `*${a.title || a.titleEnglish || "?"}*\n  ${hasId ? `ID: ${a.id} · ` : ""}${a.type || "?"} · ${a.episodes || "?"} eps · ⭐${a.score || a.rating || "?"}\n  ${a.synopsis || a.description || "Use !animeinfo for details."}`;
     })
     .join("\n\n");
   await reply(sock, msg, `🎬 *Anime Search: "${args}"* _(via ${source})_\n\n${text}\n\n_Use !animeinfo <id> for details, or !animedl <id> <episode> to download._`);

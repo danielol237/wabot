@@ -158,4 +158,4 @@ async function runCode(code, lang = "js", opts = {}) {
   return runSandboxed(code, lang, opts);
 }
 
-module.exports = { runCode, runSandboxed, runUnsafe, checkDocker };
+module.exports = { runCode, runSandboxed, runUnsafe, checkDocker, imageFor };

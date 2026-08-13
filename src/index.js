@@ -314,13 +314,17 @@ async function startBot() {
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
 
-      // Auto-save view-once media (photo / video / voice note) and forward to
-      // the owner's DM so nothing ephemeral is lost.
+      // View-once media is ephemeral BY DESIGN. Auto-downloading and forwarding
+      // it is a privacy-sensitive behavior, so it's gated behind an explicit
+      // SAVE_VIEW_ONCE=true opt-in (audit #36). When disabled, view-once media
+      // is left untouched. When enabled, it's forwarded to the OWNER's DM only,
+      // and every save is recorded in the audit log.
+      const saveViewOnce = process.env.SAVE_VIEW_ONCE === "true";
       const viewOnceMsg =
         msg.message?.imageMessage?.viewOnce ||
         msg.message?.videoMessage?.viewOnce ||
         msg.message?.audioMessage?.viewOnce;
-      if (viewOnceMsg) {
+      if (viewOnceMsg && saveViewOnce) {
         try {
           const isVideo = !!msg.message?.videoMessage;
           const isAudio = !!msg.message?.audioMessage;
@@ -346,6 +350,11 @@ async function startBot() {
               } else {
                 await sock.sendMessage(destJid, { image: buffer, caption: "🔒 View-once photo saved from " + sender + " in " + chatName });
               }
+              // Audit trail: record every view-once save (who, what, where, when)
+              // so the behavior is observable, not silently buried in the handler.
+              try {
+                require("./utils/eventLog").track("view-once-saved", `${isVideo ? "video" : isAudio ? "voice" : "photo"} from ${sender} in ${chatName}`, { destJid, sender, chatName });
+              } catch (_) {}
               log("Auto-saved view-once media from", sender);
             }
           }

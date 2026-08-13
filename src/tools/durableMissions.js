@@ -49,6 +49,66 @@ const writeLocks = new Map();
 const executors = new Map(); // id -> active execution promise
 const instanceId = "proc-" + uuidv4().slice(0, 6);
 
+// ── Real action executor ──────────────────────────────────────
+// ACTION steps used to just call getAIResponse (LLM talking about the action,
+// not doing it). This dispatches concrete actions to real handlers instead.
+// Format: "ACTION: <verb> <arg>" or "<verb>: <arg>". Supported verbs are
+// deliberately explicit and capability-checked — no arbitrary shell.
+async function executeAction(stepArg, mission) {
+  const arg = String(stepArg || "").trim();
+  const m = arg.match(/^(\w+)\s*:?\s*([\s\S]*)$/);
+  const verb = (m ? m[1] : "").toLowerCase();
+  const rest = (m ? m[2] : arg).trim();
+
+  // file.write <path> — record a note/file into the mission's data dir
+  if (verb === "file" || verb === "write" || verb === "note") {
+    const fp = path.join(DATA_DIR, "missions", `action_${mission.id}_${Date.now()}.txt`);
+    fs.writeFileSync(fp, rest || arg, "utf8");
+    return `Wrote mission artifact to ${path.basename(fp)} (${(rest || arg).length} chars).`;
+  }
+
+  // git.commit / git.push — only when repo + git integration are present
+  if (verb === "git" || verb === "commit" || verb === "push") {
+    const repo = process.env.SESSION_GIT_REPO;
+    if (!repo) return "git action skipped: SESSION_GIT_REPO not configured.";
+    return "git action requested; configured repo present — run via !backup/!git commands for auth'd access.";
+  }
+
+  // http.request <url> — safe GET to verify/check a URL (no body/posts)
+  if (verb === "http" || verb === "url" || verb === "check") {
+    const url = rest || arg;
+    if (!/^https?:\/\//i.test(url)) return "http action skipped: not an http(s) URL.";
+    try {
+      const axios = require("axios");
+      const r = await axios.get(url, { timeout: 12000, validateStatus: () => true });
+      return `Checked ${url}: HTTP ${r.status} · ${String(r.headers["content-type"] || "").slice(0, 60)} · ${(String(r.data || "").slice(0, 200))}`;
+    } catch (e) {
+      return `http check failed: ${e.message}`;
+    }
+  }
+
+  // whatsapp.send <text> — send a message back to the mission's chat
+  if (verb === "whatsapp" || verb === "send" || verb === "message") {
+    try {
+      const sock = require("./missionSock").getSock();
+      if (sock && mission.chatId) {
+        await sock.sendMessage(mission.chatId, { text: (rest || arg).slice(0, 4000) });
+        return `Sent WhatsApp message to ${mission.chatId}.`;
+      }
+      return "whatsapp action skipped: no active socket.";
+    } catch (e) {
+      return "whatsapp action failed: " + e.message;
+    }
+  }
+
+  // analysis / unknown verb — fall back to a bounded AI reasoning step (this is
+  // genuinely an analysis/decision, not an execution claim).
+  return await getAIResponse(
+    `Mission "${mission.objective}". Execute/analyze this step concretely: ${arg}\nReturn a concise, concrete result (facts/decisions only, no promises of side effects you didn't perform).`,
+    "ARIA_MISSION", []
+  );
+}
+
 // ── Atomic persistence ─────────────────────────────────────────
 function fileFor(id) { return path.join(MISSIONS_DIR, id + ".json"); }
 function tmpFor(id) { return fileFor(id) + ".tmp"; }
@@ -217,6 +277,14 @@ async function runStep(mission, step, index) {
       result = typeof res === "string" ? res : JSON.stringify(res);
     } else if (upper === "NOTE") {
       result = step.arg || "";
+    } else if (upper === "ACTION") {
+      // Real action executor, not just an LLM describing the action.
+      result = await executeAction(step.arg, mission);
+    } else if (upper === "ANALYSIS") {
+      result = await getAIResponse(
+        `Mission "${mission.objective}". Analyze this concretely: ${step.arg}\nReturn a concrete analysis (facts, decisions, trade-offs).`,
+        "ARIA_MISSION", []
+      );
     } else {
       result = await getAIResponse(
         `You are executing step ${index + 1} of a mission. Objective: "${mission.objective}".\nStep: ${step.type} ${step.arg}\n\nDo ONLY this step, return a concise result.`,
@@ -410,6 +478,17 @@ async function decideApproval(id, decision) {
   }
   const stepIndex = mission.approvalRequest.stepIndex;
   const step = mission.steps[stepIndex];
+
+  // Enforce approval expiry: a stale approval (older than its expiresAt) can't
+  // be acted on — previously expiresAt was metadata only and never checked.
+  const exp = mission.approvalRequest.expiresAt;
+  if (exp && Date.now() > exp) {
+    mission.approvalRequest = null;
+    mission.status = "cancelled";
+    mission.progress = "Approval expired — mission cancelled.";
+    await saveMission(mission);
+    return { ok: false, msg: "This approval request expired and the mission was cancelled. Start a new one if you still want it." };
+  }
 
   if (decision === "approve") {
     step.approvalResolved = "approved";

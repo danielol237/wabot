@@ -94,7 +94,6 @@ function registerBuiltinCommands() {
   registerCommand({ name: "admin", aliases: ["setadmin"], category: "admin", description: "Add/remove bot admin", handler: handleAdmin, ownerOnly: true });
   registerCommand({ name: "ban", aliases: [], category: "admin", description: "Ban a user", handler: handleBan, ownerOnly: true });
   registerCommand({ name: "unban", aliases: [], category: "admin", description: "Unban a user", handler: handleUnban, ownerOnly: true });
-  registerCommand({ name: "nsfw", aliases: ["adultmode", "mature"], category: "admin", description: "Toggle NSFW mode (owner only): !nsfw on/off", handler: handleNsfw, ownerOnly: true });
 
   // Group admin
   registerCommand({ name: "kick", aliases: ["remove"], category: "group", description: "Kick a member", handler: handleKick, ownerOnly: false });
@@ -554,26 +553,6 @@ async function handleOpen(sock, msg, args, ctx) {
   } catch (e) {
     await reply(sock, msg, `❌ Couldn't open the group: ${e.message}`);
   }
-}
-
-// ── !nsfw — owner-only toggle for NSFW mode ──
-async function handleNsfw(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
-  const { isNsfwEnabled, setNsfw } = require("../utils/botSettings");
-  const arg = String(Array.isArray(args) ? args[0] : args || "").toLowerCase();
-  if (arg === "on" || arg === "true" || arg === "enable" || arg === "1") {
-    setNsfw(true);
-    await react(sock, msg, "🔞");
-    return reply(sock, msg, "🔞 NSFW mode ON — adult content enabled.");
-  }
-  if (arg === "off" || arg === "false" || arg === "disable" || arg === "0") {
-    setNsfw(false);
-    await react(sock, msg, "🙂");
-    return reply(sock, msg, "🙂 NSFW mode OFF.");
-  }
-  // No/invalid arg → show current state + usage
-  const state = isNsfwEnabled() ? "ON" : "OFF";
-  return reply(sock, msg, `🔞 NSFW mode is currently *${state}*.\nUse *!nsfw on* or *!nsfw off* (owner only).`);
 }
 
 async function handleAddMember(sock, msg, args, ctx) {

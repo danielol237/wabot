@@ -22,12 +22,16 @@ test("botSettings: NSFW toggle persists", () => {
   wipe();
 });
 
-test("commandRouter: !close / !open / !nsfw are registered", () => {
+test("commandRouter: !close / !open are registered + !nsfw lives in the plugin", () => {
   const cr = require("../src/utils/commandRouter");
   // The module registers all commands on load; check the registry indirectly
   // by confirming the file contains the registrations (they're static).
   const src = require("fs").readFileSync(path.join(__dirname, "../src/utils/commandRouter.js"), "utf8");
   assert.ok(src.includes('name: "close"'), "!close registered");
   assert.ok(src.includes('name: "open"'), "!open registered");
-  assert.ok(src.includes('name: "nsfw"'), "!nsfw registered");
+  // !nsfw was REMOVED from the core router — it lives in plugins/nsfw.js so its
+  // per-chat toggle is the one the category commands actually read (fixes the
+  // bug where core !nsfw said "ON" but !smallboobs still saw "off").
+  const pluginSrc = require("fs").readFileSync(path.join(__dirname, "../plugins/nsfw.js"), "utf8");
+  assert.ok(pluginSrc.includes('name: "nsfw"'), "!nsfw registered in the plugin");
 });

@@ -1,0 +1,22 @@
+# .dockerignore — keep the image lean and secrets out of it.
+
+# Never ship these (auth state + local data)
+sessions/
+data/*.json
+temp/
+*.backup
+.git/
+
+# Build artifacts
+node_modules/
+*.log
+.DS_Store
+
+# Editor/local
+.env
+.env.local
+.vscode/
+.idea/
+
+# Keep the repo files ARIA needs but skip heavy/generated ones
+# (plugins, src, scripts, package.json are included)

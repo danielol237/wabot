@@ -314,11 +314,16 @@ async function startBot() {
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
 
-      // Auto-save view-once media and forward to owner's DM
-      const viewOnceMsg = msg.message?.imageMessage?.viewOnce || msg.message?.videoMessage?.viewOnce;
+      // Auto-save view-once media (photo / video / voice note) and forward to
+      // the owner's DM so nothing ephemeral is lost.
+      const viewOnceMsg =
+        msg.message?.imageMessage?.viewOnce ||
+        msg.message?.videoMessage?.viewOnce ||
+        msg.message?.audioMessage?.viewOnce;
       if (viewOnceMsg) {
         try {
           const isVideo = !!msg.message?.videoMessage;
+          const isAudio = !!msg.message?.audioMessage;
           const buffer = await sock.downloadMediaMessage(msg);
           if (buffer) {
             // Save to ARIA own DM (her number) so owner sees it privately
@@ -326,7 +331,10 @@ async function startBot() {
             const sender = msg.pushName || msg.key.participant || "someone";
             const chatName = msg.key.remoteJid?.includes("g.us") ? "a group" : "a chat";
             if (ariaJid && ariaJid !== msg.key.remoteJid) {
-              if (isVideo) {
+              if (isAudio) {
+                const ptt = !!msg.message?.audioMessage?.ptt;
+                await sock.sendMessage(ariaJid, { audio: buffer, mimetype: "audio/ogg; codecs=opus", ptt, caption: "🔒 View-once voice note saved from " + sender + " in " + chatName });
+              } else if (isVideo) {
                 await sock.sendMessage(ariaJid, { video: buffer, caption: "🔒 View-once video saved from " + sender + " in " + chatName });
               } else {
                 await sock.sendMessage(ariaJid, { image: buffer, caption: "🔒 View-once photo saved from " + sender + " in " + chatName });

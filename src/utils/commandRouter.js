@@ -89,7 +89,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", description: "Check if bot is alive", handler: handleAlive, ownerOnly: false });
   registerCommand({ name: "help", aliases: ["menu", "commands", "h"], category: "meta", description: "Show help menu", handler: handleHelp, ownerOnly: false });
   registerCommand({ name: "stats", aliases: ["botstats"], category: "admin", description: "Show bot statistics", handler: handleStats, ownerOnly: true });
-  registerCommand({ name: "errors", aliases: ["errorlog", "debug"], category: "admin", description: "Show recent errors", handler: handleErrors, ownerOnly: true });
+  registerCommand({ name: "errors", aliases: ["errorlog"], category: "admin", description: "Show recent errors", handler: handleErrors, ownerOnly: true });
   registerCommand({ name: "broadcast", aliases: ["bc", "announce"], category: "admin", description: "Broadcast message to all chats", handler: handleBroadcast, ownerOnly: true });
   registerCommand({ name: "admin", aliases: ["setadmin"], category: "admin", description: "Add/remove bot admin", handler: handleAdmin, ownerOnly: true });
   registerCommand({ name: "ban", aliases: [], category: "admin", description: "Ban a user", handler: handleBan, ownerOnly: true });
@@ -122,7 +122,7 @@ function registerBuiltinCommands() {
   // Academy (adaptive learning system)
   registerCommand({ name: "academy", aliases: ["study", "learn", "school"], category: "utility", description: "Adaptive coding academy: pick a track + level", handler: handleAcademy, ownerOnly: false });
   registerCommand({ name: "run", aliases: ["execute", "practice"], category: "utility", description: "Run code for a challenge: !run <code>", handler: handleAcademyRun, ownerOnly: false });
-  registerCommand({ name: "project", aliases: ["capstone", "build"], category: "utility", description: "Start a track project: !project <track> <level>", handler: handleProject, ownerOnly: false });
+  registerCommand({ name: "project", aliases: ["capstone"], category: "utility", description: "Start a track project: !project <track> <level>", handler: handleProject, ownerOnly: false });
   registerCommand({ name: "incident", aliases: ["oncall", "sre"], category: "utility", description: "Production incident simulator: diagnose + fix", handler: handleIncident, ownerOnly: false });
   registerCommand({ name: "review", aliases: ["codereview", "court"], category: "utility", description: "AI code review court: !review <code>", handler: handleReview, ownerOnly: false });
   registerCommand({ name: "duel", aliases: ["vs", "challenge"], category: "utility", description: "AI-vs-human duel: !duel <problem>", handler: handleDuel, ownerOnly: false });
@@ -138,8 +138,7 @@ function registerBuiltinCommands() {
 
   // Media / Creative
   registerCommand({ name: "imagine", aliases: ["img", "draw"], category: "creative", description: "Generate an image with AI", handler: handleImageGen, ownerOnly: false });
-  registerCommand({ name: "sticker", aliases: ["sticker"], category: "creative", description: "Make a sticker from image", handler: handleStickerCommand, ownerOnly: false });
-  registerCommand({ name: "sticker", aliases: ["s"], category: "creative", description: "Sticker shortcut", handler: handleStickerCommand, ownerOnly: false });
+  registerCommand({ name: "sticker", aliases: ["s"], category: "creative", description: "Make a sticker from an image", handler: handleStickerCommand, ownerOnly: false });
   registerCommand({ name: "carbon", aliases: ["codeimg"], category: "creative", description: "Render code as image", handler: handleCarbon, ownerOnly: false });
   registerCommand({ name: "wallpaper", aliases: ["wall", "wp"], category: "creative", description: "Search wallpapers", handler: handleWallpaper, ownerOnly: false });
 
@@ -200,7 +199,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "github", aliases: ["gh"], category: "research", description: "Search GitHub repos: !github <thing>", handler: handleGitHub, ownerOnly: false });
   registerCommand({ name: "releases", aliases: ["ghrelease", "githubrelease"], category: "research", description: "Get latest GitHub release + download links: !releases owner/repo", handler: handleGitHubReleases, ownerOnly: false });
   registerCommand({ name: "reddit", aliases: ["rdt"], category: "research", description: "Search Reddit: !reddit <thing> or !reddit r/sub <thing>", handler: handleReddit, ownerOnly: false });
-  registerCommand({ name: "wikipedia", aliases: ["wiki", "wp"], category: "research", description: "Search Wikipedia: !wikipedia <thing>", handler: handleWikipedia, ownerOnly: false });
+  registerCommand({ name: "wikipedia", aliases: ["wiki"], category: "research", description: "Search Wikipedia: !wikipedia <thing>", handler: handleWikipedia, ownerOnly: false });
 
   // Pokémon
 
@@ -296,8 +295,13 @@ async function routeMessage(sock, msg, context) {
     const cmdName = cmdText.split(/\s+/)[0];
     const args = text.slice(PREFIX.length).trim().slice(cmdName.length).trim();
     
-    for (const cmd of commands) {
-      if (cmd.name === cmdName || cmd.aliases.includes(cmdName)) {
+    // Resolve collisions deterministically: an exact command NAME always beats
+    // an alias. e.g. !build → the "build" command, not academy's "project"
+    // alias; !agent → the "agent" command, not academy's build alias.
+    let resolved = commands.find((c) => c.name === cmdName);
+    if (!resolved) resolved = commands.find((c) => (c.aliases || []).includes(cmdName));
+    const cmd = resolved;
+    if (cmd) {
         // Owner-only check
         if (cmd.ownerOnly && !isOwner(senderJid)) {
           const { reply: _rp } = require("./baileysHelpers");
@@ -327,7 +331,6 @@ async function routeMessage(sock, msg, context) {
           try { require("./eventLog").track("error", `Command ${cmd.name} failed: ${err.message.slice(0, 80)}`); } catch (_) {}
         }
         return;
-      }
     }
   }
 
@@ -2137,8 +2140,38 @@ async function handleAIResponse(sock, msg, text, ctx) {
 // ── Initialize ───────────────────────────────────────────────
 registerBuiltinCommands();
 
+// ── Command collision detector ──────────────────────────────
+// The router dispatches first-match-wins over the registration array, so a
+// duplicate trigger (same name or alias registered twice) silently lets the
+// earlier command steal the later one. Surface every collision at startup so
+// commands aren't silently shadowed (e.g. !build = academy project, not the
+// app builder; !agent = project, not the agent runner).
+function detectCommandCollisions() {
+  const seen = new Map(); // trigger -> { command, kind }
+  const warnings = [];
+  for (const cmd of commands) {
+    const register = (trigger, kind) => {
+      if (seen.has(trigger)) {
+        warnings.push(`collision: "${trigger}" -> ${seen.get(trigger).command} (${seen.get(trigger).kind}) vs ${cmd.name} (${kind})`);
+      } else {
+        seen.set(trigger, { command: cmd.name, kind });
+      }
+    };
+    register(cmd.name, "name");
+    for (const a of cmd.aliases || []) register(a, "alias");
+  }
+  if (warnings.length) {
+    const { warn } = require("./logger");
+    warn(`[router] ${warnings.length} command collision(s):\n  ` + warnings.join("\n  "));
+  }
+  return warnings;
+}
+
+detectCommandCollisions();
+
 // ── Plugin marketplace command handlers ──────────────────────
 async function handlePluginsList(sock, msg, args, context) {
+  const { reply } = require("./baileysHelpers");
   const { listInstalled } = require("../tools/pluginMarket");
   const list = listInstalled();
   if (!list.length) return reply(sock, msg, "No plugins installed.");
@@ -2147,7 +2180,8 @@ async function handlePluginsList(sock, msg, args, context) {
 }
 
 async function handlePluginInstall(sock, msg, args, context) {
-  const name = (args || "")[0];
+  const { reply } = require("./baileysHelpers");
+  const name = String(args || "").trim();
   if (!name) return reply(sock, msg, "Usage: !install <plugin-name>");
   const { installPlugin } = require("../tools/pluginMarket");
   const r = await installPlugin(name);
@@ -2155,7 +2189,8 @@ async function handlePluginInstall(sock, msg, args, context) {
 }
 
 async function handlePluginUpdate(sock, msg, args, context) {
-  const name = (args || "")[0];
+  const { reply } = require("./baileysHelpers");
+  const name = String(args || "").trim();
   if (!name) return reply(sock, msg, "Usage: !update <plugin-name>");
   const { updatePlugin } = require("../tools/pluginMarket");
   const r = await updatePlugin(name);
@@ -2163,7 +2198,8 @@ async function handlePluginUpdate(sock, msg, args, context) {
 }
 
 async function handlePluginEnable(sock, msg, args, context) {
-  const name = (args || "")[0];
+  const { reply } = require("./baileysHelpers");
+  const name = String(args || "").trim();
   if (!name) return reply(sock, msg, "Usage: !enable <plugin-name>");
   const { setPluginState } = require("../tools/pluginMarket");
   setPluginState(name, true);
@@ -2171,7 +2207,8 @@ async function handlePluginEnable(sock, msg, args, context) {
 }
 
 async function handlePluginDisable(sock, msg, args, context) {
-  const name = (args || "")[0];
+  const { reply } = require("./baileysHelpers");
+  const name = String(args || "").trim();
   if (!name) return reply(sock, msg, "Usage: !disable <plugin-name>");
   const { setPluginState } = require("../tools/pluginMarket");
   setPluginState(name, false);

@@ -15,6 +15,20 @@ const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_
 // OpenAI-compatible wrapper. The key is passed via the x-goog-api-key header.
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]; // fallback chain
+// Groq's free tier caps total tokens-per-minute (prompt + history + response) at
+// 8000 for some models, and Groq retires models without much notice — so this is
+// a fallback chain (primary → next) and Groq gets a safer, lower token cap.
+// Hoisted here (audit #24) instead of re-created inside the hot path.
+const GROQ_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "llama-3.1-8b-instant"];
+// Free OpenRouter models rate-limit hard (shared quota), so keep a longer chain
+// so a rate-limited model falls through to the next one. Hoisted per audit #24.
+const OPENROUTER_MODELS = [
+  "openai/gpt-oss-20b:free",
+  "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "nvidia/nemotron-nano-12b-v2-vl:free",
+  "openai/gpt-oss-20b:free",
+];
 
 // Cerebras' free tier: 1M tokens/day, no credit card — genuinely the highest free
 // ceiling available right now, added after repeatedly hitting Gemini's daily 429s
@@ -227,14 +241,10 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
   }
 
   // Try Groq second — model deprecated June 17, 2026, switched to current replacement.
-  // Groq retires models without much notice, so this list is a fallback chain:
-  // if the primary model gets deprecated too, it tries the next one automatically.
-  const GROQ_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "llama-3.1-8b-instant"];
-
-  // Groq's free tier caps total tokens-per-minute (prompt + history + response) at 8000
-  // for some models. Requesting max_tokens near that ceiling guarantees a 413 the moment
-  // the prompt itself has any real size — so Groq gets its own safer, lower cap than
-  // Gemini, which has much more headroom.
+  // Groq retires models without much notice, so the GROQ_MODELS chain (defined at
+  // module scope) tries the next model automatically if the primary is deprecated.
+  // Groq's free tier caps total tokens-per-minute at 8000 for some models, so it
+  // gets a safer, lower cap than Gemini, which has much more headroom.
   const groqMaxTokens = Math.min(maxTokens, 6000);
   let lastError = null;
 
@@ -263,17 +273,9 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
     }
   }
 
-  // Fallback to OpenRouter — the previous model ID (rouge-rose) was retired,
-  // so we use a verified working free model with a small fallback chain.
-  // Free OpenRouter models rate-limit hard (shared quota), so keep a longer
-  // chain so a rate-limited model falls through to the next one.
-  const OPENROUTER_MODELS = [
-    "openai/gpt-oss-20b:free",
-    "google/gemma-4-31b-it:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "nvidia/nemotron-nano-12b-v2-vl:free",
-    "openai/gpt-oss-20b:free",
-  ];
+  // Fallback to OpenRouter — the previous model ID (rouge-rose) was retired.
+  // Free OpenRouter models rate-limit hard (shared quota), so the module-scope
+  // OPENROUTER_MODELS chain lets a rate-limited model fall through to the next.
   if (process.env.OPENROUTER_API_KEY) {
     for (const model of OPENROUTER_MODELS) {
       try {

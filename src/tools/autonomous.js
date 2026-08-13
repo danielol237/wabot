@@ -96,4 +96,14 @@ function stop() {
   console.log("🤖 Autonomous mode deactivated");
 }
 
-module.exports = { init, stop, startAutonomousLoop };
+// Called on every real inbound message from a tracked user so ARIA's "has it
+// been a while since we interacted" check reflects ACTUAL conversation, not just
+// her own proactive ticks. Previously lastCheck only updated when she sent a
+// proactive message, so she'd think the owner was idle right after they messaged.
+function noteInteraction(senderJid) {
+  if (!senderJid) return;
+  const existing = specialUsers.get(senderJid);
+  specialUsers.set(senderJid, { ...(existing || {}), lastCheck: Date.now() });
+}
+
+module.exports = { init, stop, startAutonomousLoop, noteInteraction };

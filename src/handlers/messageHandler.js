@@ -55,6 +55,9 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // ── HUMANITY ENGINE ────────────────────────────────────────
   // Track interaction for bond/mood
   trackInteraction(senderJid, text, checkOwner(senderJid));
+  // Update autonomous-mode "last interaction" so ARIA knows the user is actually
+  // active (previously it only tracked her own proactive ticks).
+  try { require("../tools/autonomous").noteInteraction(senderJid); } catch (_) {}
   // Update mood based on conversation
   updateMood(senderJid, text);
 

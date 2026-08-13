@@ -16,6 +16,13 @@ const { log, error, warn } = require("../utils/logger");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 const SANDBOX_IMAGE = process.env.SANDBOX_IMAGE || "node:20-slim";
+// Python needs a Python runtime; node:20-slim has none. Auto-pick a python image
+// for python code unless the operator explicitly overrode SANDBOX_IMAGE.
+function imageFor(lang) {
+  if (process.env.SANDBOX_IMAGE) return process.env.SANDBOX_IMAGE;
+  const isPy = lang === "py" || lang === "python";
+  return isPy ? "python:3.12-slim" : "node:20-slim";
+}
 
 // Preflight: is docker available on this host?
 let dockerAvailable = null;
@@ -69,27 +76,40 @@ async function runSandboxed(code, lang, opts = {}) {
     "--stop-timeout", "3",
     "-v", `${filePath}:/work/main.${ext}:ro`,
     "-w", "/work",
-    SANDBOX_IMAGE,
+    imageFor(lang),
     ...runCmd,
   ];
 
   return new Promise((resolve) => {
-    // `stdin` support (hidden-test harness): feed input to the program via
-    // execFile's `input` option, which writes it to the child's stdin.
-    const execOpts = { timeout: (timeoutSec + 5) * 1000, maxBuffer: 1024 * 1024 };
-    if (opts.stdin != null) execOpts.input = String(opts.stdin);
-    execFile("docker", dockerArgs, execOpts, (err, stdout, stderr) => {
+    const { spawn } = require("child_process");
+    // If stdin is provided, pass it through with `-i` (interactive) so the
+    // container actually receives it on the program's stdin. Without `-i`,
+    // docker run doesn't attach stdin and the program sees EOF. We use spawn +
+    // a real stdin write because execFile's `input` option doesn't reliably
+    // deliver stdin through `docker run`.
+    if (opts.stdin != null) dockerArgs.splice(dockerArgs.indexOf("--rm") + 1, 0, "-i");
+    const proc = spawn("docker", dockerArgs, { timeout: (timeoutSec + 5) * 1000 });
+    let stdout = "", stderr = "", timedOut = false;
+    proc.stdout.on("data", (d) => { stdout += String(d); if (stdout.length > 4000) proc.kill("SIGKILL"); });
+    proc.stderr.on("data", (d) => { stderr += String(d); });
+    proc.on("error", (e) => {
+      try { fs.unlinkSync(filePath); } catch (_) {}
+      return resolve({ success: false, output: "docker error: " + e.message, sandboxed: true });
+    });
+    proc.on("close", (code) => {
       try { fs.unlinkSync(filePath); } catch (_) {}
       const output = (stdout || stderr || "").slice(0, 4000);
-      if (err && err.killed) {
-        return resolve({ success: false, output: "❌ Timed out / killed in sandbox.", sandboxed: true });
-      }
-      if (err) {
-        // err.message often contains "docker: ..." — keep the useful part
-        return resolve({ success: false, output: (stderr || err.message).slice(0, 2000), sandboxed: true });
-      }
+      if (timedOut) return resolve({ success: false, output: "❌ Timed out / killed in sandbox.", sandboxed: true });
+      if (code !== 0 && !stdout) return resolve({ success: false, output: (stderr || `exit ${code}`).slice(0, 2000), sandboxed: true });
       resolve({ success: true, output: output || "(no output)", sandboxed: true });
     });
+    // Write stdin, then close so the program sees EOF.
+    if (opts.stdin != null) {
+      proc.stdin.write(String(opts.stdin));
+      proc.stdin.end();
+    } else {
+      proc.stdin.end();
+    }
   });
 }
 

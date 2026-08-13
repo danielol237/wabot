@@ -124,7 +124,7 @@ function portalAuth(req, res, next) {
 
 // ── Google OAuth ────────────────────────────────────────────────
 router.get("/auth/google", (req, res) => {
-  if (!GOOGLE_CLIENT_ID) return res.redirect("/portal/login?error=google-not-configured");
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !BASE_URL) return res.redirect("/portal/login?error=google-not-configured");
   const state = signToken({ r: crypto.randomBytes(8).toString("hex"), exp: Date.now() + 10 * 60 * 1000 });
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
@@ -138,6 +138,8 @@ router.get("/auth/google", (req, res) => {
 
 router.get("/auth/google/callback", async (req, res) => {
   const code = req.query.code;
+  const state = verifyToken(req.query.state);
+  if (!state?.r) return res.redirect("/portal/login?error=oauth-state-invalid");
   if (!code) return res.redirect("/portal/login?error=no-code");
   try {
     const tok = await axios.post("https://oauth2.googleapis.com/token",
@@ -161,7 +163,7 @@ router.get("/auth/google/callback", async (req, res) => {
     }
     const learner = accounts[sub];
     const token = issuePortalToken(learner);
-    res.cookie("aria_portal", token, { httpOnly: true, sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
+    res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
     return res.redirect("/portal");
   } catch (e) {
     return res.redirect("/portal/login?error=oauth-failed");
@@ -183,7 +185,7 @@ router.post("/auth/email", express.json(), (req, res) => {
     save();
     const learner = accounts[id];
     const token = issuePortalToken(learner);
-    res.cookie("aria_portal", token, { httpOnly: true, sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
+    res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
     return res.json({ ok: true });
   }
   // login
@@ -224,7 +226,7 @@ function googleSvg() { return `<svg viewBox="0 0 24 24"><path fill="#4285F4" d="
 router.get("/login", (req, res) => {
   const err = req.query.error || "";
   const errMsg = err === "google-not-configured" ? "Google sign-in isn't set up yet — create an account with email below, or ask ARIA to enable it." :
-    err === "no-code" || err === "oauth-failed" ? "Google sign-in didn't complete. Please try again." :
+    err === "no-code" || err === "oauth-failed" || err === "oauth-state-invalid" ? "Google sign-in didn't complete securely. Please try again." :
     err === "logged-out" ? "You've been logged out." : "";
   const body = `
   <div class="auth-shell"><div class="auth-layout">

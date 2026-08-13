@@ -106,15 +106,20 @@ async function searchAnime(query) {
     anilist: [], jikan: [], omnisave: [], consumet: [], animepahe: [], gogoanime: [],
   };
 
-  await Promise.all([
+  // Race all providers against a hard deadline so a single slow/hung provider
+  // can NEVER block the whole search. Unfinished buckets are skipped.
+  await Promise.race([
+    Promise.all([
     (async () => {
-      const data = await anilist(
-        `query($q:String){Page(perPage:12){media(search:$q,type:ANIME,sort:SEARCH_MATCH){id
-          title{english romaji native} coverImage{extraLarge large} description genres status
-          seasonYear averageScore episodes format}}}`,
-        { q: query }
-      );
-      buckets.anilist = fromAnilist(data?.Page);
+      try {
+        const data = await anilist(
+          `query($q:String){Page(perPage:12){media(search:$q,type:ANIME,sort:SEARCH_MATCH){id
+            title{english romaji native} coverImage{extraLarge large} description genres status
+            seasonYear averageScore episodes format}}}`,
+          { q: query }
+        );
+        buckets.anilist = fromAnilist(data?.Page);
+      } catch (_) {}
     })(),
     (async () => {
       try {
@@ -162,6 +167,8 @@ async function searchAnime(query) {
         }));
       } catch (_) {}
     })(),
+    ]),
+    new Promise((resolve) => setTimeout(resolve, 10000)), // 10s hard cap
   ]);
 
   // Deterministic priority: rich metadata first, dedupe by title.

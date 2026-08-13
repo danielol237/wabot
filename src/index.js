@@ -74,6 +74,10 @@ app.use("/preview", checkAuth, express.static(path.join(__dirname, "../data/proj
 const animeBrowserRouter = require("./animeBrowser");
 app.use("/dashboard/anime", checkAuth, animeBrowserRouter);
 
+// ARIA Anime — standalone PUBLIC streaming/download site (separate from dashboard).
+const animeSiteRouter = require("./animeSite");
+app.use("/anime", animeSiteRouter);
+
 app.get("/preview", (req, res) => {
   const projectsDir = path.join(__dirname, "../data/projects");
   if (!fs.existsSync(projectsDir)) return res.send("No projects built yet.");

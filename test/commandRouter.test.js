@@ -32,3 +32,16 @@ test("commandRouter: no duplicate sticker registration (was registered twice)", 
   const stickers = commands.filter((c) => c.name === "sticker");
   assert.strictEqual(stickers.length, 1, "sticker registered exactly once");
 });
+
+test("commandRouter: zero command collisions (audit #1)", () => {
+  // Every name and every alias must be unique across the whole registry. A
+  // duplicate (same name twice, or an alias that collides with another name or
+  // alias) silently shadows a command. After the #1 fixes the detector must
+  // return an empty list.
+  const { commands, detectCommandCollisions } = require("../src/utils/commandRouter");
+  const collisions = detectCommandCollisions();
+  assert.ok(Array.isArray(collisions), "detector returns an array");
+  assert.strictEqual(collisions.length, 0, `expected 0 command collisions, got ${collisions.length}: ${collisions.join("; ")}`);
+  // Sanity: registry is non-empty.
+  assert.ok(commands.length > 10, "registry has a healthy number of commands");
+});

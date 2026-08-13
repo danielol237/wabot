@@ -2221,4 +2221,5 @@ module.exports = {
   commands,
   detectIntent,
   triggeredByName,
+  detectCommandCollisions,
 };

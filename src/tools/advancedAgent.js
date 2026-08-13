@@ -120,4 +120,4 @@ async function runAgent(task, senderName, onProgress) {
   return await getAIResponse(finalPrompt, senderName, []);
 }
 
-module.exports = { runAgent };
+module.exports = { runAgent, parseWriteStep };

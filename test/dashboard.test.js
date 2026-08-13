@@ -129,14 +129,18 @@ test("dashboard: /api/live returns telemetry for authenticated user", async () =
 });
 
 test("telemetry: analytics windows + record round-trip", () => {
+  // Capture baseline BEFORE recording. Telemetry accumulates across runs in the
+  // shared data/dashboardTelemetry.json (not reset on boot), so asserting exact
+  // counts against an absolute value is inherently flaky. We assert the DELTA.
+  const before = tel.analytics()["24h"];
   tel.record("message");
   tel.record("command", { detail: "test" });
   tel.record("ai", { ok: true, latency: 150, provider: "cerebras" });
   const a = tel.analytics();
-  assert.ok(a["24h"].messages >= 1, "24h messages should count the recorded event");
-  assert.ok(a["24h"].commands >= 1, "24h commands should count");
-  assert.ok(a["24h"].aiRequests >= 1, "24h AI requests should count");
-  assert.strictEqual(a["24h"].providers.cerebras, 1, "provider split should count cerebras");
+  assert.ok(a["24h"].messages >= before.messages + 1, "24h messages should count the recorded event");
+  assert.ok(a["24h"].commands >= before.commands + 1, "24h commands should count");
+  assert.ok(a["24h"].aiRequests >= before.aiRequests + 1, "24h AI requests should count");
+  assert.ok((a["24h"].providers.cerebras || 0) >= (before.providers?.cerebras || 0) + 1, "provider split should count cerebras");
   // Cleanup telemetry file.
   try { fs.unlinkSync(path.join(__dirname, "../data/dashboardTelemetry.json")); } catch (_) {}
 });

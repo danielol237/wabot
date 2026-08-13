@@ -182,17 +182,25 @@ function learnCommunicationStyle(userId, userName, text) {
   const p = store.profile || {};
   const lower = text.toLowerCase();
 
-  let style = p.communicationStyle || "neutral";
-  if (lower.split(/\s+/).length < 4) style = "brief";
-  else if (/\b(can you|please|could you|would you)\b/.test(lower)) style = "polite";
-  else if (/\b(fuck|shit|damn|wtf|bro|man|dude)\b/.test(lower)) style = "casual";
-  else if (text.length > 100) style = "detailed";
+  const wordCount = lower.split(/\s+/).filter(Boolean).length;
 
-  // Only update if we have a signal (don't overwrite "brief" with every short message)
-  if (lower.split(/\s+/).length < 4 || /\b(fuck|shit|damn|wtf|can you|please)\b/.test(lower)) {
-    p.communicationStyle = style;
+  // Strong, explicit style signals — these are the only ones worth learning.
+  // Trivial short replies ("ok", "yes", "sure") are NOT signals and must not
+  // clobber a previously-learned style. Previously the "brief" branch fired on
+  // any <4-word message and saved every time, so one "k" would downgrade a
+  // normally-polite user to "brief" permanently.
+  if (/\b(fuck|shit|damn|wtf|bro|man|dude)\b/.test(lower)) {
+    p.communicationStyle = "casual";
+    save();
+  } else if (/\b(can you|please|could you|would you|thank)\b/.test(lower)) {
+    p.communicationStyle = "polite";
+    save();
+  } else if (wordCount >= 4 && text.length > 100) {
+    p.communicationStyle = "detailed";
     save();
   }
+  // Explicitly DO NOT learn "brief" from short messages — it's the default and
+  // overwrites real style signals. Only a strong new signal updates the style.
 }
 
 module.exports = {

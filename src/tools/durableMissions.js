@@ -585,5 +585,5 @@ loadAll();
 module.exports = {
   createMission, executeMission, decideApproval, recoverMissions,
   getMission, getMissions, getAllMissions, cancelMission, formatMissionList, setSock,
-  save, saveMission, traceMission,
+  save, saveMission, traceMission, executeAction,
 };

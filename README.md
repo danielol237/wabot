@@ -11,7 +11,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Scan the QR in terminal (or visit `/qr` in browser).
+Pair WhatsApp from the owner dashboard. Open `/dashboard`, sign in with `DASHBOARD_PASSWORD`, then choose **Pair WhatsApp**. The protected `/qr` screen shows either the QR or the phone-number pairing code; pairing is still available without exposing the credential to public visitors.
 
 ## Environment Variables
 
@@ -27,6 +27,15 @@ Scan the QR in terminal (or visit `/qr` in browser).
 | `ELEVENLABS_API_KEY` | No | Text-to-speech voice responses |
 | `BOT_NAME` | No | Bot name trigger (default: aria) |
 | `BOT_PREFIX` | No | Command prefix (default: !) |
+| `BASE_URL` | Required for Google sign-in | Public origin with no trailing slash, for example `https://wabot-ytal.onrender.com` |
+| `GOOGLE_CLIENT_ID` | No | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | No | Google OAuth client secret |
+| `PORTAL_SESSION_SECRET` | Recommended | Long random signing secret for learner sessions |
+| `MEDIA_PROXY_SECRET` | Required for browser playback/download links | Long random secret for expiring media capabilities |
+| `SESSION_ENCRYPT_KEY` | Required for Git-backed session backup | Dedicated random key of at least 32 characters |
+| `ANIME_WHATSAPP_MAX_MB` | No | WhatsApp delivery ceiling; default 150 MB |
+| `MEDIA_ALLOWED_HOSTS` | No | Comma-separated HTTPS provider host allowlist |
+| `PHONE_NUMBER` | No | If set, enables pairing-code mode instead of QR |
 
 ## Features
 
@@ -72,10 +81,12 @@ These execute code or write files on the server, so they're restricted to `OWNER
 
 Other dev commands open to everyone: `!remember`, `!preferences`, `!learn`, `!facts`.
 
-### 🌐 Web Dashboard
-When the bot is running, open `http://your-server-ip:3001/dashboard` in your browser.
+### 🌐 Web surfaces
+The public root opens the catalog at `/anime`. Browse/search remain login-free; watch and download links are short-lived signed capabilities. The learner portal is at `/portal/login`, and the owner dashboard is at `/dashboard`.
 
-Requires `DASHBOARD_PASSWORD` in .env.
+When the bot is running, open `https://your-public-origin/dashboard` in your browser.
+
+The dashboard requires `DASHBOARD_PASSWORD` in `.env`. The QR pairing screen is intentionally protected by the same owner session; it is not removed.
 
 **Dashboard pages:**
 - `/dashboard` — live stats (uptime, messages, spawns, errors)
@@ -83,6 +94,9 @@ Requires `DASHBOARD_PASSWORD` in .env.
 - `/dashboard/trainers` — view all Pokémon trainers
 - `/dashboard/logs` — error log viewer
 - `/dashboard/admin` — manage admins, broadcast, config status
+- `/qr` — protected WhatsApp QR or pairing-code screen
+- `/portal/login` — learner email/password and Google sign-in
+- `/anime` — public catalog, watch, and download pages
 
 ### 🔧 Other Commands
 `!search`, `!weather`, `!translate`, `!news`, `!lyrics`, `!sticker`, `!carbon`, `!wallpaper`, `!anime`, `!episodes`, `!trending`, `!remind`, `!poll`, `!say` (TTS), `!kick`, `!promote`, `!tagall`, `!warn`, `!clear`, `!remember`
@@ -91,7 +105,7 @@ Requires `DASHBOARD_PASSWORD` in .env.
 Anime downloads (`!animedl`, the web browser) depend on two things that are
 **not npm packages**, so they must exist on the host:
 
-- **`yt-dlp`** — used to download/merge the final video. Install it on the host
+- **`yt-dlp`**, **`ffmpeg`**, and **`ffprobe`** — used to download, merge, validate, and deliver the final video. The production Dockerfile installs and verifies them; Render deployments must use that Dockerfile or install the same binaries.
   (`pip install yt-dlp`, or via apt). If it's missing, ARIA logs a clear error
   at startup and the download step reports `DOWNLOAD_FAILED` instead of silently
   breaking. Providers like OmniSave return direct MP4 URLs and Gogo/AnimePahe

@@ -20,6 +20,11 @@ router.use(["/api/missions", "/api/memory", "/api/media", "/api/household", "/ap
 // Same stateless CSRF policy as the dashboard, for the state-changing /api
 // endpoints that sit behind dashboard auth. /api/chat stays public + CSRF-free.
 const { csrfOk } = require("./dashboard");
+const { error: logError } = require("./utils/logger");
+function apiFailure(res, scope, err) {
+  logError(`[${scope}]`, err?.stack || err?.message || err);
+  return res.status(500).json({ error: "The service is temporarily unavailable. Please try again." });
+}
 router.post(["/api/missions", "/api/missions/cancel"], (req, res, next) => {
   if (!csrfOk(req)) return res.status(403).json({ error: "Invalid or missing CSRF token." });
   next();
@@ -68,14 +73,15 @@ router.post("/api/chat", async (req, res) => {
     res.json({ reply: reply || "..." });
   } catch (e) {
     chatInFlight = Math.max(0, chatInFlight - 1);
-    res.status(500).json({ reply: "error: " + e.message });
+    logError("[website-chat]", e?.stack || e?.message || e);
+    res.status(500).json({ reply: "ARIA is temporarily unavailable. Please try again." });
   }
 });
 
 // ── API: missions ────────────────────────────────────────────
 router.get("/api/missions", (req, res) => {
   try { const dm = tryLoad("./tools/durableMissions"); res.json({ missions: dm && dm.getAllMissions ? dm.getAllMissions() : [] }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { return apiFailure(res, "website-api", e); }
 });
 router.post("/api/missions", (req, res) => {
   try {
@@ -172,7 +178,7 @@ router.get("/api/system", async (req, res) => {
 
 // ── The page ─────────────────────────────────────────────────
 router.get("/", (req, res) => {
-  res.send(page());
+  res.redirect(302, "/anime");
 });
 
 function page() {
@@ -440,12 +446,20 @@ async function loadMissions(){
 }
 async function createMission(){
   const input=document.getElementById('missionInput'); const obj=input.value.trim(); if(!obj)return;
-  await fetch('/api/missions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({objective:obj})});
-  input.value=''; loadMissions();
+  try{
+    const cr=await fetch('/dashboard/api/csrf'); const cj=await cr.json();
+    if(!cr.ok||!cj.csrf){throw new Error('owner session required');}
+    await fetch('/api/missions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({objective:obj,_csrf:cj.csrf})});
+    input.value=''; loadMissions();
+  }catch(e){alert('Sign in to the dashboard before starting a mission.');}
 }
 async function cancelMission(id){
-  await fetch('/api/missions/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
-  loadMissions();
+  try{
+    const cr=await fetch('/dashboard/api/csrf'); const cj=await cr.json();
+    if(!cr.ok||!cj.csrf){throw new Error('owner session required');}
+    await fetch('/api/missions/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,_csrf:cj.csrf})});
+    loadMissions();
+  }catch(e){alert('Sign in to the dashboard before cancelling a mission.');}
 }
 
 // memory

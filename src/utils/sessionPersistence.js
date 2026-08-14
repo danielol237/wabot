@@ -29,24 +29,26 @@ const TOKEN = process.env.GITHUB_TOKEN || "";
 const ASKPASS_FILE = path.join(HOME, ".session-askpass");
 try {
   fs.writeFileSync(ASKPASS_FILE, "#!/bin/sh\necho \"$ARIA_SESSION_TOKEN\"\n", { mode: 0o700 });
+  fs.chmodSync(ASKPASS_FILE, 0o700);
 } catch (_) {}
 
 function syncEnabled() {
-  return !!REPO && !!TOKEN;
+  return !!REPO && !!TOKEN && String(process.env.SESSION_ENCRYPT_KEY || "").length >= 32;
 }
 
 // ── At-rest encryption ────────────────────────────────────────
 // Session files are committed to a (private) git repo. Even private repos can
 // leak — leaked PAT, compromised account, accidental visibility change. So we
-// encrypt each file with AES-256-GCM before committing, using a key derived
-// from SESSION_ENCRYPT_KEY (preferred) or GITHUB_TOKEN. Files are decrypted
+// encrypt each file with AES-256-GCM before committing, using a dedicated
+// SESSION_ENCRYPT_KEY. Files are decrypted
 // back to plaintext in the live sessions/ dir on restore, so Baileys is
 // untouched. Envelope: [12-byte IV][16-byte authTag][ciphertext].
 function deriveKey() {
-  if (!process.env.SESSION_ENCRYPT_KEY) {
-    warn("⚠️ SESSION_ENCRYPT_KEY not set — deriving session encryption key from GITHUB_TOKEN. Set a dedicated SESSION_ENCRYPT_KEY so rotating GITHUB_TOKEN doesn't make old backups undecryptable.");
+  const secret = String(process.env.SESSION_ENCRYPT_KEY || "");
+  if (secret.length < 32) {
+    warn("⚠️ SESSION_ENCRYPT_KEY is missing or too short — session backup is disabled until a dedicated 32+ character key is configured.");
+    return null;
   }
-  const secret = process.env.SESSION_ENCRYPT_KEY || TOKEN;
   return crypto.createHash("sha256").update(secret).digest();
 }
 
@@ -151,7 +153,9 @@ async function backupSession() {
   }
 
   // Encrypt the git-side copy so the repo never holds plaintext session keys.
-  encryptTree(path.join(GIT_DIR, "sessions"), deriveKey());
+  const key = deriveKey();
+  if (!key) return { ok: false, err: "SESSION_ENCRYPT_KEY is not configured" };
+  encryptTree(path.join(GIT_DIR, "sessions"), key);
 
   await git(["add", "-A"], GIT_DIR);
   const status = await git(["status", "--porcelain"], GIT_DIR);
@@ -184,18 +188,23 @@ async function restoreSession() {
   const staging = path.join(HOME, ".session-restore");
   try {
     if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
-    fs.mkdirSync(staging, { recursive: true });
+    fs.mkdirSync(staging, { recursive: true, mode: 0o700 });
+    try { fs.chmodSync(staging, 0o700); } catch (_) {}
     fs.cpSync(backed, staging, { recursive: true });
-    decryptTree(staging, deriveKey());
+    const key = deriveKey();
+    if (!key) throw new Error("SESSION_ENCRYPT_KEY is not configured");
+    decryptTree(staging, key);
   } catch (e) {
     try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
     return { ok: false, err: "staging copy failed: " + e.message };
   }
 
-  fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  fs.mkdirSync(SESSIONS_DIR, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(SESSIONS_DIR, 0o700); } catch (_) {}
   try {
     fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
-    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(SESSIONS_DIR, 0o700); } catch (_) {}
     fs.cpSync(staging, SESSIONS_DIR, { recursive: true });
   } catch (e) {
     try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
@@ -209,7 +218,7 @@ async function restoreSession() {
 let syncInterval = null;
 function startAutoSync() {
   if (!syncEnabled()) {
-    warn("⚠️ Session persistence not configured — set SESSION_GIT_REPO + GITHUB_TOKEN to avoid re-scanning QR on every restart.");
+    warn("⚠️ Session persistence not configured — set SESSION_GIT_REPO + GITHUB_TOKEN + SESSION_ENCRYPT_KEY to avoid re-scanning QR on every restart.");
     return;
   }
   if (syncInterval) clearInterval(syncInterval);

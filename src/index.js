@@ -21,7 +21,8 @@ const TEMP_DIR = path.join(__dirname, "../temp");
 const SESSIONS_DIR = path.join(__dirname, "../sessions");
 const sessionPersistence = require("./utils/sessionPersistence");
 [TEMP_DIR, SESSIONS_DIR].forEach((dir) => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(dir, 0o700); } catch (_) {}
 });
 
 // Load plugins once at startup. A broken plugin logs an error and gets
@@ -30,7 +31,17 @@ const loadedPlugins = loadPlugins();
 log(`🧩 ${loadedPlugins.length} plugin(s) loaded.`);
 
 const app = express();
-app.use(express.json());
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "256kb" }));
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self' https://accounts.google.com; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https: wss:; media-src 'self' https: blob:");
+  if (req.secure) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  next();
+});
 
 // Public root: the deployed product entry point is the anime catalog. The
 // legacy ARIA control site remains available through its existing API routes.
@@ -54,6 +65,9 @@ let pairingCodeRequested = false; // prevents re-requesting a new code on every 
 let isReady = false;
 let lastError = null;
 let sock = null;
+function htmlEsc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 // Boot-once guard: socket-INDEPENDENT services (session backup, task poller,
 // memory curator) must init exactly once at the first connection, NOT on every
 // WhatsApp reconnect (audit #35). Reconnects only need to re-wire the socket-
@@ -80,7 +94,7 @@ app.use("/dashboard/anime", checkAuth, animeBrowserRouter);
 const animeSiteRouter = require("./animeSite");
 app.use("/anime", animeSiteRouter);
 
-app.get("/preview", (req, res) => {
+app.get("/preview", checkAuth, (req, res) => {
   const projectsDir = path.join(__dirname, "../data/projects");
   if (!fs.existsSync(projectsDir)) return res.send("No projects built yet.");
   const projects = fs.readdirSync(projectsDir).filter((f) => fs.statSync(path.join(projectsDir, f)).isDirectory());
@@ -92,40 +106,20 @@ app.get("/preview", (req, res) => {
   res.send(html);
 });
 
-app.get("/qr", (req, res) => {
-  if (isReady) {
-    return res.send(`<html><body style="background:#111;color:#0f0;font-family:sans-serif;text-align:center;padding-top:100px;">
-      <h1>✅ ARIA is connected!</h1></body></html>`);
-  }
-  if (lastError) {
-    return res.send(`<html><head><meta http-equiv="refresh" content="5"></head><body style="background:#111;color:#f55;font-family:sans-serif;text-align:center;padding-top:60px;">
-      <h2>⚠️ Error occurred</h2><pre style="white-space:pre-wrap;padding:0 20px;">${lastError}</pre>
-      <p>Page will retry automatically...</p></body></html>`);
-  }
+function pairingPage(title, content, refresh = 0) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh ? `<meta http-equiv="refresh" content="${refresh}">` : ""}<title>${htmlEsc(title)} · ARIA</title><style>:root{color-scheme:dark;--bg:#0b0d12;--panel:#151a22;--line:#2a3240;--text:#f4f6fa;--muted:#9ba6b8;--accent:#ff5d6c;--ok:#42d6a2}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}.card{width:min(560px,100%);padding:28px;border:1px solid var(--line);border-radius:20px;background:var(--panel);text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3)}.mark{width:48px;height:48px;margin:0 auto 16px;border-radius:14px;background:linear-gradient(135deg,var(--accent),#ff8a5b);position:relative;overflow:hidden}.mark:before,.mark:after{content:"";position:absolute;display:block;width:8px;border-radius:6px;transform:skewX(-22deg);background:#fff}.mark:before{height:29px;left:15px;top:9px}.mark:after{height:21px;left:27px;top:15px;opacity:.72}h1{font-size:24px;margin:0 0 8px;letter-spacing:-.03em}.sub{color:var(--muted);font-size:13px;line-height:1.6}.qr{width:min(300px,80vw);height:auto;margin:22px auto 14px;padding:10px;background:#fff;border-radius:14px}.code{display:block;margin:22px 0 14px;padding:16px;border:1px solid rgba(66,214,162,.4);border-radius:14px;color:var(--ok);font:800 34px/1 ui-monospace,monospace;letter-spacing:.18em}.steps{margin:22px auto 0;padding:16px;border-radius:12px;background:#0f141b;color:var(--muted);font-size:12px;text-align:left;line-height:1.8}.status{display:inline-flex;padding:5px 10px;border-radius:99px;background:rgba(66,214,162,.12);color:var(--ok);font-size:11px;font-weight:800}.status.error{background:rgba(255,93,108,.12);color:var(--accent)}a{display:inline-block;margin-top:18px;color:var(--text);text-decoration:none;border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:12px;font-weight:700}</style></head><body><main class="card"><div class="mark" aria-hidden="true"></div>${content}</main></body></html>`;
+}
 
+app.get("/qr", checkAuth, (req, res) => {
+  if (isReady) return res.send(pairingPage("WhatsApp connected", `<span class="status">Connected</span><h1>ARIA is online</h1><p class="sub">WhatsApp pairing is complete. Return to the dashboard to manage the bot.</p><a href="/dashboard">Back to dashboard</a>`));
+  if (lastError) return res.send(pairingPage("Pairing error", `<span class="status error">Needs attention</span><h1>Pairing needs attention</h1><p class="sub">${htmlEsc(lastError)}</p><p class="sub">This page will retry automatically.</p>`, 5));
   if (USE_PAIRING_CODE) {
-    if (!pairingCode) {
-      return res.send(`<html><head><meta http-equiv="refresh" content="2"></head>
-        <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
-        <h2>⏳ Generating pairing code...</h2></body></html>`);
-    }
-    return res.send(`<html><body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:60px;">
-      <h2>📱 Enter this code in WhatsApp</h2>
-      <p style="font-size:48px;letter-spacing:8px;color:#0f0;font-weight:bold;">${pairingCode}</p>
-      <p>WhatsApp → Linked Devices → Link a Device → Link with phone number instead</p></body></html>`);
+    if (!pairingCode) return res.send(pairingPage("Preparing pairing code", `<h1>Preparing pairing code</h1><p class="sub">Keep this page open. A new code will appear shortly.</p>`, 2));
+    return res.send(pairingPage("Pair with a code", `<span class="status">Secure owner pairing</span><h1>Enter this code in WhatsApp</h1><code class="code">${htmlEsc(pairingCode)}</code><div class="steps">WhatsApp → Linked devices → Link a device → Link with phone number instead</div>`));
   }
-
-  if (!latestQrDataUrl) {
-    return res.send(`<html><head><meta http-equiv="refresh" content="2"></head>
-      <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:100px;">
-      <h2>⏳ Waiting for QR code to generate...</h2></body></html>`);
-  }
+  if (!latestQrDataUrl) return res.send(pairingPage("Preparing QR code", `<h1>Preparing QR code</h1><p class="sub">Keep this page open. The QR will appear as soon as WhatsApp provides it.</p>`, 2));
   const ageSeconds = Math.floor((Date.now() - qrGeneratedAt) / 1000);
-  res.send(`<html><head><meta http-equiv="refresh" content="3"></head>
-    <body style="background:#111;color:#fff;font-family:sans-serif;text-align:center;padding-top:40px;">
-    <h2>📱 Scan this QR with WhatsApp</h2>
-    <img src="${latestQrDataUrl}" style="width:300px;height:300px;" />
-    <p>Generated ${ageSeconds}s ago — page auto-refreshes every 3s</p></body></html>`);
+  return res.send(pairingPage("Scan WhatsApp QR", `<span class="status">Secure owner pairing</span><h1>Scan with WhatsApp</h1><img class="qr" src="${latestQrDataUrl}" alt="WhatsApp pairing QR code"><p class="sub">Generated ${ageSeconds}s ago. This screen refreshes every 3 seconds.</p><div class="steps">WhatsApp → Linked devices → Link a device → Scan the QR shown above.</div>`, 3));
 });
 
 async function startBot() {

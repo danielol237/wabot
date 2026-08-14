@@ -12,6 +12,19 @@ const { log, error } = require("../utils/logger");
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const MIN_BETWEEN_ALERTS_MS = 30 * 60 * 1000; // don't alert on the same thing more than once/30min
 
+function recordSentinelSignal(signal) {
+  try {
+    const configured = String(process.env.OWNER_NUMBER || "").trim();
+    if (!configured) return;
+    const owner = configured.includes("@") ? configured : configured + "@s.whatsapp.net";
+    const sentinel = require("./atlasSentinel");
+    const atlas = require("./atlasStore");
+    for (const workspace of atlas.listWorkspaces(owner, { state: "active" }).filter((item) => item.sentinel?.enabled)) {
+      sentinel.ingestLocal(owner, workspace.id, signal, { notify: false });
+    }
+  } catch (_) {}
+}
+
 let timer = null;
 let lastAlert = {}; // key -> ts
 
@@ -34,6 +47,18 @@ async function runMonitorPass(holder) {
       const fresh = recent.filter((e) => Date.now() - (e.time || 0) < 60 * 60 * 1000);
       if (fresh.length >= 3 && shouldAlert("errors")) {
         alerts.push(`⚠️ *Heads up:* I logged ${fresh.length} errors in the last hour. Might be worth a look — *!errors* for details.`);
+      }
+      if (fresh.length >= 3) {
+        recordSentinelSignal({
+          source: "local",
+          kind: "runtime_errors",
+          action: "review",
+          sourceId: "runtime-errors",
+          dedupeKey: `local:runtime-errors:${Math.floor(Date.now() / (60 * 60 * 1000))}`,
+          title: `${fresh.length} runtime errors in the last hour`,
+          summary: "ARIA recorded at least three recent runtime errors. Review the error log before treating the system as healthy.",
+          severity: "high",
+        });
       }
     }
   } catch (_) {}
@@ -66,6 +91,18 @@ async function runMonitorPass(holder) {
       const anyUp = withKeys.some((r) => r.ok);
       if (withKeys.length && !anyUp && shouldAlert("ai-down")) {
         alerts.push(`🔌 *All configured AI providers are failing.* ${down.map((d) => `${d.name} (${d.error || "error"})`).join(", ")} — replies may fail. Check the dashboard → Health.`);
+      }
+      if (withKeys.length && !anyUp) {
+        recordSentinelSignal({
+          source: "local",
+          kind: "provider_outage",
+          action: "review",
+          sourceId: "ai-providers",
+          dedupeKey: `local:provider-outage:${Math.floor(Date.now() / (60 * 60 * 1000))}`,
+          title: "All configured AI providers are failing",
+          summary: down.map((item) => `${item.name}: ${item.error || "unavailable"}`).join("; ").slice(0, 1000),
+          severity: "critical",
+        });
       }
       if (withKeys.length === 0 && shouldAlert("no-ai-keys")) {
         alerts.push("🔌 I don't have any AI provider keys configured right now — I can't generate replies. Add one of OPENROUTER_API_KEY / GROQ_API_KEY / GEMINI_API_KEY.");

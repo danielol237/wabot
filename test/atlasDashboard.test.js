@@ -79,3 +79,36 @@ test("Atlas dashboard plan API requires CSRF and applies an explicit reviewed ro
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Atlas dashboard exposes Sentinel state and keeps signal resolution owner-controlled", async () => {
+  const app = express();
+  app.use(express.json({ limit: "256kb" }));
+  app.use(express.urlencoded({ extended: true }));
+  app.use("/dashboard", dashboard);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  let workspaceId = null;
+  try {
+    const csrf = (await request(server, "/dashboard/api/csrf")).json().csrf;
+    const created = await request(server, "/dashboard/api/atlas/workspaces", { method: "POST", body: { title: "Sentinel dashboard project", outcome: "Observe delivery health", _csrf: csrf } });
+    assert.equal(created.status, 201);
+    workspaceId = created.json().id;
+    const enabled = await request(server, `/dashboard/api/atlas/${workspaceId}/sentinel`, { method: "POST", body: { action: "enable", githubRepository: "danielol237/wabot", _csrf: csrf } });
+    assert.equal(enabled.status, 200);
+    assert.equal(enabled.json().sentinel.enabled, true);
+    const owner = process.env.OWNER_NUMBER.includes("@") ? process.env.OWNER_NUMBER : process.env.OWNER_NUMBER + "@s.whatsapp.net";
+    const sentinel = require("../src/tools/atlasSentinel");
+    const signal = sentinel.ingestGithub(owner, { action: "completed", check_run: { conclusion: "failure" }, repository: { full_name: "danielol237/wabot" } }, "check_run", "dashboard-sentinel-1");
+    const state = await request(server, `/dashboard/api/atlas/${workspaceId}/sentinel`);
+    assert.equal(state.status, 200);
+    assert.equal(state.json().signals.length, 1);
+    const resolved = await request(server, `/dashboard/api/atlas/${workspaceId}/sentinel`, { method: "POST", body: { action: "resolve", id: signal.signal.id, _csrf: csrf } });
+    assert.equal(resolved.status, 200);
+    assert.equal(resolved.json().signal.status, "resolved");
+  } finally {
+    if (workspaceId) {
+      try { require("fs").rmSync(require("path").join(atlas.ATLAS_DIR, workspaceId + ".json"), { force: true }); } catch (_) {}
+    }
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

@@ -33,6 +33,8 @@ Pair WhatsApp from the owner dashboard. Open `/dashboard`, sign in with `DASHBOA
 | `PORTAL_SESSION_SECRET` | Recommended | Long random signing secret for learner sessions |
 | `MEDIA_PROXY_SECRET` | Required for browser playback/download links | Long random secret for expiring media capabilities |
 | `SESSION_ENCRYPT_KEY` | Required for Git-backed session backup | Dedicated random key of at least 32 characters |
+| `GITHUB_WEBHOOK_SECRET` | No | Optional HMAC secret for signed GitHub Sentinel deliveries |
+| `RENDER_WEBHOOK_SECRET` | No | Optional Standard Webhooks signing secret for Render Sentinel deliveries |
 | `ANIME_WHATSAPP_MAX_MB` | No | WhatsApp delivery ceiling; default 150 MB |
 | `MEDIA_ALLOWED_HOSTS` | No | Comma-separated HTTPS provider host allowlist |
 | `YTDLP_VERSION` | No | Pinned yt-dlp version; default `2026.7.4` |
@@ -89,9 +91,15 @@ The public root opens the catalog at `/anime`. Browse/search remain login-free; 
 ### 🧭 ARIA Atlas — Project Brain
 Atlas gives ARIA durable project workspaces instead of isolated one-off tasks. Say “ARIA, this is a project: launch the anime site by December,” “add this to Wabot,” “what is blocking us?”, “what is next?”, “record a decision,” “what evidence do we have?”, or “give me the project brief.” ARIA stores the project contract, tasks, milestones, evidence, decisions, mission links, and living timeline in owner-scoped atomic records under `data/atlas/`.
 
-Open `/dashboard/atlas` after owner login to see the Atlas cockpit. It shows workspaces, the North Star outcome, progress, Now/Next work, blockers, the decision ledger, the evidence vault, and recent activity. Atlas uses a balanced action policy: observation and preparation can proceed automatically, while deployments, external posts, permission changes, spending, deletion, and other commit actions require explicit approval.
+Atlas V3 adds **Sentinel**, an opt-in operating layer for project signals. It recognizes no-prefix requests such as “show Sentinel,” “what changed in the project,” “acknowledge signal signal_…,” “resolve signal signal_…,” and “approve brief brief_…”. Signed GitHub check, pull-request, deployment, and Render deploy events can become normalized evidence, scored risks, and reviewable decision briefs. Duplicate provider deliveries are ignored by stable delivery IDs, and unverified requests are rejected before reaching Atlas.
+
+Open `/dashboard/atlas` after owner login to see the Atlas cockpit. It shows workspaces, the North Star outcome, progress, Now/Next work, blockers, the roadmap, risk register, Sentinel signal feed, decision briefs, decision ledger, evidence vault, and recent activity. Atlas uses a balanced action policy: observation and preparation can proceed automatically, while deployments, external posts, permission changes, spending, deletion, and other commit actions require explicit approval. Approving a Sentinel brief records your approval; it does not silently commit code, deploy services, or post externally.
 
 When the bot is running, open `https://your-public-origin/dashboard` in your browser.
+
+#### Sentinel activation
+
+Sentinel is disabled by default. Set `GITHUB_WEBHOOK_SECRET` and/or `RENDER_WEBHOOK_SECRET` in the host environment, open `/dashboard/atlas`, select a workspace, enter the matching GitHub `owner/repository` and/or Render service ID, and choose **Enable / save**. Configure the provider webhook to point to `/webhooks/atlas/github` or `/webhooks/atlas/render` on the bot’s public HTTPS origin. GitHub delivery signatures are checked with `X-Hub-Signature-256`; Render signatures and timestamps are checked using its Standard Webhooks format. If no external webhook is configured, the existing local monitor and mission loop still create Sentinel signals for repeated errors, provider outages, and stalled Atlas missions.
 
 The dashboard requires `DASHBOARD_PASSWORD` in `.env`. The QR pairing screen is intentionally protected by the same owner session; it is not removed.
 

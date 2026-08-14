@@ -33,7 +33,12 @@ log(`🧩 ${loadedPlugins.length} plugin(s) loaded.`);
 const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({
+  limit: "256kb",
+  verify: (req, res, buf) => {
+    if (String(req.originalUrl || req.url || "").startsWith("/webhooks/")) req.rawBody = Buffer.from(buf);
+  },
+}));
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -48,6 +53,11 @@ app.use((req, res, next) => {
 app.get("/", (req, res) => res.redirect(302, "/anime"));
 const websiteRouter = require("./website");
 app.use("/", websiteRouter);
+
+// Signed Atlas Sentinel webhooks — provider payloads are verified before they
+// enter the durable project brain. They remain opt-in through environment secrets
+// and workspace source mappings.
+app.use("/webhooks/atlas", require("./tools/atlasWebhooks"));
 
 // Mount web dashboard
 const dashboardRouter = require("./dashboard");

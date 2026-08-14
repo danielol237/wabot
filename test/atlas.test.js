@@ -87,3 +87,72 @@ test("Atlas daily brief is high-signal and rate-limited per workspace", () => {
     cleanup(workspace.id);
   }
 });
+
+
+test("Atlas v2 drafts and applies a dependency-linked roadmap", async () => {
+  const planner = require("../src/tools/atlasPlanner");
+  const owner = "atlas-test-owner-" + Date.now() + "-planner";
+  const workspace = atlas.createWorkspace(owner, { title: "Ship Atlas v2", outcome: "Release a reliable planning engine" });
+  try {
+    const draftResult = planner.draftPlan(owner, "plan this project");
+    assert.ok(draftResult?.draft);
+    assert.equal(draftResult.draft.milestones.length, 4);
+    assert.ok(draftResult.draft.risks.length >= 2);
+    const applied = planner.applyDraft(owner);
+    assert.ok(applied?.applied);
+    const stored = atlas.getWorkspace(owner, workspace.id);
+    assert.equal(stored.planning.status, "applied");
+    assert.equal(stored.milestones.length, 4);
+    assert.ok(stored.tasks.length >= 10);
+    assert.ok(stored.tasks.some((task) => task.dependsOn.length > 0));
+    const compareTask = stored.tasks.find((task) => task.title === "Compare the viable approaches");
+    const baselineTask = stored.tasks.find((task) => task.title === "Inspect the current baseline");
+    assert.ok(compareTask.dependsOn.includes(baselineTask.id));
+    assert.ok(stored.risks.some((risk) => risk.score >= 12));
+    assert.equal(planner.applyDraft(owner), null);
+  } finally {
+    cleanup(workspace.id);
+  }
+});
+
+test("Atlas v2 reconciles a mission outcome exactly once", () => {
+  const owner = "atlas-test-owner-" + Date.now() + "-reconcile";
+  const workspace = atlas.createWorkspace(owner, { title: "Mission bridge", outcome: "Connect mission results" });
+  try {
+    const task = atlas.addTask(owner, workspace.id, { title: "Run verification", missionId: "mission-test-1" });
+    const first = atlas.reconcileMission(owner, workspace.id, "mission-test-1", { status: "completed", result: "All verification checks passed" });
+    const second = atlas.reconcileMission(owner, workspace.id, "mission-test-1", { status: "failed", error: "should not overwrite" });
+    assert.equal(first.taskId, task.id);
+    assert.equal(first.status, "completed");
+    assert.deepEqual(second, first);
+    const stored = atlas.getWorkspace(owner, workspace.id);
+    assert.equal(stored.tasks.find((item) => item.id === task.id).status, "done");
+    assert.equal(stored.evidence.filter((item) => item.kind === "mission_outcome").length, 1);
+  } finally {
+    cleanup(workspace.id);
+  }
+});
+
+
+test("Atlas reconciler maps a terminal durable mission into its workspace", () => {
+  const reconciler = require("../src/tools/atlasReconciler");
+  const owner = "atlas-test-owner-" + Date.now() + "-bridge";
+  const workspace = atlas.createWorkspace(owner, { title: "Reconciliation project", outcome: "Keep mission state honest" });
+  try {
+    const task = atlas.addTask(owner, workspace.id, { title: "Run release checks", missionId: "bridge-mission-1" });
+    const result = reconciler.reconcileOne({
+      id: "bridge-mission-1",
+      creator: owner,
+      status: "failed",
+      progress: "Failed",
+      error: "provider unavailable",
+      metadata: { atlasWorkspaceId: workspace.id, atlasOwnerId: owner },
+      objective: "Run release checks",
+    });
+    assert.equal(result.taskId, task.id);
+    assert.equal(atlas.getWorkspace(owner, workspace.id).tasks.find((item) => item.id === task.id).status, "blocked");
+    assert.ok(atlas.getWorkspace(owner, workspace.id).risks.some((risk) => /provider unavailable/.test(risk.title)));
+  } finally {
+    cleanup(workspace.id);
+  }
+});

@@ -5,6 +5,7 @@
 const { createWorkspace, findWorkspace, getBrief, addEvent, addEvidence, addTask, updateTask, summary } = require("./atlasStore");
 const { createMission, executeMission } = require("./durableMissions");
 const { decisionCard, LEVELS } = require("./atlasPolicy");
+const { handlePlanner } = require("./atlasPlanner");
 
 function clean(value, max = 1000) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -76,7 +77,7 @@ async function nextSafeStep(ownerId, workspace, options = {}) {
   if (gate.approvalRequired || gate.level === LEVELS.PROPOSE || gate.level === LEVELS.COMMIT) {
     return `The next task is *${task.title}*. It is classified as *${gate.level}* and needs your approval before I run it. ${gate.reason}`;
   }
-  const missionId = createMission(options.chatId || ownerId, ownerId, task.title, { metadata: { atlasWorkspaceId: workspace.id, atlasTaskId: task.id, actionLevel: "prepare" } });
+  const missionId = createMission(options.chatId || ownerId, ownerId, task.title, { metadata: { atlasWorkspaceId: workspace.id, atlasTaskId: task.id, atlasOwnerId: ownerId, actionLevel: "prepare" } });
   updateTask(ownerId, workspace.id, task.id, { status: "in_progress", missionId });
   addEvent(ownerId, workspace.id, { type: "next_step_started", text: `Started safe preparation mission ${missionId} for ${task.title}` });
   executeMission(missionId).catch(() => {});
@@ -88,6 +89,10 @@ async function handleAtlas(ownerId, text, options = {}) {
   const lower = input.toLowerCase();
   if (/^(?:aria[,:!]?\s*)?(?:this is|this is my|new|create|start)\s+(?:a\s+)?(?:new\s+)?project\b/i.test(input)) {
     return { kind: "created", workspace: createAtlasProject(ownerId, input) };
+  }
+
+  if (/\b(?:plan this|plan it|make a plan|break this down|break the project down|plan the project|make a roadmap|build a roadmap|show the roadmap|show the plan|view the dependencies|show the risks|apply the plan|approve the plan)\b/i.test(lower)) {
+    return handlePlanner(ownerId, input);
   }
 
   if (/\b(?:why did you choose|what decisions|recent decisions|why this)\b/i.test(lower)) {

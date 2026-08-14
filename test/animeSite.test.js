@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const express = require("express");
+process.env.ANIME_DISABLE_WORKER = "1";
 
 function boot() {
   const app = express();
@@ -16,7 +17,7 @@ test("anime home exposes account entry and clear catalog actions", async () => {
     const response = await fetch(`${base}/`);
     const html = await response.text();
     assert.strictEqual(response.status, 200);
-    assert.ok(html.includes("Learner login"));
+    assert.ok(html.includes("Learner sign in"));
     assert.ok(html.includes("Search anime"));
     assert.ok(html.includes("Browse catalog"));
   } finally {

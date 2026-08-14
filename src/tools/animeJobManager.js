@@ -70,7 +70,7 @@ const MAX_CONCURRENT_DOWNLOADS = Number(process.env.ANIME_MAX_CONCURRENT || 2);
 // yt-dlp size cap for a single file (keeps the bot from ballooning).
 const MAX_DOWNLOAD_MB = Number(process.env.ANIME_MAX_MB || 1500);
 // Hard WhatsApp media ceiling. Above this we refuse to upload and say why.
-const WHATSAPP_MAX_MB = Number(process.env.ANIME_WHATSAPP_MAX_MB || 60);
+const WHATSAPP_MAX_MB = Number(process.env.ANIME_WHATSAPP_MAX_MB || 150);
 
 const DEFAULT_HEADERS = {
   "User-Agent":
@@ -108,7 +108,8 @@ const adapters = {
         throw jobError("SOURCE_NOT_FOUND", "omnisave", "extract", "no detailPath for subject", true);
       }
       const dl = await getOmniSaveDownload(anime.subjectId, detailPath, 1, episode || 1);
-      const url = dl?.downloads?.find((d) => d?.url)?.url || dl?.downloads?.[0]?.url;
+      const chosen = (dl?.downloads || []).filter((d) => d?.url && d.vipLocked !== true).sort((a, b) => (parseInt(b.resolution, 10) || 0) - (parseInt(a.resolution, 10) || 0))[0];
+      const url = chosen?.url;
       if (!url) {
         throw jobError("SOURCE_NOT_FOUND", "omnisave", "extract", "no usable download URL (VIP-locked or empty)", true);
       }
@@ -116,8 +117,8 @@ const adapters = {
         provider: "omnisave",
         url,
         type: /\.m3u8/i.test(url) ? "hls" : "mp4",
-        quality: anime.quality || "unknown",
-        headers: { ...DEFAULT_HEADERS },
+        quality: String(chosen.resolution || anime.quality || "unknown"),
+        headers: { ...DEFAULT_HEADERS, Referer: "https://videodownloader.site/", Origin: "https://videodownloader.site" },
         title: anime.title || "",
       };
     },
@@ -501,7 +502,9 @@ async function runJob(job) {
 
     // Canonical + confidence diagnostic (metadata ≠ downloadable).
     if (report.canonical) {
-      step("resolver", "canonical", true, `${report.canonical.title} (id ${report.canonical.id}${report.confidence?.title != null ? `, title match ${report.confidence.title}%` : ""})`);
+      const canonicalTitle = report.canonical?.identity?.title || report.canonical?.title || job.name;
+      const canonicalId = report.canonical?.identity?.id || report.canonical?.id || "?";
+      step("resolver", "canonical", report.canonical.status === "ok", `${canonicalTitle} (id ${canonicalId}${report.confidence?.title != null ? `, title match ${report.confidence.title}%` : ""})`);
     } else {
       step("resolver", "canonical", false, report.error || "no canonical match");
     }
@@ -685,7 +688,7 @@ function enqueueAnimeJob({ name, episode, sock, chatId, quotedMsg, preferred, qu
   queue.push(job.id);
   persistQueue();
   emit(job);
-  pump();
+  if (process.env.ANIME_DISABLE_WORKER !== "1") pump();
   return job;
 }
 
@@ -719,6 +722,9 @@ module.exports = {
   getRuntimeDeps,
 };
 
-// Recover any jobs that were queued before a restart, and check yt-dlp.
-loadQueue();
-checkYtDlp();
+// Recover queued jobs and warm the media runtime only in production. Tests can
+// still create job records, but must not inherit or execute live downloads.
+if (process.env.ANIME_DISABLE_WORKER !== "1") {
+  loadQueue();
+  checkYtDlp();
+}

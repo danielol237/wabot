@@ -162,7 +162,7 @@ function checkAuth(req, res, next) {
 
 function loginForm() {
   return `<div class="login">
-    <div class="login-logo" aria-hidden="true"></div>
+    <div class="login-logo" aria-hidden="true">A</div>
     <div class="login-kicker">OWNER CONTROL CENTER</div>
     <h1>Welcome back.</h1>
     <p class="login-lede">Monitor ARIA, inspect activity, manage downloads, and keep the bot healthy from one private workspace.</p>
@@ -418,7 +418,7 @@ function renderLiveStrip(ls) {
       <div class="page-title">Command center</div><div class="page-sub">A calm overview of ARIA’s current state and the next useful action.</div>
       <div class="hero command-hero">
         <div class="hrow">
-          <div class="avatar" aria-hidden="true"></div>
+          <div class="avatar" aria-hidden="true">A</div>
           <div><h2>ARIA core <span class="badge ${configured ? "b-green" : "b-amber"}" id="core-badge">● ${configured ? "ONLINE" : "NEEDS AI CONFIG"}</span></h2>
             <div class="sub">Primary model <b>${modelLabel}</b> · fallback <b>${fallbackLabel}</b></div>
           </div>
@@ -669,10 +669,8 @@ function atlasOwnerId() {
 
 function renderAtlasPane(workspaces, brief, csrf) {
   const workspace = brief?.workspace;
-  const openTasks = workspace ? workspace.tasks.filter((task) => !["done", "cancelled"].includes(task.status)).length : 0;
-  const blocked = brief?.blocked?.length || 0;
-  const decisions = workspace?.decisions?.length || 0;
   const tasks = brief?.nextTasks || [];
+  const blocked = brief?.blocked || [];
   const recent = brief?.recent || [];
   const evidence = workspace?.evidence?.slice(-5).reverse() || [];
   const recentDecisions = brief?.recentDecisions || [];
@@ -681,113 +679,72 @@ function renderAtlasPane(workspaces, brief, csrf) {
   const planning = workspace?.planning || {};
   const sentinel = workspace?.sentinel || {};
   const signals = (workspace?.signals || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 6);
-  const briefs = (workspace?.briefs || []).filter((brief) => !["resolved", "rejected"].includes(brief.status)).slice(-5).reverse();
+  const briefs = (workspace?.briefs || []).filter((item) => !["resolved", "rejected"].includes(item.status)).slice(-5).reverse();
+  const openTasks = workspace ? workspace.tasks.filter((task) => !["done", "cancelled"].includes(task.status)).length : 0;
+  const progress = brief?.progress || 0;
+  const missionCount = workspace ? Object.keys(workspace.missionOutcomes || {}).length : 0;
+  const statusClass = (status) => status === "done" || status === "resolved" ? "b-green" : status === "blocked" || status === "critical" ? "b-red" : status === "in_progress" || status === "approved" ? "b-accent" : "b-amber";
   const workspaceRows = workspaces.length
-    ? workspaces.map((item) => `<a class="atlas-workspace ${item.id === workspace?.id ? "active" : ""}" href="/dashboard/atlas?workspace=${encodeURIComponent(item.id)}"><span>${esc(item.title)}</span><small>${item.state}</small></a>`).join("")
-    : `<div class="empty">No Atlas workspaces yet.</div>`;
+    ? workspaces.map((item) => `<a class="atlas-workspace ${item.id === workspace?.id ? "active" : ""}" href="/dashboard/atlas?workspace=${encodeURIComponent(item.id)}"><span><b>${esc(item.title)}</b><small>${esc(item.contract?.outcome || "Project workspace")}</small></span><em>${esc(item.state)}</em></a>`).join("")
+    : `<div class="empty">No project workspaces yet.</div>`;
   const taskRows = tasks.length
-    ? tasks.map((task) => `<div class="atlas-row"><span><b>${esc(task.title)}</b><small>${esc(task.priority)} · ${esc(task.status)}</small></span><span class="badge ${task.status === "in_progress" ? "b-accent" : "b-amber"}">${esc(task.status)}</span></div>`).join("")
-    : `<div class="empty">No open tasks. Ask ARIA to add the next milestone.</div>`;
-  const blockedRows = blocked
-    ? brief.blocked.map((task) => `<div class="atlas-row"><span><b>${esc(task.title)}</b><small>needs attention</small></span><span class="badge b-red">blocked</span></div>`).join("")
-    : `<div class="empty">Nothing is blocked.</div>`;
+    ? tasks.slice(0, 6).map((task) => `<div class="atlas-list-row"><span><b>${esc(task.title)}</b><small>${esc(task.priority || "normal")} priority · ${esc(task.status)}</small></span><span class="badge ${statusClass(task.status)}">${esc(task.status)}</span></div>`).join("")
+    : `<div class="empty">No open next actions. Ask ARIA to identify the next safe step.</div>`;
+  const blockedRows = blocked.length
+    ? blocked.slice(0, 5).map((task) => `<div class="atlas-list-row"><span><b>${esc(task.title)}</b><small>Blocked work needs an explicit review.</small></span><span class="badge b-red">blocked</span></div>`).join("")
+    : `<div class="empty">No blocked work.</div>`;
+  const roadmapRows = milestones.length
+    ? milestones.map((milestone, index) => `<div class="atlas-list-row"><span><b><span class="atlas-index">${String(index + 1).padStart(2, "0")}</span>${esc(milestone.title)}</b><small>${esc(milestone.description || "Roadmap milestone")} · ${milestone.taskIds?.length || 0} tasks</small></span><span class="badge ${statusClass(milestone.status)}">${esc(milestone.status)}</span></div>`).join("")
+    : `<div class="empty">No roadmap applied. Draft one for this workspace first.</div>`;
+  const riskRows = risks.length
+    ? risks.map((risk) => `<div class="atlas-list-row"><span><b>${esc(risk.title)}</b><small>${esc(risk.mitigation || "Review the linked evidence")}</small></span><span class="score ${risk.score >= 15 ? "critical" : risk.score >= 9 ? "watch" : "low"}">${Number(risk.score) || 0}<small>/25</small></span></div>`).join("")
+    : `<div class="empty">No open risks.</div>`;
+  const signalRows = signals.length
+    ? signals.map((signal) => `<div class="atlas-list-row"><span><b>${esc(signal.title)}</b><small>${esc(signal.source)} · ${esc(signal.severity)} · ${esc(signal.status)} · <code>${esc(signal.id)}</code></small></span>${signal.status !== "resolved" ? `<button class="qbtn compact" onclick='sentinelAction("resolve",${JSON.stringify(signal.id)})'>Resolve</button>` : `<span class="badge b-green">resolved</span>`}</div>`).join("")
+    : `<div class="empty">No signals recorded. Sentinel is ${sentinel.enabled ? "watching" : "disabled"}.</div>`;
+  const briefRows = briefs.length
+    ? briefs.map((item) => `<div class="atlas-brief"><div class="atlas-brief-top"><b>${esc(item.title)}</b><span class="badge ${statusClass(item.status)}">${esc(item.actionLevel)} · ${esc(item.status)}</span></div><small>${esc(item.recommendation)}</small><button class="qbtn compact" onclick='sentinelAction("approve",${JSON.stringify(item.id)})'>Approve recommendation</button></div>`).join("")
+    : `<div class="empty">No open decision briefs.</div>`;
   const decisionRows = recentDecisions.length
-    ? recentDecisions.map((decision) => `<div class="atlas-note"><b>${esc(decision.choice || decision.question)}</b><small>${esc(decision.rationale || "Decision recorded in Atlas")}</small></div>`).join("")
+    ? recentDecisions.slice(0, 5).map((decision) => `<div class="atlas-note"><b>${esc(decision.choice || decision.question)}</b><small>${esc(decision.rationale || "Decision recorded in Atlas")}</small></div>`).join("")
     : `<div class="empty">No decisions recorded yet.</div>`;
   const evidenceRows = evidence.length
     ? evidence.map((item) => `<div class="atlas-note"><b>${esc(item.title)}</b><small>${esc(item.summary || "Evidence attached")}${item.url ? ` · <a href="${esc(item.url)}" target="_blank" rel="noopener">open source</a>` : ""}</small></div>`).join("")
     : `<div class="empty">No evidence attached yet.</div>`;
   const activityRows = recent.length
-    ? recent.map((event) => `<div class="feed-item"><div class="feed-ico">${event.type === "decision_recorded" ? "🧾" : event.type === "task_updated" ? "✓" : "•"}</div><div class="feed-body"><div class="m">${esc(event.text)}</div><div class="t">${new Date(event.at).toLocaleString()}</div></div></div>`).join("")
+    ? recent.slice(0, 6).map((event) => `<div class="atlas-activity-row"><span class="atlas-activity-mark"></span><span><b>${esc(event.text)}</b><small>${new Date(event.at).toLocaleString()}</small></span></div>`).join("")
     : `<div class="empty">Atlas activity will appear here.</div>`;
-  const roadmapRows = milestones.length
-    ? milestones.map((milestone, index) => `<div class="atlas-row"><span><b>${index + 1}. ${esc(milestone.title)}</b><small>${esc(milestone.description || "Roadmap milestone")} · ${milestone.taskIds?.length || 0} task(s)</small></span><span class="badge ${milestone.status === "done" ? "b-green" : "b-accent"}">${esc(milestone.status)}</span></div>`).join("")
-    : `<div class="empty">No roadmap applied. Ask ARIA to “plan this project”.</div>`;
-  const riskRows = risks.length
-    ? risks.map((risk) => `<div class="atlas-row"><span><b>${esc(risk.title)}</b><small>mitigation: ${esc(risk.mitigation || "Review with ARIA")}</small></span><span class="badge ${risk.score >= 15 ? "b-red" : risk.score >= 9 ? "b-amber" : "b-muted"}">${Number(risk.score) || 0}/25</span></div>`).join("")
-    : `<div class="empty">No open risks recorded.</div>`;
-  const signalRows = signals.length
-    ? signals.map((signal) => `<div class="atlas-row"><span><b>${esc(signal.title)}</b><small>${esc(signal.id)} · ${esc(signal.source)} · ${esc(signal.severity)} · ${esc(signal.status)}</small></span><span class="actions"><button class="qbtn" onclick='sentinelAction("${signal.status === "resolved" ? "ack" : "resolve"}",${JSON.stringify(signal.id)})'>${signal.status === "resolved" ? "Acknowledge" : "Resolve"}</button></span></div>`).join("")
-    : `<div class="empty">No Sentinel signals recorded.</div>`;
-  const briefRows = briefs.length
-    ? briefs.map((brief) => `<div class="atlas-note"><b>${esc(brief.title)}</b><small>${esc(brief.id)} · ${esc(brief.actionLevel)} · ${esc(brief.status)}<br>${esc(brief.recommendation)}</small><button class="qbtn" onclick='sentinelAction("approve",${JSON.stringify(brief.id)})'>Approve brief</button></div>`).join("")
-    : `<div class="empty">No open Sentinel decision briefs.</div>`;
   return `<style>
-    .atlas-shell{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;align-items:start}
-    .atlas-side{position:sticky;top:16px}.atlas-main{min-width:0}.atlas-contract{border:1px solid rgba(139,124,246,.32);background:linear-gradient(135deg,rgba(99,102,241,.12),var(--panel))}
-    .atlas-contract h2{font-size:24px;margin:6px 0 6px}.atlas-contract p{color:var(--muted);max-width:760px}.atlas-contract-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;color:var(--faint);font-size:11px}
-    .atlas-workspaces{display:grid;gap:6px;margin:12px 0}.atlas-workspace{display:flex;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:12px}.atlas-workspace:hover,.atlas-workspace.active{border-color:var(--brand);background:var(--brand-soft);color:var(--text)}.atlas-workspace small{color:var(--faint)}
-    .atlas-form{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:14px}.atlas-form input,.atlas-form textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:9px 10px;font:inherit;font-size:12px}.atlas-form textarea{min-height:74px;resize:vertical}.atlas-form input:focus,.atlas-form textarea:focus{outline:none;border-color:var(--brand)}
-    .atlas-stats{margin:16px 0}.atlas-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.atlas-row:last-child{border-bottom:0}.atlas-row b{display:block;font-size:12px}.atlas-row small,.atlas-note small{display:block;color:var(--faint);font-size:10.5px;margin-top:3px}.atlas-note{padding:10px 0;border-bottom:1px solid var(--line)}.atlas-note:last-child{border-bottom:0}.atlas-note b{display:block;font-size:12px}.atlas-note a{color:var(--brand2)}
-    @media(max-width:760px){.atlas-shell{grid-template-columns:1fr}.atlas-side{position:static}.atlas-contract h2{font-size:20px}.atlas-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    .atlas-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:26px}.atlas-head .page-sub{max-width:680px;margin-bottom:0}.atlas-head-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.atlas-eyebrow,.section-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:var(--faint)}
+    .atlas-layout{display:grid;grid-template-columns:238px minmax(0,1fr);gap:20px;align-items:start}.atlas-rail{position:sticky;top:20px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}.atlas-rail-header{display:flex;justify-content:space-between;align-items:center}.atlas-workspaces{display:grid;gap:4px;margin:14px -6px 16px}.atlas-workspace{display:flex;justify-content:space-between;gap:8px;padding:11px 8px;border-radius:6px;color:var(--muted);text-decoration:none;border-left:2px solid transparent}.atlas-workspace:hover,.atlas-workspace.active{background:var(--brand-soft);color:var(--text);border-left-color:var(--accent)}.atlas-workspace b{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}.atlas-workspace small{display:block;color:var(--faint);font-size:10px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}.atlas-workspace em{font-style:normal;font-size:9px;color:var(--faint)}.atlas-create{border-top:1px solid var(--line);padding-top:14px}.atlas-create input,.atlas-create textarea,.atlas-form input,.atlas-form textarea{width:100%;background:var(--panel2);border:1px solid var(--line2);color:var(--text);border-radius:6px;padding:10px;font:inherit;font-size:12px;margin-bottom:7px}.atlas-create textarea{min-height:68px;resize:vertical}.atlas-create input:focus,.atlas-create textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}.atlas-create .qbtn{width:100%}
+    .atlas-content{min-width:0}.atlas-north-star{background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:23px;margin-bottom:14px}.atlas-north-star h2{font-size:23px;letter-spacing:-.03em;margin:5px 0 7px}.atlas-north-star p{color:var(--muted);max-width:760px;line-height:1.55;font-size:13px}.atlas-meta{display:flex;gap:16px;flex-wrap:wrap;margin-top:17px;color:var(--faint);font-size:11px}.atlas-meta b{color:var(--muted);font-weight:650}.atlas-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}.atlas-kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 15px}.atlas-kpi .value{font-size:24px;font-weight:780;letter-spacing:-.04em}.atlas-kpi .label{font-size:10px;color:var(--muted);margin-top:3px}.atlas-progress{height:5px;background:var(--panel3);border-radius:999px;overflow:hidden;margin-top:11px}.atlas-progress span{display:block;height:100%;background:var(--accent);border-radius:inherit}
+    .atlas-section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px}.atlas-section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.atlas-section-head h2{font-size:13px;letter-spacing:-.01em}.atlas-section-head small{color:var(--faint);font-size:10px}.atlas-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}.atlas-list-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:11px 0;border-bottom:1px solid var(--line)}.atlas-list-row:last-child{border-bottom:0}.atlas-list-row>span:first-child{min-width:0}.atlas-list-row b{display:block;font-size:12px;line-height:1.35}.atlas-list-row small{display:block;color:var(--faint);font-size:10.5px;line-height:1.4;margin-top:3px}.atlas-list-row code{font:10px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--accent)}.atlas-index{display:inline-block;width:24px;color:var(--faint);font:10px ui-monospace,SFMono-Regular,Consolas,monospace}.score{font-size:15px;font-weight:800;white-space:nowrap}.score small{display:inline;font-size:9px;color:var(--faint)}.score.critical{color:var(--red)}.score.watch{color:var(--amber)}.score.low{color:var(--green)}.qbtn.compact{min-height:32px;padding:6px 9px;font-size:10px;white-space:nowrap}.atlas-brief{padding:11px 0;border-bottom:1px solid var(--line)}.atlas-brief:last-child{border-bottom:0}.atlas-brief-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.atlas-brief b{font-size:12px}.atlas-brief>small{display:block;color:var(--muted);font-size:11px;line-height:1.45;margin:6px 0 9px}.atlas-note{padding:10px 0;border-bottom:1px solid var(--line)}.atlas-note:last-child{border-bottom:0}.atlas-note b{display:block;font-size:12px}.atlas-note small{display:block;color:var(--faint);font-size:10.5px;line-height:1.45;margin-top:4px}.atlas-note a{color:var(--accent)}.atlas-activity{display:grid;gap:0}.atlas-activity-row{display:flex;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}.atlas-activity-row:last-child{border-bottom:0}.atlas-activity-mark{width:7px;height:7px;border-radius:50%;background:var(--accent);margin-top:5px;flex:0 0 auto}.atlas-activity-row b{display:block;font-size:11px;font-weight:650}.atlas-activity-row small{display:block;color:var(--faint);font-size:10px;margin-top:3px}
+    @media(max-width:900px){.atlas-layout{grid-template-columns:1fr}.atlas-rail{position:static}.atlas-workspaces{display:flex;overflow-x:auto;margin-bottom:14px}.atlas-workspace{min-width:180px;border-left:0;border-bottom:2px solid transparent}.atlas-workspace.active{border-bottom-color:var(--accent)}.atlas-create{border-top:0;padding-top:0}.atlas-kpis{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:580px){.atlas-head{display:block}.atlas-head-actions{justify-content:flex-start;margin-top:12px}.atlas-north-star{padding:18px}.atlas-north-star h2{font-size:20px}.atlas-grid{grid-template-columns:1fr}.atlas-kpis{gap:7px}.atlas-kpi{padding:12px}.atlas-kpi .value{font-size:21px}.atlas-list-row{gap:8px}.atlas-list-row .badge{font-size:9px}}
   </style><div class="pane show" id="pane-atlas">
-    <div class="page-title">Atlas <span class="badge b-accent">PROJECT BRAIN</span></div>
-    <div class="page-sub">durable workspaces · decisions · evidence · next actions</div>
-    <div class="atlas-shell">
-      <aside class="card atlas-side">
-        <div class="h">Workspaces <span class="badge b-green">${workspaces.length}</span></div>
-        <div class="atlas-workspaces">${workspaceRows}</div>
-        <form id="atlas-create-form" class="atlas-form">
-          <input name="title" placeholder="New project title" required maxlength="120" />
-          <textarea name="outcome" placeholder="What does success look like?" maxlength="1000"></textarea>
-          <input name="deadline" placeholder="Deadline (optional)" maxlength="80" />
-          <button class="qbtn" type="submit">Create workspace</button>
-          <div id="atlas-create-result" class="hint"></div>
-        </form>
-      </aside>
-      <section class="atlas-main">
-        ${workspace ? `<div class="card atlas-contract"><div class="eyebrow">NORTH STAR</div><h2>${esc(workspace.title)}</h2><p>${esc(workspace.contract.outcome)}</p><div class="atlas-contract-meta"><span>Policy: ${esc(workspace.approvalPolicy)}</span>${workspace.contract.deadline ? `<span>Deadline: ${esc(workspace.contract.deadline)}</span>` : ""}<span>Updated: ${new Date(workspace.updatedAt).toLocaleString()}</span></div><div class="actions"><button class="qbtn purple" onclick="atlasPlan('draft')">Draft roadmap</button>${planning.draft ? `<button class="qbtn" onclick="atlasPlan('apply')">Apply reviewed plan</button><span class="badge b-amber">draft awaiting review</span>` : planning.status === "applied" ? `<span class="badge b-green">roadmap applied</span>` : ""}</div><div id="atlas-plan-result" class="hint"></div></div>` : `<div class="card atlas-contract"><div class="eyebrow">NORTH STAR</div><h2>Give ARIA a project to own</h2><p>Say “ARIA, this is a project: …” in WhatsApp or create your first workspace here.</p></div>`}
-        <div class="stats atlas-stats"><div class="stat"><div class="n">${brief?.progress || 0}%</div><div class="l">progress</div></div><div class="stat"><div class="n">${openTasks}</div><div class="l">open tasks</div></div><div class="stat"><div class="n" style="color:${blocked ? "var(--red)" : "var(--green)"}">${blocked}</div><div class="l">blocked</div></div><div class="stat"><div class="n">${decisions}</div><div class="l">decisions</div></div></div>
-        <div class="grid2"><div class="card"><div class="h">Now / Next</div>${taskRows}</div><div class="card"><div class="h">Blocked</div>${blockedRows}</div></div>
-        <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Roadmap</div>${roadmapRows}</div><div class="card"><div class="h">Risk register</div>${riskRows}</div></div>
-        <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Sentinel <span class="badge ${sentinel.enabled ? "b-green" : "b-muted"}">${sentinel.enabled ? "enabled" : "disabled"}</span></div><p class="hint">Signed GitHub and Render events become evidence, risks, and reviewable decision briefs.</p><div class="atlas-form"><input id="sentinel-github-repo" placeholder="GitHub repository (owner/name)" value="${esc(sentinel.sources?.github?.repository || "")}" maxlength="160" /><input id="sentinel-render-service" placeholder="Render service ID" value="${esc(sentinel.sources?.render?.serviceId || "")}" maxlength="120" /><div class="actions"><button class="qbtn purple" onclick="sentinelAction('enable')">Enable / save</button><button class="qbtn" onclick="sentinelAction('disable')">Disable</button><button class="qbtn" onclick="sentinelAction('run')">Run local pass</button></div><div id="sentinel-result" class="hint"></div></div><div style="margin-top:12px">${signalRows}</div></div><div class="card"><div class="h">Decision briefs</div>${briefRows}</div></div>
-        <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Decision ledger</div>${decisionRows}</div><div class="card"><div class="h">Evidence vault</div>${evidenceRows}</div></div>
-        <div class="card" style="margin-top:16px"><div class="h">Living timeline</div>${activityRows}</div>
+    <div class="atlas-head"><div><div class="atlas-eyebrow">PROJECT BRAIN / PROJECT OPERATIONS</div><h1 class="page-title">Atlas</h1><p class="page-sub">A durable view of what ARIA is tracking, what is blocked, what changed, and what needs your decision.</p></div><div class="atlas-head-actions"><span class="badge b-green">owner scoped</span><button class="qbtn" onclick="location.reload()">Refresh</button></div></div>
+    <div class="atlas-layout">
+      <aside class="atlas-rail"><div class="atlas-rail-header"><span class="section-label">Workspaces</span><span class="badge b-muted">${workspaces.length}</span></div><div class="atlas-workspaces">${workspaceRows}</div><form id="atlas-create-form" class="atlas-create"><span class="section-label">New project</span><input name="title" placeholder="Project title" required maxlength="120" /><textarea name="outcome" placeholder="What does success look like?" maxlength="1000"></textarea><input name="deadline" placeholder="Deadline (optional)" maxlength="80" /><button class="qbtn purple" type="submit">Create workspace</button><div id="atlas-create-result" class="hint"></div></form></aside>
+      <section class="atlas-content">
+        ${workspace ? `<section class="atlas-north-star"><div class="atlas-eyebrow">NORTH STAR</div><h2>${esc(workspace.title)}</h2><p>${esc(workspace.contract.outcome)}</p><div class="atlas-meta"><span>Policy <b>${esc(workspace.approvalPolicy)}</b></span>${workspace.contract.deadline ? `<span>Deadline <b>${esc(workspace.contract.deadline)}</b></span>` : ""}<span>Updated <b>${new Date(workspace.updatedAt).toLocaleString()}</b></span></div><div class="actions"><button class="qbtn purple" onclick="atlasPlan('draft')">Draft roadmap</button>${planning.draft ? `<button class="qbtn" onclick="atlasPlan('apply')">Apply reviewed plan</button><span class="badge b-amber">draft awaiting review</span>` : planning.status === "applied" ? `<span class="badge b-green">roadmap applied</span>` : ""}</div><div id="atlas-plan-result" class="hint"></div></section>` : `<section class="atlas-north-star"><div class="atlas-eyebrow">NORTH STAR</div><h2>Select or create a project</h2><p>Create a workspace in the left rail, or tell ARIA “this is a project: …” in WhatsApp.</p></section>`}
+        <div class="atlas-kpis"><div class="atlas-kpi"><div class="value">${progress}%</div><div class="label">Progress</div><div class="atlas-progress"><span style="width:${Math.max(0, Math.min(100, progress))}%"></span></div></div><div class="atlas-kpi"><div class="value">${openTasks}</div><div class="label">Open actions</div></div><div class="atlas-kpi"><div class="value" style="color:${blocked.length ? "var(--red)" : "var(--green)"}">${blocked.length}</div><div class="label">Blocked</div></div><div class="atlas-kpi"><div class="value">${missionCount}</div><div class="label">Mission outcomes</div></div></div>
+        <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Now / next</h2><small>highest-value open work</small></div>${taskRows}</section><section class="atlas-section"><div class="atlas-section-head"><h2>Blocked work</h2><small>needs attention</small></div>${blockedRows}</section></div>
+        <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Roadmap</h2><small>${milestones.length ? `${milestones.length} milestones` : "not applied"}</small></div>${roadmapRows}</section><section class="atlas-section"><div class="atlas-section-head"><h2>Risk register</h2><small>${risks.length} open</small></div>${riskRows}</section></div>
+        <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Sentinel signals</h2><small>${sentinel.enabled ? "watching" : "disabled"}</small></div><p class="hint" style="margin:0 0 8px">Signed project events and local monitoring become evidence-backed review items.</p>${signalRows}<div class="atlas-form" style="margin-top:12px"><input id="sentinel-github-repo" placeholder="GitHub repository: owner/name" value="${esc(sentinel.sources?.github?.repository || "")}" maxlength="160" /><input id="sentinel-render-service" placeholder="Render service ID (optional)" value="${esc(sentinel.sources?.render?.serviceId || "")}" maxlength="120" /><div class="actions"><button class="qbtn purple" onclick="sentinelAction('enable')">Enable / save</button><button class="qbtn" onclick="sentinelAction('disable')">Disable</button><button class="qbtn" onclick="sentinelAction('run')">Run local pass</button></div><div id="sentinel-result" class="hint"></div></div></section><section class="atlas-section"><div class="atlas-section-head"><h2>Decision briefs</h2><small>owner review</small></div>${briefRows}</section></div>
+        <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Recent decisions</h2><small>recorded choices</small></div>${decisionRows}</section><section class="atlas-section"><div class="atlas-section-head"><h2>Evidence</h2><small>attached sources</small></div>${evidenceRows}</section></div>
+        <section class="atlas-section" style="margin-top:14px"><div class="atlas-section-head"><h2>Activity timeline</h2><small>latest Atlas events</small></div><div class="atlas-activity">${activityRows}</div></section>
       </section>
     </div>
     <script>
     const ATLAS_CSRF=${JSON.stringify(csrf)};
-    async function sentinelAction(action,id){
-      const result=document.getElementById('sentinel-result');
-      const body={_csrf:ATLAS_CSRF,action};
-      if(id) body.id=id;
-      if(action==='enable'){body.enabled=true;body.githubRepository=document.getElementById('sentinel-github-repo')?.value||'';body.renderServiceId=document.getElementById('sentinel-render-service')?.value||'';}
-      try{
-        const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/sentinel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        const data=await response.json();
-        if(!response.ok) throw new Error(data.error||'Sentinel action failed');
-        result.textContent=action==='run'?'Sentinel pass complete. Reloading…':'Sentinel updated. Reloading…';
-        setTimeout(()=>window.location.reload(),350);
-      }catch(error){if(result) result.textContent=error.message;}
-    }
-    async function atlasPlan(action){
-      const result = document.getElementById('atlas-plan-result');
-      try{
-        const response = await fetch('/dashboard/api/atlas/${workspace?.id || ""}/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:ATLAS_CSRF,action})});
-        const data = await response.json();
-        if(!response.ok) throw new Error(data.error || 'Atlas plan action failed');
-        result.textContent = action === 'apply' ? 'Roadmap applied. Reloading…' : 'Roadmap drafted. Reloading for review…';
-        setTimeout(()=>window.location.reload(),350);
-      }catch(error){result.textContent=error.message;}
-    }
-    document.getElementById('atlas-create-form')?.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const result = document.getElementById('atlas-create-result');
-      const body = Object.fromEntries(new FormData(form).entries());
-      body._csrf = ATLAS_CSRF;
-      try {
-        const response = await fetch('/dashboard/api/atlas/workspaces', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Could not create workspace');
-        window.location.href = '/dashboard/atlas?workspace=' + encodeURIComponent(data.id);
-      } catch (error) { result.textContent = error.message; }
-    });
+    async function sentinelAction(action,id){const result=document.getElementById('sentinel-result');const body={_csrf:ATLAS_CSRF,action};if(id)body.id=id;if(action==='enable'){body.githubRepository=document.getElementById('sentinel-github-repo')?.value||'';body.renderServiceId=document.getElementById('sentinel-render-service')?.value||'';}try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/sentinel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Sentinel action failed');if(result)result.textContent='Saved. Refreshing…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
+    async function atlasPlan(action){const result=document.getElementById('atlas-plan-result');try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:ATLAS_CSRF,action})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Atlas plan action failed');if(result)result.textContent=action==='apply'?'Roadmap applied. Refreshing…':'Roadmap drafted. Refreshing for review…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
+    document.getElementById('atlas-create-form')?.addEventListener('submit',async(event)=>{event.preventDefault();const form=event.currentTarget;const result=document.getElementById('atlas-create-result');const body=Object.fromEntries(new FormData(form).entries());body._csrf=ATLAS_CSRF;try{const response=await fetch('/dashboard/api/atlas/workspaces',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not create workspace');window.location.href='/dashboard/atlas?workspace='+encodeURIComponent(data.id);}catch(error){if(result)result.textContent=error.message;}});
     </script>
   </div>`;
 }
 
-function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "", standalonePane = false) {
+function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "", standalonePane = false, initialPane = "home") {
   return `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
@@ -796,59 +753,52 @@ function renderPage(title, content, passwordNeeded = false, isLogin = false, csr
 <title>${title} · ARIA</title>
 <style>
 :root{
-  /* Brand — professional indigo/violet */
-  --brand:#6366f1; --brand2:#8b5cf6; --brand-soft:rgba(99,102,241,.12);
-  /* Theme-agnostic status colors */
-  --green:#22c55e; --amber:#f59e0b; --red:#ef4444;
-  --radius:14px; --radius-sm:10px;
-  --shadow:0 1px 2px rgba(16,24,40,.05),0 8px 24px rgba(16,24,40,.06);
-  --shadow-lg:0 2px 4px rgba(16,24,40,.06),0 16px 40px rgba(16,24,40,.1);
+  --brand:#4f8cff; --brand2:#76a7ff; --brand-soft:rgba(79,140,255,.12);
+  --green:#3dcc8a; --amber:#f2b84b; --red:#f06b75; --cyan:#57c7e8;
+  --radius:10px; --radius-sm:7px;
+  --shadow:0 10px 30px rgba(0,0,0,.16); --shadow-lg:0 18px 48px rgba(0,0,0,.24);
 }
 [data-theme="dark"]{
   color-scheme:dark;
-  --bg:#0b0f1a; --panel:#141a29; --panel2:#0f1522; --panel3:#1b2334; --line:#222c42; --line2:#2e3a55;
-  --text:#e7ecf5; --muted:#93a0b8; --faint:#5d6b88;
-  --accent:#a5b4fc; --accent2:#c4b5fd; --cyan:#67e8f9;
+  --bg:#080d14; --panel:#101821; --panel2:#0c131c; --panel3:#172331; --line:#1d2a37; --line2:#2b3d4e;
+  --text:#edf3f8; --muted:#9aabba; --faint:#617486; --accent:#76a7ff; --accent2:#9dc0ff;
 }
 [data-theme="light"]{
   color-scheme:light;
-  --bg:#f6f7fb; --panel:#ffffff; --panel2:#f1f3f9; --panel3:#e9ecf5; --line:#e2e6f0; --line2:#cdd3e5;
-  --text:#1a2130; --muted:#5b6678; --faint:#8a93a8;
-  --accent:#6366f1; --accent2:#8b5cf6; --cyan:#0891b2;
-  --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.07);
-  --shadow-lg:0 2px 4px rgba(16,24,40,.07),0 16px 40px rgba(16,24,40,.1);
+  --bg:#f3f6f8; --panel:#ffffff; --panel2:#f7f9fb; --panel3:#eaf0f4; --line:#dbe3e9; --line2:#c1ced8;
+  --text:#17212b; --muted:#5d6d7a; --faint:#8594a0; --accent:#246edb; --accent2:#4f8cff;
+  --shadow:0 8px 24px rgba(19,38,53,.08); --shadow-lg:0 16px 42px rgba(19,38,53,.13);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+body{font-family:Inter,-apple-system,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;letter-spacing:-.005em}
 .mono{font-family:ui-monospace,Consolas,monospace}
 
 /* Theme toggle — fixed top-right, styled for both themes */
-.theme-toggle{position:fixed;top:16px;right:18px;z-index:60;width:38px;height:38px;border-radius:11px;border:1px solid var(--line2);background:var(--panel);color:var(--text);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:.15s}
-.theme-toggle:hover{transform:translateY(-1px);box-shadow:var(--shadow-lg)}
+.theme-toggle{position:static;width:38px;height:38px;border-radius:7px;border:1px solid var(--line2);background:var(--panel2);color:var(--muted);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}.theme-toggle:hover{color:var(--text);border-color:var(--accent)}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-.app{display:flex;min-height:100vh}
-.sidebar{width:240px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.app{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
+.sidebar{width:248px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:24px 16px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
 .sb-brand{display:flex;align-items:center;gap:11px;padding:0 8px;margin-bottom:26px}
-.sb-logo{position:relative;width:38px;height:38px;overflow:hidden;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--brand2));box-shadow:0 4px 12px var(--brand-soft)}.sb-logo:before,.sb-logo:after{content:"";position:absolute;display:block;width:7px;border-radius:5px;transform:skewX(-22deg);background:#fff}.sb-logo:before{height:23px;left:11px;top:7px}.sb-logo:after{height:17px;left:20px;top:12px;opacity:.72}
+.sb-logo{display:grid;place-items:center;width:38px;height:38px;overflow:hidden;border-radius:9px;background:var(--brand);color:#fff;font-size:16px;font-weight:800;letter-spacing:-.08em;box-shadow:0 6px 16px rgba(79,140,255,.25)}
 .sb-name{font-size:16px;font-weight:800;color:var(--text);letter-spacing:-.01em}
 .sb-name small{display:block;font-size:11px;color:var(--muted);font-weight:600}
-.sb-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint);font-weight:700;padding:0 10px;margin:16px 0 6px}
-.navitem{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:10px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;transition:.14s;border:1px solid transparent}
-.navitem .ico{font-size:16px;width:20px;text-align:center}
+.sb-group{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);font-weight:800;padding:0 10px;margin:22px 0 7px}
+.navitem{display:flex;align-items:center;gap:11px;padding:10px 11px;border-radius:7px;color:var(--muted);font-size:12px;font-weight:650;cursor:pointer;transition:.14s;border:1px solid transparent}
+.navitem .ico{font:700 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.02em;width:23px;text-align:left;color:var(--faint)}
 .navitem:hover{background:var(--panel2);color:var(--text)}
-.navitem.active{background:var(--brand-soft);color:var(--accent);border-color:var(--brand-soft)}
+.navitem.active{background:var(--brand-soft);color:var(--accent);border-color:rgba(79,140,255,.24)}.navitem.active .ico{color:var(--accent)}
 .sb-bottom{margin-top:auto;padding-top:16px;border-top:1px solid var(--line)}
 .sb-online{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:0 12px;margin-bottom:12px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(34,197,94,.15)}
-.logout{width:100%;background:none;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;transition:.14s}
+.logout{width:100%;background:none;border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:10px;font-size:12px;font-weight:650;cursor:pointer;transition:.14s}
 .logout:hover{color:var(--red);border-color:rgba(239,68,68,.4)}
 
-.main{flex:1;padding:32px 36px 60px;max-width:1120px}
-.page-title{font-size:24px;font-weight:800;color:var(--text);letter-spacing:-.02em}
-.page-sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+.main{min-width:0;padding:0 42px 64px;max-width:1440px;width:100%}
+.topbar{height:76px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);margin-bottom:34px;gap:20px}.topbar-kicker{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);font-weight:800}.topbar-context strong{display:block;font-size:15px;margin-top:3px;letter-spacing:-.02em}.topbar-status{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:12px;white-space:nowrap}.topbar-status .dot{width:7px;height:7px}.page-title{font-size:30px;font-weight:760;color:var(--text);letter-spacing:-.035em}.page-sub{color:var(--muted);font-size:13px;margin:7px 0 28px;line-height:1.5}
 
-.hero{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px;margin-bottom:22px;box-shadow:var(--shadow)}
-.command-hero{background:linear-gradient(135deg,#11183e,#202454 68%,#1c3c53);border-color:rgba(165,180,252,.24)}
+.hero{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:28px;margin-bottom:22px;box-shadow:var(--shadow)}
+.command-hero{background:#122337;border-color:#294a65}
 .hero-meta{color:#aeb7d1;font-size:12px;margin-top:8px}
 .quick-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:0 0 16px}
 .quick-card{display:flex;align-items:center;gap:11px;text-align:left;width:100%;padding:15px;border:1px solid var(--line);border-radius:13px;background:var(--panel);color:var(--text);text-decoration:none;cursor:pointer;transition:.15s}
@@ -857,22 +807,22 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .callout-warning{display:flex;gap:10px;align-items:flex-start;border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.07)}.callout-warning strong{color:var(--amber);font-size:13px;white-space:nowrap}.callout-warning span{color:var(--muted);font-size:12px}
 
 .hero .hrow{display:flex;align-items:center;gap:14px}
-.hero .avatar{position:relative;width:52px;height:52px;overflow:hidden;border-radius:15px;background:linear-gradient(135deg,var(--brand),var(--brand2));flex-shrink:0}.hero .avatar:before,.hero .avatar:after{content:"";position:absolute;display:block;width:10px;border-radius:6px;transform:skewX(-22deg);background:#fff}.hero .avatar:before{height:32px;left:16px;top:10px}.hero .avatar:after{height:23px;left:29px;top:17px;opacity:.72}
+.hero .avatar{display:grid;place-items:center;width:52px;height:52px;overflow:hidden;border-radius:10px;background:var(--brand);color:#fff;font-weight:800;flex-shrink:0}
 .hero h2{font-size:18px;font-weight:800;display:flex;align-items:center;gap:10px;color:var(--text)}
 .hero .sub{color:var(--muted);font-size:13px;margin-top:3px}
 .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
-.qbtn{display:inline-flex;align-items:center;gap:7px;padding:10px 16px;border-radius:11px;font-size:13px;font-weight:700;cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--text);transition:.14s}
+.qbtn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:9px 14px;border-radius:7px;font-size:12px;font-weight:720;cursor:pointer;border:1px solid var(--line2);background:var(--panel2);color:var(--text);transition:.14s}
 .qbtn:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
-.qbtn.purple{background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff;border:none}
+.qbtn.purple{background:var(--brand);color:#fff;border:1px solid var(--brand)}
 
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:22px}
-.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:22px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 17px;box-shadow:none}
 .stat .n{font-size:26px;font-weight:800;color:var(--text);letter-spacing:-.02em}
 .stat .l{color:var(--muted);font-size:12px;margin-top:3px}
 
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
-.card .h{font-size:13px;font-weight:800;color:var(--text);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;box-shadow:none}
+.card .h{font-size:12px;font-weight:780;color:var(--text);margin-bottom:13px;display:flex;justify-content:space-between;align-items:center;letter-spacing:.01em}
 .card .h .badge{font-size:10px;padding:2px 9px;border-radius:99px}
 .row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
 .row:last-child{border:none}
@@ -889,79 +839,79 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .b-green{background:rgba(34,197,94,.13);color:var(--green)}
 .b-red{background:rgba(239,68,68,.12);color:var(--red)}
 .b-amber{background:rgba(245,158,11,.13);color:var(--amber)}
-.b-accent{background:rgba(124,92,255,.13);color:var(--accent)}
+.b-accent{background:var(--brand-soft);color:var(--accent)}
 .b-muted{background:var(--panel2);color:var(--muted)}
 .bar{height:6px;border-radius:99px;background:var(--panel2);overflow:hidden;margin:2px 0 12px}
 .bar-fill{height:100%;border-radius:99px;transition:width .4s}
-.stat.dark{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.12)}
-.stat.dark .n{color:#fff}
-.stat.dark .l{color:#9aa3c9}
-.empty{text-align:center;padding:22px;color:var(--faint);font-size:12px}
+.stat.dark{background:rgba(255,255,255,.045);border-color:rgba(255,255,255,.11)}
+.stat.dark .n{color:#fff}.stat.dark .l{color:#9aa3c9}
+.empty{text-align:center;padding:24px;color:var(--faint);font-size:12px;line-height:1.5}
+.mobile-nav{display:none}
 .pane{display:none}
 .pane.show{display:block;animation:fade .25s}
 @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
 .login{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line2);border-radius:22px;padding:38px 30px;text-align:center;box-shadow:var(--shadow)}
-.login-logo{position:relative;width:56px;height:56px;overflow:hidden;margin:0 auto 14px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--cyan))}.login-logo:before,.login-logo:after{content:"";position:absolute;display:block;width:9px;border-radius:6px;transform:skewX(-22deg);background:#fff}.login-logo:before{height:34px;left:17px;top:10px}.login-logo:after{height:25px;left:29px;top:17px;opacity:.72}
+.login-logo{display:grid;place-items:center;width:56px;height:56px;overflow:hidden;margin:0 auto 14px;border-radius:10px;background:var(--brand);color:#fff;font-size:22px;font-weight:800;letter-spacing:-.08em}
 .login h1{font-size:20px;font-weight:800}
 .login p{color:var(--muted);font-size:13px;margin:8px 0 22px}.login-kicker{font-size:10px;letter-spacing:.14em;color:var(--accent);font-weight:800;margin-bottom:14px}.login-lede{line-height:1.55;max-width:300px;margin-left:auto!important;margin-right:auto!important}.login-label{display:block;text-align:left;color:var(--muted);font-size:12px;font-weight:700;margin:0 0 7px}.login-foot{display:flex;justify-content:space-between;gap:12px;margin-top:16px;color:var(--faint);font-size:11px}.login-foot a{color:var(--accent);text-decoration:none;font-weight:700}
 .login input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:13px;border-radius:11px;font-size:15px;outline:none;margin-bottom:12px}
 .login input:focus{border-color:var(--accent)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 18px;border-radius:11px;border:none;font-size:14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}
-.btn-primary{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff}
+.btn-primary{background:var(--brand);color:#fff}
 .btn-block{width:100%}
 .error{color:var(--red);margin-top:12px;font-size:13px}
 .hint{color:var(--faint);margin-top:12px;font-size:11px}
 
 @media(max-width:820px){
-  .sidebar{width:100%;height:auto;position:sticky;top:0;z-index:40;padding:10px 12px;border-right:0;border-bottom:1px solid var(--line);display:block;overflow-x:auto}
-  .app{display:block}.sb-brand{padding:0 4px;margin-bottom:10px}.sb-name,.sb-group,.sb-online span{display:none}.sb-bottom{position:absolute;right:12px;top:12px;border:0;padding:0}.logout{width:auto;padding:7px 10px;font-size:11px}.navitem{display:inline-flex;justify-content:center;padding:8px 10px;margin:2px;font-size:11px}.navitem span:not(.ico){display:inline}.navitem .ico{font-size:14px;width:auto}.main{max-width:none;padding:22px 16px 50px}.grid2{grid-template-columns:1fr}.quick-grid{grid-template-columns:1fr}.theme-toggle{top:12px;right:12px}
+  .app{display:block;padding-bottom:72px}.sidebar{width:100%;height:58px;position:sticky;top:0;z-index:40;padding:10px 16px;border-right:0;border-bottom:1px solid var(--line);display:flex;flex-direction:row;align-items:center}.sb-brand{padding:0;margin:0}.sb-brand .sb-logo{width:30px;height:30px;font-size:13px}.sb-name,.sb-group,.sb-online,.sidebar .navitem,.sidebar .sb-bottom{display:none}.main{max-width:none;padding:0 16px 40px}.topbar{height:64px;margin-bottom:26px}.topbar-kicker{font-size:9px}.topbar-context strong{font-size:13px}.topbar-status span:not(.dot){display:none}.page-title{font-size:26px}.grid2{grid-template-columns:1fr}.quick-grid{grid-template-columns:1fr}.mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);gap:2px;bottom:0;left:0;right:0;z-index:50;padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:rgba(8,13,20,.96);border-top:1px solid var(--line);backdrop-filter:blur(14px)}.mobile-nav a{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);text-decoration:none;font-size:9px;font-weight:650}.mobile-nav a span{font:700 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--faint)}.mobile-nav a:hover,.mobile-nav a:focus{color:var(--accent)}.card{padding:16px}.hero{padding:22px 18px}.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:14px}.stat .n{font-size:22px}
 }
 </style>
 </head>
 <body>
 ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 <div class="app">
-  <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
   <aside class="sidebar">
-    <div class="sb-brand"><div class="sb-logo" aria-hidden="true"></div><div class="sb-name">ARIA<small>control center</small></div></div>
-    <div class="sb-group">Overview</div>
-    ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">◉</span><span>Command</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Command</span></div>`}
-    <a class="navitem" href="/dashboard/atlas"><span class="ico">🧭</span><span>Atlas</span></a>
-    <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
-    <div class="navitem" data-pane="analytics"><span class="ico">📊</span><span>Analytics</span></div>
+    <div class="sb-brand"><div class="sb-logo" aria-hidden="true">A</div><div class="sb-name">ARIA<small>operator console</small></div></div>
+    <div class="sb-group">Workspace</div>
+    ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">01</span><span>Command center</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">01</span><span>Command center</span></div>`}
+    <a class="navitem" href="/dashboard/atlas"><span class="ico">02</span><span>Atlas projects</span></a>
+    <div class="navitem" data-pane="activity"><span class="ico">03</span><span>Activity</span></div>
+    <div class="navitem" data-pane="analytics"><span class="ico">04</span><span>Analytics</span></div>
     <div class="sb-group">Intelligence</div>
-    <div class="navitem" data-pane="brain"><span class="ico">🧬</span><span>Brain</span></div>
-    <div class="navitem" data-pane="memory"><span class="ico">🧠</span><span>Memory</span></div>
-    <div class="navitem" data-pane="media"><span class="ico">🖼️</span><span>Media</span></div>
-    <div class="sb-group">Academy</div>
-    <div class="navitem" data-pane="academy"><span class="ico">🎓</span><span>Academy</span></div>
-    <div class="navitem" data-pane="learnerspace"><span class="ico">🧑‍🎓</span><span>Learners</span></div>
-    <div class="sb-group">Automation</div>
-    <div class="navitem" data-pane="missions"><span class="ico">◆</span><span>Missions</span></div>
-    <div class="navitem" data-pane="downloads"><span class="ico">⬇️</span><span>Downloads</span></div>
-    <div class="navitem" data-pane="sources"><span class="ico">🧩</span><span>Sources</span></div>
+    <div class="navitem" data-pane="brain"><span class="ico">05</span><span>System brain</span></div>
+    <div class="navitem" data-pane="memory"><span class="ico">06</span><span>Memory</span></div>
+    <div class="navitem" data-pane="media"><span class="ico">07</span><span>Media</span></div>
+    <div class="sb-group">Build & learn</div>
+    <div class="navitem" data-pane="academy"><span class="ico">08</span><span>Academy</span></div>
+    <div class="navitem" data-pane="learnerspace"><span class="ico">09</span><span>Learners</span></div>
+    <div class="navitem" data-pane="missions"><span class="ico">10</span><span>Missions</span></div>
+    <div class="navitem" data-pane="downloads"><span class="ico">11</span><span>Downloads</span></div>
+    <div class="navitem" data-pane="sources"><span class="ico">12</span><span>Sources</span></div>
     <div class="sb-group">Operations</div>
-    <div class="navitem" data-pane="incidents"><span class="ico">🚨</span><span>Incidents</span></div>
-    <div class="navitem" data-pane="health"><span class="ico">❤️</span><span>Health</span></div>
-    <div class="navitem" data-pane="logs"><span class="ico">📜</span><span>Logs</span></div>
-    <div class="navitem" data-pane="system"><span class="ico">🛠️</span><span>System</span></div>
-    <div class="navitem" data-pane="household"><span class="ico">🏠</span><span>Household</span></div>
-    <div class="navitem" data-pane="admin"><span class="ico">🔐</span><span>Admin</span></div>
+    <div class="navitem" data-pane="incidents"><span class="ico">13</span><span>Incidents</span></div>
+    <div class="navitem" data-pane="health"><span class="ico">14</span><span>Health</span></div>
+    <div class="navitem" data-pane="logs"><span class="ico">15</span><span>Logs</span></div>
+    <div class="navitem" data-pane="system"><span class="ico">16</span><span>System</span></div>
+    <div class="navitem" data-pane="household"><span class="ico">17</span><span>Household</span></div>
+    <div class="navitem" data-pane="admin"><span class="ico">18</span><span>Admin</span></div>
     <div class="sb-bottom">
       <div class="sb-online"><span class="dot"></span><span>ARIA online</span></div>
       <form method="POST" action="/dashboard/logout">${csrf ? `<input type="hidden" name="_csrf" value="${csrf}" />` : ""}<button class="logout">Leave dashboard</button></form>
     </div>
   </aside>
   <main class="main">
+    <header class="topbar"><div class="topbar-context"><div class="topbar-kicker">ARIA CONTROL CENTER</div><strong>Private operator workspace</strong></div><div class="topbar-status"><span class="dot"></span><span>Connected</span><button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">◐</button></div></header>
     ${passwordNeeded ? `<div class="card"><div class="empty">Set DASHBOARD_PASSWORD in env to access.</div></div>` : content}
   </main>
 </div>
+<nav class="mobile-nav" aria-label="Primary navigation"><a href="/dashboard"><span>01</span>Command</a><a href="/dashboard/atlas"><span>02</span>Atlas</a><a href="/dashboard?pane=missions"><span>10</span>Missions</a><a href="/dashboard?pane=downloads"><span>11</span>Downloads</a><a href="/dashboard?pane=health"><span>14</span>Health</a></nav>
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};
 const STANDALONE_PANE=${JSON.stringify(standalonePane)};
+const INITIAL_PANE=${JSON.stringify(initialPane)};
 const titles={home:['Command',"ARIA core · live telemetry"],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 const htmlEscClient=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -974,7 +924,7 @@ function showPane(p){
 }
 if(!STANDALONE_PANE){
   navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
-  showPane('home');
+  showPane(INITIAL_PANE);
 }else{
   document.getElementById('pane-atlas')?.classList.add('show');
 }
@@ -1512,7 +1462,8 @@ router.get("/", checkAuth, (req, res) => {
     content += renderHealthPane();
     content += renderLogsPane();
 
-    res.send(renderPage("Home", content, false, false, csrfFor(req)));
+    const requestedPane = ["home","activity","analytics","brain","memory","media","academy","learnerspace","missions","downloads","sources","incidents","health","logs","system","household","admin"].includes(String(req.query.pane || "")) ? String(req.query.pane) : "home";
+    res.send(renderPage("Home", content, false, false, csrfFor(req), false, requestedPane));
   } catch (e) {
     res.send(renderPage("Error", `<div class="card"><div class="empty">${e.message}</div></div>`));
   }

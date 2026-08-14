@@ -27,3 +27,11 @@ test("ai: src/tools/ai.js loads and returns without RangeError", async () => {
   // If the recursion bug were present this would throw RangeError before returning.
   assert.ok(true);
 });
+
+test("ai: normal Gemini STOP completions do not append a false truncation notice", () => {
+  const { _test } = require("../src/tools/ai");
+  const stopped = _test.withTruncationNotice("Show Sentinel", "STOP", "MAX_TOKENS");
+  const exhausted = _test.withTruncationNotice("A long build", "MAX_TOKENS", "MAX_TOKENS");
+  assert.equal(stopped, "Show Sentinel");
+  assert.match(exhausted, /tell me to continue/);
+});

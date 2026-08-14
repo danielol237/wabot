@@ -104,6 +104,11 @@ Keep your personality warm, direct, and human-readable, but increase care and pr
 
 // Detects requests that likely need serious code output (full pages/apps/scripts)
 // so we can give the model enough room to actually finish instead of cutting off mid-file.
+const TRUNCATION_NOTICE = "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
+function withTruncationNotice(content, finishReason, exhaustedReason) {
+  return finishReason === exhaustedReason ? String(content || "") + TRUNCATION_NOTICE : String(content || "");
+}
+
 function needsLargeOutput(userMessage) {
   const signals = [
     "build me", "create a", "make a", "website", "webpage", "web page", "login page",
@@ -170,10 +175,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
           }
         );
         const finishReason = res.data.choices[0]?.finish_reason;
-        let content = res.data.choices[0]?.message?.content || "I got nothing. Try again.";
-        if (finishReason === "length") {
-          content += "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
-        }
+        const content = withTruncationNotice(res.data.choices[0]?.message?.content || "I got nothing. Try again.", finishReason, "length");
         lastProvider = "cerebras";
         return content;
       } catch (err) {
@@ -216,11 +218,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
           }
         );
         const candidate = res.data.candidates && res.data.candidates[0];
-        let content = candidate?.content?.parts?.map((p) => p.text || "").join("") || "I got nothing. Try again.";
-        const finishReason = candidate?.finishReason;
-        if (finishReason === "MAX_TOKENS" || finishReason === "STOP") {
-          content += "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
-        }
+        const content = withTruncationNotice(candidate?.content?.parts?.map((p) => p.text || "").join("") || "I got nothing. Try again.", candidate?.finishReason, "MAX_TOKENS");
         lastProvider = "gemini";
         return content;
       } catch (err) {
@@ -251,10 +249,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
           temperature: 0.7,
         });
         const finishReason = res.choices[0]?.finish_reason;
-        let content = res.choices[0]?.message?.content || "I got nothing. Try again.";
-        if (finishReason === "length") {
-          content += "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
-        }
+        const content = withTruncationNotice(res.choices[0]?.message?.content || "I got nothing. Try again.", finishReason, "length");
         lastProvider = "groq";
         return content;
       } catch (err) {
@@ -326,5 +321,5 @@ async function getAIResponse(...args) {
   return out;
 }
 
-module.exports = { getAIResponse };
+module.exports = { getAIResponse, _test: { withTruncationNotice, TRUNCATION_NOTICE } };
 

@@ -76,7 +76,8 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   await humanDelay(sock, chatId, senderJid, text.length + 1);
 
   // ── DECIDE WHETHER TO REPLY (checked for text AND media/voice) ──
-  const isCommand = lower.startsWith(process.env.BOT_PREFIX || "!");
+  const configuredPrefix = String(process.env.BOT_PREFIX || "").trim().toLowerCase();
+  const isCommand = (configuredPrefix && lower.startsWith(configuredPrefix)) || lower.startsWith("!");
   const hasNameTrigger = triggeredByName(text);
   const sessionActive = isSessionActive(chatId);
   const mentioned = isBotMentioned(msg, botJid);
@@ -148,7 +149,7 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     }
   }
 
-  // ── NAME TRIGGER or PREFIX COMMAND ────────────────────────
+  // ── NAME TRIGGER, LEGACY PREFIX, OR ACTIVE FLOW ────────────
   // Active academy flow: if the chat is mid-!academy and this is a plain
   // reply (number / next / prev / back / done / quiz letter), intercept before
   // normal AI chat so the adaptive learning system can advance the session.

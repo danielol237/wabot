@@ -32,7 +32,9 @@ log(`🧩 ${loadedPlugins.length} plugin(s) loaded.`);
 const app = express();
 app.use(express.json());
 
-// ARIA's own website — her home on the web (dashboard is a section of it)
+// Public root: the deployed product entry point is the anime catalog. The
+// legacy ARIA control site remains available through its existing API routes.
+app.get("/", (req, res) => res.redirect(302, "/anime"));
 const websiteRouter = require("./website");
 app.use("/", websiteRouter);
 

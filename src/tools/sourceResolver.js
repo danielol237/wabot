@@ -25,6 +25,28 @@ const ANILIST_URL = "https://graphql.anilist.co";
 const axios = require("axios");
 
 function normalize(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+function titleMatchScore(query, item) {
+  const target = normalize(query);
+  const candidate = normalize(item?.title || item?.titleEnglish || item?.name || "");
+  if (!target || !candidate) return 0;
+  if (candidate === target) return 100;
+  if (candidate.startsWith(target) || target.startsWith(candidate)) return 88;
+  const wanted = new Set(target.split(" ").filter((token) => token.length > 2));
+  const found = candidate.split(" ").filter((token) => wanted.has(token));
+  return wanted.size ? Math.round((found.length / wanted.size) * 70) : 0;
+}
+function pickBestResult(query, results) {
+  return (Array.isArray(results) ? results : [])
+    .map((result, index) => ({ result, index, score: titleMatchScore(query, result) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)[0]?.result || null;
+}
+const PROVIDER_TIMEOUT_MS = Math.max(5000, Number(process.env.ANIME_PROVIDER_TIMEOUT_MS || 18000));
+function bounded(promise, ms, fallback) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
 
 // Parse a season number from a title/name like "solo leveling season 2",
 // "attack on titan s4", "one piece part 3". Returns 1 if none found.
@@ -41,7 +63,7 @@ async function anilistSearch(title) {
   try {
     const r = await axios.post(ANILIST_URL, {
       query: `query($q:String){Page(perPage:8){media(search:$q,type:ANIME,sort:SEARCH_MATCH){id
-        title{english romaji native} episodes format seasonYear status nextAiringEpisode{episode}}}}}`,
+        title{english romaji native} episodes format seasonYear status}}}`,
       variables: { q: title },
     }, { timeout: 12000 });
     return { ok: true, media: r.data?.data?.Page?.media || [] };
@@ -114,7 +136,8 @@ const DISCOVERERS = [
       const { searchOmniSave, searchOmniSaveById, getOmniSaveDownload } = require("./animeDownload");
       const list = await searchOmniSave(title);
       if (!list.length) return { candidates: [], noResults: true };
-      const anime = list[0];
+      const anime = pickBestResult(title, list);
+      if (!anime) return { candidates: [], noResults: true };
       let detailPath = anime.detailPath;
       if (!detailPath) { const d = await searchOmniSaveById(anime.subjectId); detailPath = d?.detailPath || ""; }
       if (!detailPath) return { candidates: [], error: "no detailPath" };
@@ -122,9 +145,10 @@ const DISCOVERERS = [
       // defaulting to 1. The old hardcoded 1 silently grabbed season 1 even for
       // "season 2 ep 1" requests.
       const dl = await getOmniSaveDownload(anime.subjectId, detailPath, season || 1, episode || 1);
-      const url = dl?.downloads?.find((d) => d?.url)?.url || dl?.downloads?.[0]?.url;
-      if (!url) return { candidates: [], error: "no usable URL (VIP-locked?)" };
-      return { candidates: [{ provider: "omnisave", url, type: /m3u8/i.test(url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0" }, title: anime.title }] };
+      const chosen = dl?.downloads?.find((d) => d?.url && d.vipLocked !== true);
+      const url = chosen?.url;
+      if (!url) return { candidates: [], error: "no usable non-VIP URL" };
+      return { candidates: [{ provider: "omnisave", url, type: /m3u8/i.test(url) ? "hls" : "mp4", quality: String(chosen.resolution || "unknown"), headers: { "User-Agent": "Mozilla/5.0", Referer: "https://videodownloader.site/", Origin: "https://videodownloader.site" }, title: anime.title }] };
     },
   },
   {
@@ -134,7 +158,8 @@ const DISCOVERERS = [
       const { searchGogo, gogoAnimeStream, HOSTS } = require("./animeGogo");
       const list = await searchGogo(title);
       if (!list.length) return { candidates: [], noResults: true };
-      const anime = list[0];
+      const anime = pickBestResult(title, list);
+      if (!anime) return { candidates: [], noResults: true };
       const slug = String(anime.id || "").replace(/^category\//, "").replace(/\/$/, "");
       const gogo = await gogoAnimeStream(slug, episode);
       if (!gogo.m3u8) return { candidates: [], error: gogo.error || "no m3u8" };
@@ -148,7 +173,7 @@ const DISCOVERERS = [
     async discover(title, episode) {
       const { consumetSearch, consumetEpisodeStream } = require("./animeConsumet");
       const s = await consumetSearch(title);
-      const anime = s.results?.[0];
+      const anime = pickBestResult(title, s.results);
       if (!anime?.id) return { candidates: [], noResults: true };
       const got = await consumetEpisodeStream(anime.id, episode, null);
       if (!got?.url) return { candidates: [], error: got?.error || "no stream" };
@@ -162,7 +187,8 @@ const DISCOVERERS = [
       const { searchAnimePahe, animepaheGetStreamUrl } = require("./animeDownload");
       const list = await searchAnimePahe(title);
       if (!list.length) return { candidates: [], noResults: true };
-      const anime = list[0];
+      const anime = pickBestResult(title, list);
+      if (!anime) return { candidates: [], noResults: true };
       const got = await animepaheGetStreamUrl(anime.id, episode || 1);
       if (!got?.url) return { candidates: [], error: got?.error || "no stream url" };
       return { candidates: [{ provider: "animepahe", url: got.url, type: /m3u8/i.test(got.url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0", Referer: "https://animepahetv.to/" }, title: anime.title }] };
@@ -177,15 +203,15 @@ async function discoverCandidates(title, episode, season) {
       .map(async (d) => {
         const start = Date.now();
         try {
-          const out = await d.discover(title, episode, season);
-          // Record provider outcome for reputation.
+      const out = await bounded(d.discover(title, episode, season), PROVIDER_TIMEOUT_MS, { candidates: [], error: `provider timeout after ${PROVIDER_TIMEOUT_MS}ms`, timeout: true });
+      // Record provider outcome for reputation.
           if (out.noResults) rep.record(d.provider, "no-results", false, {});
           else if (out.error) rep.record(d.provider, "resolve", false, { error: out.error });
           else if (out.candidates.length) rep.record(d.provider, "resolve", true, {});
           return { provider: d.provider, ...out, latencyMs: Date.now() - start };
         } catch (e) {
           rep.record(d.provider, "resolve", false, { error: e.message });
-          return { provider: d.provider, candidates: [], error: e.message, latencyMs: Date.now() - start };
+          return { provider: d.provider, candidates: [], error: e.message, timeout: false, latencyMs: Date.now() - start };
         }
       })
   );
@@ -193,7 +219,7 @@ async function discoverCandidates(title, episode, season) {
   const candidates = [];
   const diagnostics = [];
   for (const r of results) {
-    diagnostics.push({ provider: r.provider, latencyMs: r.latencyMs, error: r.error || null, noResults: !!r.noResults, candidateCount: r.candidates?.length || 0 });
+    diagnostics.push({ provider: r.provider, latencyMs: r.latencyMs, error: r.error || null, timeout: !!r.timeout, noResults: !!r.noResults, candidateCount: r.candidates?.length || 0 });
     for (const c of r.candidates || []) candidates.push(c);
   }
   return { candidates, diagnostics };
@@ -356,4 +382,4 @@ function reputationReport() {
   return rep.all();
 }
 
-module.exports = { resolveEpisode, resolveCanonical, discoverCandidates, parseSeason, reputationReport, DISCOVERERS };
+module.exports = { resolveEpisode, resolveCanonical, discoverCandidates, parseSeason, reputationReport, DISCOVERERS, PROVIDER_TIMEOUT_MS };

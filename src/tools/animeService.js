@@ -15,6 +15,18 @@ const PROGRESS_FILE = path.join(__dirname, "../../data/animeProgress.json");
 // AniList GraphQL — reliable, keyless fallback for search/trending/latest
 // (Jikan/MAL is frequently rate-limited or 504s, which gutted the browser).
 const ANILIST_URL = "https://graphql.anilist.co";
+
+// Public catalog policy: exclude AniList adult titles, adult-only genres/tags,
+// and a conservative set of explicit title terms from public discovery.
+const BLOCKED_TITLE_RE = /(?:\bhentai\b|\becchi\b|\bporn\b|\bxxx\b|\berotic\b|kyonyuu|nuki\s*nuki|bokki|sex\s+ga\s+suki|paihame|overflow|adult\s+only)/i;
+const BLOCKED_GENRE_RE = /(?:hentai|ecchi|erotica)/i;
+function isCatalogSafe(item) {
+  if (!item || item.isAdult === true || BLOCKED_TITLE_RE.test(String(item.title || ""))) return false;
+  const values = [...(item.genres || []), ...(item.tags || [])];
+  return !values.some((value) => BLOCKED_GENRE_RE.test(String(value?.name || value || "")));
+}
+function safeCatalog(items) { return (Array.isArray(items) ? items : []).filter(isCatalogSafe); }
+
 async function anilist(query, variables) {
   try {
     const r = await axios.post(ANILIST_URL, { query, variables }, { timeout: 12000 });
@@ -23,20 +35,22 @@ async function anilist(query, variables) {
 }
 
 function fromAnilist(page) {
-  return (page?.media || []).map((a) => ({
+  return safeCatalog((page?.media || []).map((a) => ({
     id: String(a.id),
     title: a.title?.english || a.title?.romaji || a.title?.native || "Untitled",
     cover: a.coverImage?.extraLarge || a.coverImage?.large || "",
     description: a.description ? a.description.replace(/<[^>]+>/g, "").slice(0, 400) : "",
     overview: a.description ? a.description.replace(/<[^>]+>/g, "").slice(0, 400) : "",
     genres: a.genres || [],
+    tags: (a.tags || []).map((tag) => tag?.name || tag).filter(Boolean),
+    isAdult: a.isAdult === true,
     status: a.status ? a.status.replace(/_/g, " ") : "",
     year: a.seasonYear,
     rating: a.averageScore ? a.averageScore / 10 : null,
     episodes: a.episodes,
     type: a.format,
     provider: "anilist",
-  }));
+  })));
 }
 
 // ── Watchlist (persisted JSON) ────────────────────────────────────
@@ -115,7 +129,7 @@ async function searchAnime(query) {
       try {
         const data = await anilist(
           `query($q:String){Page(perPage:12){media(search:$q,type:ANIME,sort:SEARCH_MATCH){id
-            title{english romaji native} coverImage{extraLarge large} description genres status
+            title{english romaji native} coverImage{extraLarge large} description genres tags{name} isAdult status
             seasonYear averageScore episodes format}}}`,
           { q: query }
         );
@@ -185,31 +199,32 @@ async function searchAnime(query) {
       out.push(it);
     }
   }
-  return out.slice(0, 24);
+  return safeCatalog(out).slice(0, 24);
 }
 
 // ── Trending / top (Jikan) ────────────────────────────────────────
 async function getTrending() {
   // AniList: top anime by popularity this season (reliable fallback).
   const data = await anilist(
-    `query{Page(perPage:12){media(type:ANIME,sort:POPULARITY_DESC,status_in:[RELEASING,NOT_YET_RELEASED]){id
-      title{english romaji} coverImage{extraLarge large} seasonYear averageScore episodes format status}}}`
+    `query{Page(perPage:12){media(type:ANIME,sort:POPULARITY_DESC,status:RELEASING){id
+      title{english romaji} coverImage{extraLarge large} seasonYear averageScore episodes format status isAdult}}}`
   );
   if (data?.Page?.media?.length) return fromAnilist(data.Page);
 
   // Fallback to Jikan/MAL.
   try {
     const r = await axios.get("https://api.jikan.moe/v4/top/anime?filter=airing&limit=12", { timeout: 10000 });
-    return (r.data.data || []).map((a) => ({
+    return safeCatalog((r.data.data || []).map((a) => ({
       id: String(a.mal_id),
       title: a.title,
       cover: a.images?.jpg?.image_url,
+      isAdult: /(?:rx|hentai|ecchi)/i.test(String(a.rating || "")),
       rating: a.score,
       episodes: a.episodes,
       type: a.type,
       year: a.year,
       provider: "jikan",
-    }));
+    })));
   } catch (_) { return []; }
 }
 
@@ -218,24 +233,25 @@ async function getLatest() {
   // AniList: newest episodes / recently airing.
   const data = await anilist(
     `query{Page(perPage:12){media(type:ANIME,status:RELEASING,sort:UPDATED_AT_DESC){id
-      title{english romaji} coverImage{extraLarge large} seasonYear averageScore episodes format status}}}`
+      title{english romaji} coverImage{extraLarge large} seasonYear averageScore episodes format status isAdult}}}`
   );
   if (data?.Page?.media?.length) return fromAnilist(data.Page);
 
   // Fallback to Jikan/MAL current season.
   try {
     const r = await axios.get("https://api.jikan.moe/v4/seasons/now?limit=12", { timeout: 10000 });
-    return (r.data.data || []).map((a) => ({
+    return safeCatalog((r.data.data || []).map((a) => ({
       id: String(a.mal_id),
       title: a.title,
       cover: a.images?.jpg?.image_url,
+      isAdult: /(?:rx|hentai|ecchi)/i.test(String(a.rating || "")),
       rating: a.score,
       episodes: a.episodes,
       type: a.type,
       year: a.year,
       status: a.airing ? "Airing" : "Completed",
       provider: "jikan",
-    }));
+    })));
   } catch (_) { return []; }
 }
 
@@ -251,7 +267,7 @@ async function getDetails(entry) {
       const a = r.data.data;
       return {
         id: String(a.mal_id), title: a.title, cover: a.images?.jpg?.large_image_url || a.images?.jpg?.image_url,
-        description: a.synopsis || "", genres: a.genres?.map((g) => g.name) || [],
+        description: a.synopsis || "", genres: a.genres?.map((g) => g.name) || [], isAdult: /(?:rx|hentai|ecchi)/i.test(String(a.rating || "")),
         status: a.status, year: a.year, rating: a.score, episodes: a.episodes,
         type: a.type, duration: a.duration, studios: a.studios?.map((s) => s.name) || [],
         provider: "jikan",
@@ -260,18 +276,18 @@ async function getDetails(entry) {
   }
 
   if (provider === "anilist") {
-    const data = await anilist(`query($id:Int){Media(id:$id,type:ANIME){id title{english romaji native} coverImage{extraLarge large} description genres status seasonYear averageScore episodes format}}`, { id: Number(id) });
+    const data = await anilist(`query($id:Int){Media(id:$id,type:ANIME){id title{english romaji native} coverImage{extraLarge large} description genres tags{name} isAdult status seasonYear averageScore episodes format}}`, { id: Number(id) });
     const a = data?.Media;
     if (a) {
       const description = a.description ? a.description.replace(/<[^>]+>/g, "").slice(0, 800) : "";
-      return { id: String(a.id), title: a.title?.english || a.title?.romaji || a.title?.native || "Untitled", cover: a.coverImage?.extraLarge || a.coverImage?.large || "", description, overview: description, genres: a.genres || [], status: a.status ? a.status.replace(/_/g, " ") : "", year: a.seasonYear, rating: a.averageScore ? a.averageScore / 10 : null, episodes: a.episodes, type: a.format, provider: "anilist" };
+      return { id: String(a.id), title: a.title?.english || a.title?.romaji || a.title?.native || "Untitled", cover: a.coverImage?.extraLarge || a.coverImage?.large || "", description, overview: description, genres: a.genres || [], tags: (a.tags || []).map((tag) => tag?.name || tag).filter(Boolean), isAdult: a.isAdult === true, status: a.status ? a.status.replace(/_/g, " ") : "", year: a.seasonYear, rating: a.averageScore ? a.averageScore / 10 : null, episodes: a.episodes, type: a.format, provider: "anilist" };
     }
   }
 
   // Fall back to whatever we already know about it.
   return {
     id, title: entry.title || "Untitled", cover: entry.cover || "", description: entry.description || "",
-    overview: entry.overview || entry.description || "", genres: entry.genres || [], status: entry.status || "", year: entry.year || "",
+    overview: entry.overview || entry.description || "", genres: entry.genres || [], tags: entry.tags || [], isAdult: entry.isAdult === true, status: entry.status || "", year: entry.year || "",
     rating: entry.rating || null, episodes: entry.episodes || null, type: entry.type || "",
     provider,
   };
@@ -326,7 +342,7 @@ async function browseAnime({ genre, status, year, type, sort = "POPULARITY_DESC"
   if (type) args.push(`format:${type}`);
   const filterStr = args.length ? args.join(",") + "," : "";
   const query = `query($page:Int){Page(page:$page,perPage:${perPage}){media(${filterStr}type:ANIME,sort:${sort}){id
-    title{english romaji native} coverImage{extraLarge large} description genres status
+    title{english romaji native} coverImage{extraLarge large} description genres tags{name} isAdult status
     seasonYear averageScore episodes format}}}`;
   const data = await anilist(query, { page: 1 });
   return fromAnilist(data?.Page);
@@ -340,7 +356,7 @@ async function getRandom() {
     const page = Math.floor(Math.random() * 100) + 1;
     const data = await anilist(
       `query($page:Int){Page(page:$page,perPage:20){media(type:ANIME,sort:POPULARITY_DESC){id
-        title{english romaji native} coverImage{extraLarge large} description genres status
+        title{english romaji native} coverImage{extraLarge large} description genres tags{name} isAdult status
         seasonYear averageScore episodes format}}}`,
       { page }
     );
@@ -395,4 +411,6 @@ module.exports = {
   trackProgress,
   markCompleted,
   getContinueWatching,
+  isCatalogSafe,
+  safeCatalog,
 };

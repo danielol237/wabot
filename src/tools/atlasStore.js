@@ -11,6 +11,7 @@ const ATLAS_DIR = path.join(DATA_DIR, "atlas");
 const MAX_EVENTS = 500;
 const MAX_EVIDENCE = 300;
 const MAX_DECISIONS = 200;
+const MAX_RISKS = 100;
 
 function ensureDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -104,6 +105,9 @@ function createWorkspace(ownerId, input = {}) {
     evidence: [],
     signals: [],
     missionIds: [],
+    missionOutcomes: {},
+    risks: [],
+    planning: { version: 2, status: "unplanned", draft: null, generatedAt: 0, appliedAt: 0, appliedPlanId: null },
     approvalPolicy: input.approvalPolicy || "balanced",
     digest: { enabled: input.digestEnabled !== false, cadence: input.digestCadence || "daily", lastSentAt: 0 },
     createdAt: now,
@@ -158,21 +162,27 @@ function addEvent(ownerId, id, event = {}) {
   });
 }
 
+function taskValue(task = {}) {
+  const priority = ["low", "normal", "high", "urgent"].includes(task.priority) ? task.priority : "normal";
+  return {
+    id: task.id || "task_" + crypto.randomUUID(),
+    title: cleanText(task.title || task.text || "Untitled task", 240),
+    description: cleanText(task.description, 1000),
+    status: ["todo", "in_progress", "blocked", "done", "cancelled"].includes(task.status) ? task.status : "todo",
+    priority,
+    dependsOn: Array.isArray(task.dependsOn) ? task.dependsOn.map(String).slice(0, 20) : [],
+    milestoneId: task.milestoneId || null,
+    missionId: task.missionId || null,
+    evidenceIds: Array.isArray(task.evidenceIds) ? task.evidenceIds.slice(0, 30) : [],
+    createdAt: task.createdAt || Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
 function addTask(ownerId, id, task = {}) {
   let created = null;
   const workspace = mutate(ownerId, id, (value) => {
-    created = {
-      id: "task_" + crypto.randomUUID(),
-      title: cleanText(task.title || task.text || "Untitled task", 240),
-      description: cleanText(task.description, 1000),
-      status: task.status || "todo",
-      priority: task.priority || "normal",
-      dependsOn: Array.isArray(task.dependsOn) ? task.dependsOn.map(String).slice(0, 20) : [],
-      missionId: task.missionId || null,
-      evidenceIds: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
+    created = taskValue(task);
     value.tasks.push(created);
     addEventToWorkspace(value, "task_created", `Task added: ${created.title}`);
   });
@@ -214,6 +224,87 @@ function addMilestone(ownerId, id, milestone = {}) {
   return workspace ? created : null;
 }
 
+function addPlanDraft(ownerId, id, draft = {}) {
+  let stored = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const normalized = {
+      id: cleanText(draft.id || "plan_" + crypto.randomUUID(), 120),
+      goal: cleanText(draft.goal || value.contract.outcome, 1000),
+      assumptions: Array.isArray(draft.assumptions) ? draft.assumptions.map((item) => cleanText(item, 300)).filter(Boolean).slice(0, 20) : [],
+      milestones: Array.isArray(draft.milestones) ? draft.milestones.slice(0, 20).map((milestone, index) => ({
+        key: cleanText(milestone.key || `m${index + 1}`, 40),
+        title: cleanText(milestone.title || `Milestone ${index + 1}`, 240),
+        description: cleanText(milestone.description, 1000),
+        dueAt: milestone.dueAt || null,
+        dependsOn: Array.isArray(milestone.dependsOn) ? milestone.dependsOn.map((item) => cleanText(item, 40)).slice(0, 10) : [],
+        tasks: Array.isArray(milestone.tasks) ? milestone.tasks.slice(0, 20).map((task) => ({
+          key: cleanText(task.key || "task", 60),
+          title: cleanText(task.title || "Untitled task", 240),
+          description: cleanText(task.description, 1000),
+          priority: task.priority,
+          dependsOn: Array.isArray(task.dependsOn) ? task.dependsOn.map((item) => cleanText(item, 60)).slice(0, 10) : [],
+        })) : [],
+      })) : [],
+      risks: Array.isArray(draft.risks) ? draft.risks.slice(0, MAX_RISKS).map((risk, index) => ({
+        key: cleanText(risk.key || `risk${index + 1}`, 60),
+        title: cleanText(risk.title || "Unspecified risk", 240),
+        likelihood: Math.max(1, Math.min(5, Number(risk.likelihood) || 3)),
+        impact: Math.max(1, Math.min(5, Number(risk.impact) || 3)),
+        mitigation: cleanText(risk.mitigation, 600),
+      })) : [],
+      generatedAt: Date.now(),
+      status: "draft",
+    };
+    value.planning = { ...(value.planning || {}), version: 2, status: "draft", draft: normalized, generatedAt: normalized.generatedAt, appliedAt: 0, appliedPlanId: null };
+    addEventToWorkspace(value, "plan_drafted", `Atlas drafted a ${normalized.milestones.length}-milestone roadmap.`);
+    stored = normalized;
+  });
+  return workspace ? stored : null;
+}
+
+function applyPlan(ownerId, id, planId) {
+  let applied = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const draft = value.planning?.draft;
+    if (!draft || (planId && draft.id !== planId)) return;
+    const milestoneIds = new Map();
+    const taskIds = new Map();
+    const existingTitles = new Map(value.tasks.map((task) => [task.title.toLowerCase(), task.id]));
+    const createdMilestones = [];
+    for (const milestone of draft.milestones || []) {
+      const created = { id: "mile_" + crypto.randomUUID(), title: milestone.title, description: milestone.description, status: "planned", dueAt: milestone.dueAt || null, dependsOn: milestone.dependsOn || [], taskIds: [], createdAt: Date.now(), updatedAt: Date.now() };
+      milestoneIds.set(milestone.key, created.id);
+      value.milestones.push(created);
+      createdMilestones.push(created);
+    }
+    for (const milestone of draft.milestones || []) {
+      const createdMilestone = createdMilestones.find((item) => item.title === milestone.title);
+      for (const task of milestone.tasks || []) {
+        const existing = existingTitles.get(task.title.toLowerCase());
+        const createdTask = existing ? value.tasks.find((item) => item.id === existing) : taskValue({ title: task.title, description: task.description, priority: task.priority, milestoneId: createdMilestone.id });
+        if (!existing) value.tasks.push(createdTask);
+        taskIds.set(`${milestone.key}:${task.key}`, createdTask.id);
+        if (!taskIds.has(task.key)) taskIds.set(task.key, createdTask.id);
+        createdMilestone.taskIds.push(createdTask.id);
+      }
+    }
+    for (const milestone of draft.milestones || []) {
+      for (const task of milestone.tasks || []) {
+        const taskId = taskIds.get(`${milestone.key}:${task.key}`);
+        const storedTask = value.tasks.find((item) => item.id === taskId);
+        if (!storedTask) continue;
+        storedTask.dependsOn = (task.dependsOn || []).map((dependency) => taskIds.get(`${milestone.key}:${dependency}`) || taskIds.get(dependency)).filter(Boolean).slice(0, 20);
+        storedTask.milestoneId = milestoneIds.get(milestone.key) || storedTask.milestoneId;
+      }
+    }
+    value.risks = [...(value.risks || []), ...(draft.risks || []).map((risk) => ({ id: "risk_" + crypto.randomUUID(), ...risk, score: risk.likelihood * risk.impact, status: "open", createdAt: Date.now(), updatedAt: Date.now() }))].slice(-MAX_RISKS);
+    value.planning = { ...(value.planning || {}), status: "applied", draft: null, appliedAt: Date.now(), appliedPlanId: draft.id, generatedAt: draft.generatedAt };
+    addEventToWorkspace(value, "plan_applied", `Applied Atlas roadmap: ${draft.milestones.length} milestone(s), ${value.tasks.length} task(s).`);
+    applied = { planId: draft.id, milestoneIds: createdMilestones.map((item) => item.id), taskCount: value.tasks.length, riskCount: value.risks.length };
+  });
+  return workspace ? applied : null;
+}
+
 function addEvidence(ownerId, id, evidence = {}) {
   let created = null;
   const workspace = mutate(ownerId, id, (value) => {
@@ -230,6 +321,16 @@ function addEvidence(ownerId, id, evidence = {}) {
     value.evidence.push(created);
     if (value.evidence.length > MAX_EVIDENCE) value.evidence = value.evidence.slice(-MAX_EVIDENCE);
     addEventToWorkspace(value, "evidence_added", `Evidence added: ${created.title}`);
+  });
+  return workspace ? created : null;
+}
+
+function addRisk(ownerId, id, risk = {}) {
+  let created = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    created = { id: "risk_" + crypto.randomUUID(), title: cleanText(risk.title || "Unspecified risk", 240), likelihood: Math.max(1, Math.min(5, Number(risk.likelihood) || 3)), impact: Math.max(1, Math.min(5, Number(risk.impact) || 3)), score: Math.max(1, Math.min(25, (Number(risk.likelihood) || 3) * (Number(risk.impact) || 3))), mitigation: cleanText(risk.mitigation, 600), status: "open", createdAt: Date.now(), updatedAt: Date.now() };
+    value.risks = [...(value.risks || []), created].slice(-MAX_RISKS);
+    addEventToWorkspace(value, "risk_added", `Risk added: ${created.title}`);
   });
   return workspace ? created : null;
 }
@@ -253,6 +354,45 @@ function addDecision(ownerId, id, decision = {}) {
     addEventToWorkspace(value, "decision_recorded", `Decision recorded: ${created.choice || created.question}`);
   });
   return workspace ? created : null;
+}
+
+function reconcileMission(ownerId, id, missionId, outcome = {}) {
+  let reconciliation = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const key = cleanText(missionId, 120);
+    if (!key) return;
+    value.missionOutcomes = value.missionOutcomes || {};
+    if (value.missionOutcomes[key]) {
+      reconciliation = value.missionOutcomes[key];
+      return;
+    }
+    const status = cleanText(outcome.status || "unknown", 40);
+    const task = value.tasks.find((candidate) => candidate.missionId === key);
+    if (task) {
+      const nextStatus = status === "completed" ? "done" : ["failed", "needs_review"].includes(status) ? "blocked" : ["cancelled"].includes(status) ? "cancelled" : "in_progress";
+      task.status = nextStatus;
+      task.updatedAt = Date.now();
+    }
+    const evidence = {
+      id: "evidence_" + crypto.randomUUID(),
+      kind: "mission_outcome",
+      title: cleanText(outcome.title || `Mission ${key} outcome`, 240),
+      summary: cleanText(outcome.result || outcome.error || outcome.progress || `Mission status: ${status}`, 1200),
+      url: null,
+      source: "durable-mission",
+      sensitivity: "normal",
+      createdAt: Date.now(),
+    };
+    value.evidence.push(evidence);
+    if (value.evidence.length > MAX_EVIDENCE) value.evidence = value.evidence.slice(-MAX_EVIDENCE);
+    if (["failed", "needs_review"].includes(status)) {
+      value.risks = [...(value.risks || []), { id: "risk_" + crypto.randomUUID(), title: cleanText(outcome.error || `Mission ${key} needs review`, 240), likelihood: 3, impact: 4, score: 12, mitigation: "Review the mission trace and decide whether to retry, revise, or cancel the task.", status: "open", createdAt: Date.now(), updatedAt: Date.now() }].slice(-MAX_RISKS);
+    }
+    reconciliation = { missionId: key, status, taskId: task?.id || null, evidenceId: evidence.id, reconciledAt: Date.now() };
+    value.missionOutcomes[key] = reconciliation;
+    addEventToWorkspace(value, "mission_reconciled", `Mission ${key} reconciled as ${status}${task ? ` → ${task.title}` : ""}.`);
+  });
+  return workspace ? reconciliation : null;
 }
 
 function markDigestSent(ownerId, id, at = Date.now()) {
@@ -320,6 +460,10 @@ module.exports = {
   addMilestone,
   addEvidence,
   addDecision,
+  addPlanDraft,
+  applyPlan,
+  addRisk,
+  reconcileMission,
   markDigestSent,
   linkMission,
   getBrief,

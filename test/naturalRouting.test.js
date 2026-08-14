@@ -37,6 +37,12 @@ test("natural routing resolves capability discovery, memory recall, and website 
   assert.equal(router.resolveNaturalAction("what is blocking us?").intent, "atlas");
   assert.equal(router.resolveNaturalAction("add a task: verify Android downloads").intent, "atlas");
   assert.equal(router.resolveNaturalAction("record a decision: keep QR pairing owner-only").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("plan this project").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("plan this").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("make a plan").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("break the project down").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("show the roadmap").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("apply the plan").intent, "atlas");
 });
 
 test("legacy prefix commands remain resolvable during migration", () => {

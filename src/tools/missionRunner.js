@@ -41,7 +41,10 @@ function startRunner() {
 async function runMissionPass() {
   if (!sockRef) return;
   const durable = require("./durableMissions");
+  const reconciler = require("./atlasReconciler");
   const missions = durable.getAllMissions ? durable.getAllMissions() : [];
+  const reconciliation = reconciler.runReconciliationPass();
+  if (reconciliation.reconciled > 0) log(`🧭 Atlas reconciled ${reconciliation.reconciled} mission outcome(s).`);
   if (!missions.length) return;
 
   for (const m of missions) {
@@ -61,7 +64,8 @@ async function runMissionPass() {
     }
 
     // 2. Proactive progress update for the owner (rate-limited to 1/6h per mission).
-    const ownerChat = process.env.OWNER_NUMBER ? process.env.OWNER_NUMBER + "@s.whatsapp.net" : null;
+    const configuredOwner = String(process.env.OWNER_NUMBER || "").trim();
+    const ownerChat = configuredOwner ? (configuredOwner.includes("@") ? configuredOwner : configuredOwner + "@s.whatsapp.net") : null;
     const sixH = 6 * 60 * 60 * 1000;
     if (ownerChat && m.status === "running" && Date.now() - (lastNotified.get(m.id) || 0) > sixH) {
       lastNotified.set(m.id, Date.now());
@@ -78,7 +82,7 @@ async function runMissionPass() {
       lastNotified.set("stall-" + m.id, Date.now());
       try {
         await sockRef.sendMessage(ownerChat, {
-          text: `⚠️ *Mission \`${m.id}\` has been running a while without progress.*\n\n"${(m.objective || "").slice(0, 60)}"\n\nCheck it: *!mission status ${m.id}*`,
+          text: `⚠️ *Mission \`${m.id}\` has been running a while without progress.*\n\n"${(m.objective || "").slice(0, 60)}"\n\nAsk me for the status or tell me to review this mission.`,
         });
       } catch (e) { error("Mission runner stall-notify error:", e.message); }
     }

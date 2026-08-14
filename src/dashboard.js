@@ -676,6 +676,9 @@ function renderAtlasPane(workspaces, brief, csrf) {
   const recent = brief?.recent || [];
   const evidence = workspace?.evidence?.slice(-5).reverse() || [];
   const recentDecisions = brief?.recentDecisions || [];
+  const milestones = workspace?.milestones || [];
+  const risks = (workspace?.risks || []).filter((risk) => risk.status === "open").sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 6);
+  const planning = workspace?.planning || {};
   const workspaceRows = workspaces.length
     ? workspaces.map((item) => `<a class="atlas-workspace ${item.id === workspace?.id ? "active" : ""}" href="/dashboard/atlas?workspace=${encodeURIComponent(item.id)}"><span>${esc(item.title)}</span><small>${item.state}</small></a>`).join("")
     : `<div class="empty">No Atlas workspaces yet.</div>`;
@@ -694,6 +697,12 @@ function renderAtlasPane(workspaces, brief, csrf) {
   const activityRows = recent.length
     ? recent.map((event) => `<div class="feed-item"><div class="feed-ico">${event.type === "decision_recorded" ? "🧾" : event.type === "task_updated" ? "✓" : "•"}</div><div class="feed-body"><div class="m">${esc(event.text)}</div><div class="t">${new Date(event.at).toLocaleString()}</div></div></div>`).join("")
     : `<div class="empty">Atlas activity will appear here.</div>`;
+  const roadmapRows = milestones.length
+    ? milestones.map((milestone, index) => `<div class="atlas-row"><span><b>${index + 1}. ${esc(milestone.title)}</b><small>${esc(milestone.description || "Roadmap milestone")} · ${milestone.taskIds?.length || 0} task(s)</small></span><span class="badge ${milestone.status === "done" ? "b-green" : "b-accent"}">${esc(milestone.status)}</span></div>`).join("")
+    : `<div class="empty">No roadmap applied. Ask ARIA to “plan this project”.</div>`;
+  const riskRows = risks.length
+    ? risks.map((risk) => `<div class="atlas-row"><span><b>${esc(risk.title)}</b><small>mitigation: ${esc(risk.mitigation || "Review with ARIA")}</small></span><span class="badge ${risk.score >= 15 ? "b-red" : risk.score >= 9 ? "b-amber" : "b-muted"}">${Number(risk.score) || 0}/25</span></div>`).join("")
+    : `<div class="empty">No open risks recorded.</div>`;
   return `<style>
     .atlas-shell{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;align-items:start}
     .atlas-side{position:sticky;top:16px}.atlas-main{min-width:0}.atlas-contract{border:1px solid rgba(139,124,246,.32);background:linear-gradient(135deg,rgba(99,102,241,.12),var(--panel))}
@@ -718,15 +727,26 @@ function renderAtlasPane(workspaces, brief, csrf) {
         </form>
       </aside>
       <section class="atlas-main">
-        ${workspace ? `<div class="card atlas-contract"><div class="eyebrow">NORTH STAR</div><h2>${esc(workspace.title)}</h2><p>${esc(workspace.contract.outcome)}</p><div class="atlas-contract-meta"><span>Policy: ${esc(workspace.approvalPolicy)}</span>${workspace.contract.deadline ? `<span>Deadline: ${esc(workspace.contract.deadline)}</span>` : ""}<span>Updated: ${new Date(workspace.updatedAt).toLocaleString()}</span></div></div>` : `<div class="card atlas-contract"><div class="eyebrow">NORTH STAR</div><h2>Give ARIA a project to own</h2><p>Say “ARIA, this is a project: …” in WhatsApp or create your first workspace here.</p></div>`}
+        ${workspace ? `<div class="card atlas-contract"><div class="eyebrow">NORTH STAR</div><h2>${esc(workspace.title)}</h2><p>${esc(workspace.contract.outcome)}</p><div class="atlas-contract-meta"><span>Policy: ${esc(workspace.approvalPolicy)}</span>${workspace.contract.deadline ? `<span>Deadline: ${esc(workspace.contract.deadline)}</span>` : ""}<span>Updated: ${new Date(workspace.updatedAt).toLocaleString()}</span></div><div class="actions"><button class="qbtn purple" onclick="atlasPlan('draft')">Draft roadmap</button>${planning.draft ? `<button class="qbtn" onclick="atlasPlan('apply')">Apply reviewed plan</button><span class="badge b-amber">draft awaiting review</span>` : planning.status === "applied" ? `<span class="badge b-green">roadmap applied</span>` : ""}</div><div id="atlas-plan-result" class="hint"></div></div>` : `<div class="card atlas-contract"><div class="eyebrow">NORTH STAR</div><h2>Give ARIA a project to own</h2><p>Say “ARIA, this is a project: …” in WhatsApp or create your first workspace here.</p></div>`}
         <div class="stats atlas-stats"><div class="stat"><div class="n">${brief?.progress || 0}%</div><div class="l">progress</div></div><div class="stat"><div class="n">${openTasks}</div><div class="l">open tasks</div></div><div class="stat"><div class="n" style="color:${blocked ? "var(--red)" : "var(--green)"}">${blocked}</div><div class="l">blocked</div></div><div class="stat"><div class="n">${decisions}</div><div class="l">decisions</div></div></div>
         <div class="grid2"><div class="card"><div class="h">Now / Next</div>${taskRows}</div><div class="card"><div class="h">Blocked</div>${blockedRows}</div></div>
+        <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Roadmap</div>${roadmapRows}</div><div class="card"><div class="h">Risk register</div>${riskRows}</div></div>
         <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Decision ledger</div>${decisionRows}</div><div class="card"><div class="h">Evidence vault</div>${evidenceRows}</div></div>
         <div class="card" style="margin-top:16px"><div class="h">Living timeline</div>${activityRows}</div>
       </section>
     </div>
     <script>
     const ATLAS_CSRF=${JSON.stringify(csrf)};
+    async function atlasPlan(action){
+      const result = document.getElementById('atlas-plan-result');
+      try{
+        const response = await fetch('/dashboard/api/atlas/${workspace?.id || ""}/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:ATLAS_CSRF,action})});
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.error || 'Atlas plan action failed');
+        result.textContent = action === 'apply' ? 'Roadmap applied. Reloading…' : 'Roadmap drafted. Reloading for review…';
+        setTimeout(()=>window.location.reload(),350);
+      }catch(error){result.textContent=error.message;}
+    }
     document.getElementById('atlas-create-form')?.addEventListener('submit', async (event) => {
       event.preventDefault();
       const form = event.currentTarget;
@@ -1235,6 +1255,27 @@ router.post("/api/atlas/workspaces", checkAuth, (req, res) => {
   } catch (e) {
     console.error("[dashboard-atlas-create]", e);
     return res.status(500).json({ error: "Could not create Atlas workspace" });
+  }
+});
+
+router.post("/api/atlas/:id/plan", checkAuth, (req, res) => {
+  try {
+    const action = String(req.body?.action || "draft").toLowerCase();
+    const atlasPlanner = require("./tools/atlasPlanner");
+    const atlas = require("./tools/atlasStore");
+    const workspace = atlas.getWorkspace(atlasOwnerId(), String(req.params.id));
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    if (action === "apply") {
+      const applied = atlasPlanner.applyDraft(atlasOwnerId(), workspace.title);
+      if (!applied) return res.status(409).json({ error: "no roadmap draft is waiting for approval" });
+      return res.json({ ok: true, action, applied: applied.applied });
+    }
+    if (action !== "draft") return res.status(400).json({ error: "action must be draft or apply" });
+    const draft = atlasPlanner.draftPlan(atlasOwnerId(), workspace.contract.outcome);
+    return res.status(201).json({ ok: true, action, draft: draft?.draft || null });
+  } catch (e) {
+    console.error("[dashboard-atlas-plan]", e);
+    return res.status(500).json({ error: "Could not update Atlas roadmap" });
   }
 });
 

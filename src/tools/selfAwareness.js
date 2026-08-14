@@ -16,7 +16,7 @@ Built and working:
 - Anime catalog, provider-race source resolution, validation, signed playback/file capabilities, safe catalog filtering, and queued downloads
 - Academy/LMS with hidden assessments, learner profiles, engineering-skill signals, durable XP ledger, portal accounts, Google OAuth, and WhatsApp linking
 - Reminders, recurring tasks, autonomous owner check-ins, proactive operational monitoring, and background task polling
-- ARIA Atlas v1: owner-scoped project contracts, living timelines, tasks, evidence, decisions, mission links, natural project intake, approval policy, and an authenticated dashboard cockpit
+- ARIA Atlas v2: owner-scoped project contracts, living timelines, dependency-linked discover/design/execute/verify roadmaps, scored risks, task/evidence/decision tracking, approval-gated plan application, idempotent mission-result reconciliation, natural-language project intake, and an authenticated dashboard cockpit
 
 Known gaps:
 - Role-based agent prompts exist, but planner/researcher/builder/verifier are not isolated services with independent budgets and failure domains
@@ -25,7 +25,7 @@ Known gaps:
 - Anime watchlist/progress migration is now scoped by user, but older callers still use the legacy compatibility scope until account IDs are supplied
 - Full outbound pinning cannot be inherited by third-party subprocesses such as yt-dlp/ffprobe without additional OS-level isolation
 - Companion emotion is an expressive, transparent persona state—not biological consciousness; deeper emotional-state evaluation and richer Atlas narrative context remain future work
-- Atlas still needs mission-result reconciliation, dependency-aware planning, event-driven signals, and opt-in GitHub/calendar/file connectors
+- Atlas still needs event-driven signals, independent role-agent budgets/failure domains, and opt-in GitHub/calendar/file connectors; its current reconciliation loop is interval-based and durable
 - Complex multi-file builds can still fail across files even after local syntax/build repair
 `.trim();
 

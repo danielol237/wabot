@@ -44,7 +44,7 @@ const { createBackup } = require("../tools/backupSystem");
 const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
 const { setReminder } = require("../tools/reminders");
-const { buildProject, continueProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
+const { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 // Natural-language routing is the default. The legacy prefix remains accepted
@@ -63,7 +63,7 @@ const NAME_TRIGGERS = [
 
 // ── Intent patterns ──────────────────────────────────────────
 const INTENTS = {
-  image: ["generate an image", "generate a picture", "create an image", "make an image", "draw me", "draw a", "imagine a", "imagine an", "paint a", "paint me", "design an image", "give me an image", "show me a picture", "make a picture"],
+  image: ["generate an image", "generate a picture", "generate a pic", "create an image", "create a picture", "create a pic", "make an image", "make a picture", "make a pic", "draw me", "draw a", "imagine a", "imagine an", "paint a", "paint me", "design an image", "give me an image", "show me a picture"],
   search: ["search for", "look up", "google", "search the web", "find info on"],
   download: ["download", "dl this", "get this video", "save this"],
   scrape: ["read this link", "open this link", "check this site", "visit", "browse", "summarize this link", "what's on this site"],
@@ -84,6 +84,7 @@ const INTENTS = {
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
   delegate: ["delegate", "delegate this", "orchestrate", "hand this off"],
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
+  deploy: ["deploy", "deploy it", "deploy through vercel", "host it", "host this", "host through vercel", "publish it", "put it online"],
   edit: ["edit", "edit this", "change the file", "update the file", "fix the file"],
   github: ["on github", "look on github", "github search", "search github", "find it on github", "git hub"],
   reddit: ["on reddit", "look on reddit", "reddit search", "search reddit", "find it on reddit"],
@@ -231,7 +232,8 @@ function registerBuiltinCommands() {
   registerCommand({ name: "sim", aliases: ["rehearse", "risk"], category: "utility", description: "Dry-run an action and see risk: !sim <action>", handler: handleSim, ownerOnly: false });
 
   // Dev / Advanced
-  registerCommand({ name: "build", aliases: [], category: "dev", description: "AI app builder: !build <description>", handler: handleBuild, ownerOnly: true });
+  registerCommand({ name: "build", aliases: [], category: "dev", description: "Build a complete app from a description", handler: handleBuild, ownerOnly: true });
+  registerCommand({ name: "deploy", aliases: ["host", "publish"], category: "dev", description: "Deploy the verified project to Vercel", handler: handleDeploy, ownerOnly: true });
   registerCommand({ name: "continue", aliases: ["resume"], category: "dev", description: "Continue a project", handler: handleContinue, ownerOnly: true });
   registerCommand({ name: "status", aliases: [], category: "dev", description: "Project status: !status <id>", handler: handleProjectStatus, ownerOnly: false });
   registerCommand({ name: "projects", aliases: ["mylist"], category: "dev", description: "List projects", handler: handleProjectList, ownerOnly: false });
@@ -302,7 +304,9 @@ function stripAriaAddress(text) {
 function naturalArgs(intent, text) {
   const value = stripAriaAddress(text);
   const patterns = {
+    image: /^(?:please\s+)?(?:generate|create|make|draw|paint|imagine|design|give me|show me)(?:\s+(?:a|an|me|some))?\s+(?:image|picture|pic|photo|drawing|illustration)\s*(?:of\s+)?/i,
     build: /^(?:please\s+)?(?:build|create|make)(?:\s+me)?(?:\s+(?:a|an))?\s*/i,
+    deploy: /^(?:please\s+)?(?:deploy|host|publish)(?:\s+(?:it|this|the project|through vercel|on vercel))?\s*/i,
     delegate: /^(?:please\s+)?(?:delegate|orchestrate|hand this off)(?:\s+(?:this|that|task|mission))?\s*/i,
     agent: /^(?:please\s+)?(?:figure out|plan and|research and|find and compare|deep dive on)\s*/i,
     edit: /^(?:please\s+)?(?:edit|change|update|fix)(?:\s+(?:this|the file))?\s*/i,
@@ -450,6 +454,7 @@ async function routeMessage(sock, msg, context) {
     }
     try {
       try { require("../tools/dashboardTelemetry").record("natural_action", { detail: natural.intent }); } catch (_) {}
+      try { const selfModel = require("../tools/ariaSelfModel"); selfModel.observe(senderJid, text); selfModel.recordAction(natural.intent, natural.args || text); } catch (_) {}
       await natural.handler(sock, msg, natural.args || text, context);
       try { require("./eventLog").track("natural_action", natural.intent); } catch (_) {}
     } catch (err) {
@@ -1029,16 +1034,27 @@ async function handleCardLeaderboard(sock, msg, args, ctx) {
 
 // Creative handlers
 async function handleImageGen(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !imagine <prompt>");
+  const { reply, react, isQuotingBotMessage, getQuotedMessageText } = require("./baileysHelpers");
+  let prompt = String(args || "").trim();
+  if (!prompt) return reply(sock, msg, "Tell me what to generate, for example: generate an image of a silver orbital-ribbon logo.");
+  const quoted = isQuotingBotMessage(msg) ? getQuotedMessageText(msg) : null;
+  if (/\b(it|this|that|the same)\b/i.test(prompt) && quoted) {
+    prompt = `${prompt} — subject from the quoted message: ${String(quoted).slice(0, 360)}`;
+  }
   await react(sock, msg, "🎨");
-  // Delegate to the actual image generation
+  try { require("../tools/ariaSelfModel").recordAction("image", prompt); } catch (_) {}
   const { generateImage } = require("../tools/imageGen");
-  const result = await generateImage(args);
+  const result = await generateImage(prompt);
   if (result?.buffer) {
-    await sock.sendMessage(ctx.chatId, { image: result.buffer, caption: `🎨 "${args}"` });
+    await sock.sendMessage(ctx.chatId, { image: result.buffer, caption: `🎨 ${prompt}` }, { quoted: msg });
+  } else if (result?.url) {
+    try {
+      await sock.sendMessage(ctx.chatId, { image: { url: result.url }, caption: `🎨 ${prompt}` }, { quoted: msg });
+    } catch (error) {
+      await reply(sock, msg, `❌ I generated the image, but WhatsApp could not fetch it: ${error.message}`);
+    }
   } else {
-    await reply(sock, msg, result?.text || "❌ Failed to generate image.");
+    await reply(sock, msg, `❌ Image generation failed: ${result?.error || result?.fetchError || "the provider returned no usable image"}`);
   }
 }
 
@@ -1591,7 +1607,7 @@ async function handleWikipedia(sock, msg, args, ctx) {
 function formatBuildResult(result) {
   if (!result) return "❌ Build returned nothing.";
   if (result.success === false) return "❌ " + (result.error || "Build failed.");
-  if (result.paused) return result.message || "⏸️ Build paused — reply !continue to keep going.";
+  if (result.paused) return result.message || "⏸️ Build paused — say ‘continue the project’ to keep going.";
   if (result.success && result.downloadUrl) {
     let t = "✅ *Project built!*\n";
     if (result.fileCount) t += `📄 ${result.fileCount} file(s)\n`;
@@ -1605,10 +1621,19 @@ function formatBuildResult(result) {
 
 async function handleBuild(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !build <description of app>");
+  if (!args) return reply(sock, msg, "Tell me what to build, for example: build a full-stack todo app with email login.");
   await react(sock, msg, "🏗️");
   const result = await buildProject(args, ctx.senderName, ctx.chatId);
   await reply(sock, msg, formatBuildResult(result));
+}
+
+async function handleDeploy(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, "Vercel hosting is not configured. Add VERCEL_TOKEN in the runtime, then say ‘deploy it’ again.");
+  await react(sock, msg, "🌐");
+  const result = await deployProject(ctx.chatId, args || null);
+  if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+  await reply(sock, msg, `✅ The verified project is live: ${result.url}`);
 }
 
 async function handleContinue(sock, msg, args, ctx) {
@@ -1641,7 +1666,7 @@ async function handleEditFile(sock, msg, args, ctx) {
   const parts = args.split(" ");
   const filename = parts[0];
   const instruction = parts.slice(1).join(" ");
-  if (!filename || !instruction) return reply(sock, msg, "Usage: !edit filename.js the change to make");
+  if (!filename || !instruction) return reply(sock, msg, "Tell me which project file to change and what you want changed, for example: edit server.js to add a health route.");
   await react(sock, msg, "✏️");
   const result = await editProjectFile(ctx.chatId, filename, instruction, ctx.senderName, args.slice(filename.length).trim() || null);
   await reply(sock, msg, result);
@@ -1649,7 +1674,7 @@ async function handleEditFile(sock, msg, args, ctx) {
 
 async function handleThink(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !think <what to think about>");
+  if (!args) return reply(sock, msg, "Tell me what you want me to plan before I build it.");
   await react(sock, msg, "🧠");
   const result = await thinkAboutProject(args, ctx.senderName, ctx.chatId);
   await reply(sock, msg, result);
@@ -2145,6 +2170,8 @@ async function handleAIResponse(sock, msg, text, ctx) {
   // AI chat response. Memory is consolidated through the unified UserProfile
   // service (audit #18) so the AI sees one coherent picture across all stores
   // instead of a hand-grown concatenation.
+  let selfModelContext = "";
+  try { const selfModel = require("../tools/ariaSelfModel"); selfModel.observe(ctx.senderJid, text); selfModelContext = selfModel.getContext(); } catch (_) {}
   const { buildUserContext } = require("../utils/userProfile");
   const profileCtx = buildUserContext(ctx.senderJid, text);
   const memory = getMemory(ctx.chatId);
@@ -2181,7 +2208,7 @@ async function handleAIResponse(sock, msg, text, ctx) {
   const personalizationContext = "\n\n[Personalization] Learn their name if they give it, match their communication style naturally, and remember important things they share.\n";
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: profileCtx.context + ownerContext + moodContext + personaContext + toneContext + mediaContext + personalizationContext + researchContext,
+    userContext: profileCtx.context + ownerContext + moodContext + personaContext + toneContext + mediaContext + personalizationContext + researchContext + selfModelContext,
     preferences: profileCtx.profile.preferences,
     facts: profileCtx.profile.facts,
   });

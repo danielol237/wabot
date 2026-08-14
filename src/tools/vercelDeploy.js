@@ -13,6 +13,16 @@ const fs = require("fs");
 
 const VERCEL_API = "https://api.vercel.com";
 
+async function verifyDeployment(url) {
+  try {
+    const response = await axios.get(url, { timeout: 15000, maxContentLength: 2 * 1024 * 1024, validateStatus: () => true });
+    if (response.status >= 400) return { success: false, error: `deployment returned HTTP ${response.status}` };
+    return { success: true, url };
+  } catch (error) {
+    return { success: false, error: `deployment URL did not respond: ${error.message}` };
+  }
+}
+
 function hasPackageJson(dir) {
   return fs.existsSync(path.join(dir, "package.json"));
 }
@@ -38,10 +48,10 @@ async function deployViaCli(projectDir, projectName, token) {
       if (err) return resolve({ success: false, error: "CLI deploy failed: " + (err.message || "error") });
       // The CLI prints the production URL (e.g. https://xxx.vercel.app) on success.
       const m = out.match(/(https:\/\/[a-z0-9-]+\.vercel\.app)/i) || out.match(/(https:\/\/[^\s]+\.vercel\.app)/i);
-      if (m) return resolve({ success: true, url: m[1] });
+      if (m) return verifyDeployment(m[1]).then(resolve);
       // Some CLI versions print the URL to stdout on its own line.
       const urls = out.split("\n").map((l) => l.trim()).filter((l) => /^https:\/\/.+\..+/.test(l));
-      if (urls.length) return resolve({ success: true, url: urls[urls.length - 1] });
+      if (urls.length) return verifyDeployment(urls[urls.length - 1]).then(resolve);
       return resolve({ success: false, error: "CLI deploy finished but no URL found in output" });
     });
   });
@@ -74,7 +84,7 @@ async function deployViaApi(projectDir, projectName, token) {
     });
 
     const url = res.data?.url;
-    if (url) return { success: true, url: "https://" + url };
+    if (url) return verifyDeployment("https://" + url);
     return { success: false, error: "No deployment URL returned" };
   } catch (err) {
     log("Vercel API deploy failed (non-fatal):", err.message);

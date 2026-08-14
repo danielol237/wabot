@@ -661,7 +661,90 @@ function renderBrainPane(b) {
     </div>`;
 }
 
-function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "") {
+function atlasOwnerId() {
+  const configured = String(process.env.OWNER_NUMBER || "").trim();
+  if (!configured) return "dashboard-owner";
+  return configured.includes("@") ? configured : configured + "@s.whatsapp.net";
+}
+
+function renderAtlasPane(workspaces, brief, csrf) {
+  const workspace = brief?.workspace;
+  const openTasks = workspace ? workspace.tasks.filter((task) => !["done", "cancelled"].includes(task.status)).length : 0;
+  const blocked = brief?.blocked?.length || 0;
+  const decisions = workspace?.decisions?.length || 0;
+  const tasks = brief?.nextTasks || [];
+  const recent = brief?.recent || [];
+  const evidence = workspace?.evidence?.slice(-5).reverse() || [];
+  const recentDecisions = brief?.recentDecisions || [];
+  const workspaceRows = workspaces.length
+    ? workspaces.map((item) => `<a class="atlas-workspace ${item.id === workspace?.id ? "active" : ""}" href="/dashboard/atlas?workspace=${encodeURIComponent(item.id)}"><span>${esc(item.title)}</span><small>${item.state}</small></a>`).join("")
+    : `<div class="empty">No Atlas workspaces yet.</div>`;
+  const taskRows = tasks.length
+    ? tasks.map((task) => `<div class="atlas-row"><span><b>${esc(task.title)}</b><small>${esc(task.priority)} · ${esc(task.status)}</small></span><span class="badge ${task.status === "in_progress" ? "b-accent" : "b-amber"}">${esc(task.status)}</span></div>`).join("")
+    : `<div class="empty">No open tasks. Ask ARIA to add the next milestone.</div>`;
+  const blockedRows = blocked
+    ? brief.blocked.map((task) => `<div class="atlas-row"><span><b>${esc(task.title)}</b><small>needs attention</small></span><span class="badge b-red">blocked</span></div>`).join("")
+    : `<div class="empty">Nothing is blocked.</div>`;
+  const decisionRows = recentDecisions.length
+    ? recentDecisions.map((decision) => `<div class="atlas-note"><b>${esc(decision.choice || decision.question)}</b><small>${esc(decision.rationale || "Decision recorded in Atlas")}</small></div>`).join("")
+    : `<div class="empty">No decisions recorded yet.</div>`;
+  const evidenceRows = evidence.length
+    ? evidence.map((item) => `<div class="atlas-note"><b>${esc(item.title)}</b><small>${esc(item.summary || "Evidence attached")}${item.url ? ` · <a href="${esc(item.url)}" target="_blank" rel="noopener">open source</a>` : ""}</small></div>`).join("")
+    : `<div class="empty">No evidence attached yet.</div>`;
+  const activityRows = recent.length
+    ? recent.map((event) => `<div class="feed-item"><div class="feed-ico">${event.type === "decision_recorded" ? "🧾" : event.type === "task_updated" ? "✓" : "•"}</div><div class="feed-body"><div class="m">${esc(event.text)}</div><div class="t">${new Date(event.at).toLocaleString()}</div></div></div>`).join("")
+    : `<div class="empty">Atlas activity will appear here.</div>`;
+  return `<style>
+    .atlas-shell{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;align-items:start}
+    .atlas-side{position:sticky;top:16px}.atlas-main{min-width:0}.atlas-contract{border:1px solid rgba(139,124,246,.32);background:linear-gradient(135deg,rgba(99,102,241,.12),var(--panel))}
+    .atlas-contract h2{font-size:24px;margin:6px 0 6px}.atlas-contract p{color:var(--muted);max-width:760px}.atlas-contract-meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;color:var(--faint);font-size:11px}
+    .atlas-workspaces{display:grid;gap:6px;margin:12px 0}.atlas-workspace{display:flex;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:12px}.atlas-workspace:hover,.atlas-workspace.active{border-color:var(--brand);background:var(--brand-soft);color:var(--text)}.atlas-workspace small{color:var(--faint)}
+    .atlas-form{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:14px}.atlas-form input,.atlas-form textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:9px 10px;font:inherit;font-size:12px}.atlas-form textarea{min-height:74px;resize:vertical}.atlas-form input:focus,.atlas-form textarea:focus{outline:none;border-color:var(--brand)}
+    .atlas-stats{margin:16px 0}.atlas-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.atlas-row:last-child{border-bottom:0}.atlas-row b{display:block;font-size:12px}.atlas-row small,.atlas-note small{display:block;color:var(--faint);font-size:10.5px;margin-top:3px}.atlas-note{padding:10px 0;border-bottom:1px solid var(--line)}.atlas-note:last-child{border-bottom:0}.atlas-note b{display:block;font-size:12px}.atlas-note a{color:var(--brand2)}
+    @media(max-width:760px){.atlas-shell{grid-template-columns:1fr}.atlas-side{position:static}.atlas-contract h2{font-size:20px}.atlas-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  </style><div class="pane show" id="pane-atlas">
+    <div class="page-title">Atlas <span class="badge b-accent">PROJECT BRAIN</span></div>
+    <div class="page-sub">durable workspaces · decisions · evidence · next actions</div>
+    <div class="atlas-shell">
+      <aside class="card atlas-side">
+        <div class="h">Workspaces <span class="badge b-green">${workspaces.length}</span></div>
+        <div class="atlas-workspaces">${workspaceRows}</div>
+        <form id="atlas-create-form" class="atlas-form">
+          <input name="title" placeholder="New project title" required maxlength="120" />
+          <textarea name="outcome" placeholder="What does success look like?" maxlength="1000"></textarea>
+          <input name="deadline" placeholder="Deadline (optional)" maxlength="80" />
+          <button class="qbtn" type="submit">Create workspace</button>
+          <div id="atlas-create-result" class="hint"></div>
+        </form>
+      </aside>
+      <section class="atlas-main">
+        ${workspace ? `<div class="card atlas-contract"><div class="eyebrow">NORTH STAR</div><h2>${esc(workspace.title)}</h2><p>${esc(workspace.contract.outcome)}</p><div class="atlas-contract-meta"><span>Policy: ${esc(workspace.approvalPolicy)}</span>${workspace.contract.deadline ? `<span>Deadline: ${esc(workspace.contract.deadline)}</span>` : ""}<span>Updated: ${new Date(workspace.updatedAt).toLocaleString()}</span></div></div>` : `<div class="card atlas-contract"><div class="eyebrow">NORTH STAR</div><h2>Give ARIA a project to own</h2><p>Say “ARIA, this is a project: …” in WhatsApp or create your first workspace here.</p></div>`}
+        <div class="stats atlas-stats"><div class="stat"><div class="n">${brief?.progress || 0}%</div><div class="l">progress</div></div><div class="stat"><div class="n">${openTasks}</div><div class="l">open tasks</div></div><div class="stat"><div class="n" style="color:${blocked ? "var(--red)" : "var(--green)"}">${blocked}</div><div class="l">blocked</div></div><div class="stat"><div class="n">${decisions}</div><div class="l">decisions</div></div></div>
+        <div class="grid2"><div class="card"><div class="h">Now / Next</div>${taskRows}</div><div class="card"><div class="h">Blocked</div>${blockedRows}</div></div>
+        <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Decision ledger</div>${decisionRows}</div><div class="card"><div class="h">Evidence vault</div>${evidenceRows}</div></div>
+        <div class="card" style="margin-top:16px"><div class="h">Living timeline</div>${activityRows}</div>
+      </section>
+    </div>
+    <script>
+    const ATLAS_CSRF=${JSON.stringify(csrf)};
+    document.getElementById('atlas-create-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const result = document.getElementById('atlas-create-result');
+      const body = Object.fromEntries(new FormData(form).entries());
+      body._csrf = ATLAS_CSRF;
+      try {
+        const response = await fetch('/dashboard/api/atlas/workspaces', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not create workspace');
+        window.location.href = '/dashboard/atlas?workspace=' + encodeURIComponent(data.id);
+      } catch (error) { result.textContent = error.message; }
+    });
+    </script>
+  </div>`;
+}
+
+function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "", standalonePane = false) {
   return `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
@@ -801,7 +884,8 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
   <aside class="sidebar">
     <div class="sb-brand"><div class="sb-logo" aria-hidden="true"></div><div class="sb-name">ARIA<small>control center</small></div></div>
     <div class="sb-group">Overview</div>
-    <div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Command</span></div>
+    ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">◉</span><span>Command</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Command</span></div>`}
+    <a class="navitem" href="/dashboard/atlas"><span class="ico">🧭</span><span>Atlas</span></a>
     <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
     <div class="navitem" data-pane="analytics"><span class="ico">📊</span><span>Analytics</span></div>
     <div class="sb-group">Intelligence</div>
@@ -834,6 +918,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};
+const STANDALONE_PANE=${JSON.stringify(standalonePane)};
 const titles={home:['Command',"ARIA core · live telemetry"],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 const htmlEscClient=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -844,8 +929,12 @@ function showPane(p){
   const t=titles[p]||['','']; const pt=document.querySelector('.page-title'); const ps=document.querySelector('.page-sub');
   if(pt)pt.textContent=t[0]; if(ps)ps.textContent=t[1];
 }
-navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
-showPane('home');
+if(!STANDALONE_PANE){
+  navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
+  showPane('home');
+}else{
+  document.getElementById('pane-atlas')?.classList.add('show');
+}
 // ── Theme toggle (light/dark) — persisted in localStorage ──
 (function(){
   const root=document.documentElement;
@@ -1101,6 +1190,94 @@ router.post("/api/provider-health/check", checkAuth, async (req, res) => {
     const { checkAll } = require("./tools/providerHealth");
     return res.json({ results: await checkAll() });
   } catch (e) { return res.status(500).json({ error: e.message }); }
+});
+
+// Atlas — durable Project Brain cockpit and owner APIs.
+router.get("/atlas", checkAuth, (req, res) => {
+  try {
+    const atlas = require("./tools/atlasStore");
+    const owner = atlasOwnerId();
+    const workspaces = atlas.listWorkspaces(owner);
+    const selected = req.query.workspace ? atlas.getWorkspace(owner, String(req.query.workspace)) : null;
+    const brief = atlas.getBrief(owner, selected?.id || workspaces[0]?.id || "");
+    return res.send(renderPage("Atlas", renderAtlasPane(workspaces, brief, csrfFor(req)), false, false, csrfFor(req), true));
+  } catch (e) {
+    console.error("[dashboard-atlas]", e);
+    return res.status(500).send(renderPage("Atlas", `<div class="card"><div class="empty">Atlas is temporarily unavailable.</div></div>`));
+  }
+});
+
+router.get("/api/atlas", checkAuth, (req, res) => {
+  try {
+    const atlas = require("./tools/atlasStore");
+    const owner = atlasOwnerId();
+    const workspaces = atlas.listWorkspaces(owner);
+    const selected = req.query.workspace ? atlas.getWorkspace(owner, String(req.query.workspace)) : null;
+    return res.json({ workspaces, brief: atlas.getBrief(owner, selected?.id || workspaces[0]?.id || "") });
+  } catch (e) {
+    console.error("[dashboard-atlas-api]", e);
+    return res.status(500).json({ error: "Atlas unavailable" });
+  }
+});
+
+router.post("/api/atlas/workspaces", checkAuth, (req, res) => {
+  try {
+    const body = req.body || {};
+    const title = String(body.title || "").trim();
+    if (!title || title.length > 120) return res.status(400).json({ error: "title is required and must be under 120 characters" });
+    const atlas = require("./tools/atlasStore");
+    const workspace = atlas.createWorkspace(atlasOwnerId(), {
+      title,
+      outcome: String(body.outcome || title).slice(0, 1000),
+      deadline: String(body.deadline || "").slice(0, 80),
+    });
+    return res.status(201).json({ ok: true, id: workspace.id });
+  } catch (e) {
+    console.error("[dashboard-atlas-create]", e);
+    return res.status(500).json({ error: "Could not create Atlas workspace" });
+  }
+});
+
+router.post("/api/atlas/:id/tasks", checkAuth, (req, res) => {
+  try {
+    const body = req.body || {};
+    const title = String(body.title || "").trim();
+    if (!title || title.length > 240) return res.status(400).json({ error: "task title is required and must be under 240 characters" });
+    const atlas = require("./tools/atlasStore");
+    const task = atlas.addTask(atlasOwnerId(), String(req.params.id), { title, description: body.description, priority: body.priority });
+    return task ? res.status(201).json({ ok: true, task }) : res.status(404).json({ error: "workspace not found" });
+  } catch (e) {
+    console.error("[dashboard-atlas-task]", e);
+    return res.status(500).json({ error: "Could not add Atlas task" });
+  }
+});
+
+router.post("/api/atlas/:id/evidence", checkAuth, (req, res) => {
+  try {
+    const body = req.body || {};
+    const summary = String(body.summary || body.text || "").trim();
+    if (!summary || summary.length > 1200) return res.status(400).json({ error: "evidence summary is required and must be under 1200 characters" });
+    const atlas = require("./tools/atlasStore");
+    const evidence = atlas.addEvidence(atlasOwnerId(), String(req.params.id), { title: body.title, summary, url: body.url, kind: body.kind, source: "dashboard" });
+    return evidence ? res.status(201).json({ ok: true, evidence }) : res.status(404).json({ error: "workspace not found" });
+  } catch (e) {
+    console.error("[dashboard-atlas-evidence]", e);
+    return res.status(500).json({ error: "Could not add Atlas evidence" });
+  }
+});
+
+router.post("/api/atlas/:id/decisions", checkAuth, (req, res) => {
+  try {
+    const body = req.body || {};
+    const choice = String(body.choice || body.decision || "").trim();
+    if (!choice || choice.length > 600) return res.status(400).json({ error: "decision choice is required and must be under 600 characters" });
+    const atlas = require("./tools/atlasStore");
+    const decision = atlas.addDecision(atlasOwnerId(), String(req.params.id), { question: body.question, choice, rationale: body.rationale, alternatives: body.alternatives });
+    return decision ? res.status(201).json({ ok: true, decision }) : res.status(404).json({ error: "workspace not found" });
+  } catch (e) {
+    console.error("[dashboard-atlas-decision]", e);
+    return res.status(500).json({ error: "Could not add Atlas decision" });
+  }
 });
 
 // Live log console — JSON history + SSE stream (auth via session cookie).

@@ -240,10 +240,21 @@ function formatSentinel(ownerId, query = "") {
   if (!workspace) return "I don’t have an Atlas workspace with Sentinel enabled yet. Create a project, then enable Sentinel from the dashboard.";
   const signals = signalList(workspace).slice(0, 6);
   const briefs = (workspace.briefs || []).filter((brief) => !["resolved", "rejected"].includes(brief.status)).slice(-5).reverse();
-  let text = `🛰️ *Atlas Sentinel — ${workspace.title}*\n\nStatus: ${workspace.sentinel?.enabled ? "enabled" : "disabled"}`;
-  text += signals.length ? `\n\n*Recent signals*\n${signals.map((signal) => `• ${signal.id} · ${signal.severity} · ${signal.status}\n  ${signal.title}`).join("\n")}` : "\n\n*Recent signals*\n• No signals recorded.";
-  text += briefs.length ? `\n\n*Decision briefs*\n${briefs.map((brief) => `• ${brief.id} · ${brief.actionLevel} · ${brief.status}\n  ${brief.title}\n  ${brief.recommendation}`).join("\n")}` : "\n\n*Decision briefs*\n• No open briefs.";
-  text += "\n\nSay “acknowledge signal <id>”, “resolve signal <id>”, or “approve brief <id>” after review.";
+  const enabled = Boolean(workspace.sentinel?.enabled);
+  const githubRepository = workspace.sentinel?.sources?.github?.repository;
+  const renderService = workspace.sentinel?.sources?.render?.serviceId;
+  let text = `🛰️ *Atlas Sentinel — ${workspace.title}*\n\nStatus: ${enabled ? "enabled and watching" : "disabled"}`;
+  if (enabled) {
+    text += "\n\nSentinel is a monitor, not a second chatbot. A quiet screen is normal: it means no tracked problem has fired yet.";
+    text += "\n\n*Watching now*\n• stalled Atlas missions\n• repeated runtime errors\n• all-provider AI outages";
+    text += `\n\n*External sources*\n• GitHub: ${githubRepository ? `connected to ${githubRepository}` : "not connected"}\n• Render: ${renderService ? "connected" : "not connected"}`;
+    if (!githubRepository && !renderService) text += "\n\nYou do not need webhooks for local monitoring. Add GitHub or Render only if you want deployment/check alerts.";
+  } else {
+    text += "\n\nEnable it from the Atlas dashboard to start local monitoring. Enabling Sentinel does not create a plan or take actions by itself.";
+  }
+  text += signals.length ? `\n\n*Recent signals*\n${signals.map((signal) => `• ${signal.id} · ${signal.severity} · ${signal.status}\n  ${signal.title}`).join("\n")}` : "\n\n*Recent signals*\n• None. No tracked issue has been recorded.";
+  text += briefs.length ? `\n\n*Decision briefs*\n${briefs.map((brief) => `• ${brief.id} · ${brief.actionLevel} · ${brief.status}\n  ${brief.title}\n  ${brief.recommendation}`).join("\n")}` : "\n\n*Decision briefs*\n• None waiting for your approval.";
+  text += "\n\nWhen a real signal appears, say “acknowledge signal <id>”, “resolve signal <id>”, or “approve brief <id>”.";
   return text;
 }
 

@@ -1,6 +1,10 @@
 // Group administration tools — kick, promote, demote, tagall, purge, antilink, welcome.
 // All require the bot itself to be a group admin to actually work (WhatsApp enforces this).
 
+function jidNumber(jid) {
+  return String(jid || "").split(":")[0].split("@")[0];
+}
+
 async function isBotAdmin(sock, groupId) {
   try {
     const metadata = await sock.groupMetadata(groupId);
@@ -9,10 +13,10 @@ async function isBotAdmin(sock, groupId) {
     // being undefined and normalize both sides before comparing.
     const rawId = sock?.user?.id;
     if (!rawId) return false;
-    const botNumber = String(rawId).split(":")[0].split("@")[0];
+    const botNumber = jidNumber(rawId);
     if (!botNumber) return false;
     const botParticipant = metadata.participants.find((p) => {
-      const pid = String(p?.id || "").split(":")[0].split("@")[0];
+      const pid = jidNumber(p?.id);
       return pid === botNumber;
     });
     return botParticipant?.admin === "admin" || botParticipant?.admin === "superadmin";
@@ -25,8 +29,8 @@ async function isBotAdmin(sock, groupId) {
 async function isSenderAdmin(sock, groupId, senderJid) {
   try {
     const metadata = await sock.groupMetadata(groupId);
-    const senderNumber = senderJid.split(":")[0].split("@")[0];
-    const participant = metadata.participants.find((p) => p.id.split("@")[0] === senderNumber);
+    const senderNumber = jidNumber(senderJid);
+    const participant = metadata.participants.find((p) => jidNumber(p?.id) === senderNumber);
     return participant?.admin === "admin" || participant?.admin === "superadmin";
   } catch (err) {
     console.error("isSenderAdmin check failed:", err.message);
@@ -113,15 +117,4 @@ async function purgeMessages(sock, groupId, messageKeys) {
   return { success: true, deleted };
 }
 
-module.exports = {
-  isBotAdmin,
-  isSenderAdmin,
-  kickUser,
-  addUser,
-  promoteUser,
-  demoteUser,
-  getAllParticipants,
-  tagAll,
-  hideTag,
-  purgeMessages,
-};
+module.exports = { jidNumber, isBotAdmin, isSenderAdmin, kickUser, addUser, promoteUser, demoteUser, tagAll, hideTag, purgeMessages };

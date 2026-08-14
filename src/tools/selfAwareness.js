@@ -6,13 +6,13 @@ const { getAIResponse } = require("./ai");
 const ACTUAL_CAPABILITIES = `
 Built and working:
 - Multi-provider AI chat with provider telemetry and fallback chains (Cerebras, Gemini, Groq, OpenRouter)
-- Persistent per-chat history, unified profile data, semantic memories, preferences, facts, and project context
+- Persistent per-chat history, unified profile data, semantic memories, preferences, facts, project context, and a transparent operational self-model that carries continuity across sessions
 - Vision, voice transcription, text-to-speech, stickers, image generation, and yt-dlp-backed media tools
 - Web search and URL browsing with outbound URL safety checks
 - App builder with planning, generation, build verification, repair, project state, zip delivery, and optional deployment
 - Think mode, file editing, code debugging, sandboxed code execution, and durable mission execution
 - GitHub repository inspection, local git actions, pull-request support, and repository-aware developer workflows
-- Group administration, anti-link/welcome/warning tools, owner/admin permissions, broadcasts, health checks, and telemetry
+- Group administration with normalized WhatsApp multi-device admin checks, explicit mention/quote targeting for participant changes, anti-link/welcome/warning tools, owner/admin permissions, broadcasts, health checks, and telemetry
 - Anime catalog, provider-race source resolution, validation, signed playback/file capabilities, safe catalog filtering, and queued downloads
 - Academy/LMS with hidden assessments, learner profiles, engineering-skill signals, durable XP ledger, portal accounts, Google OAuth, and WhatsApp linking
 - Reminders, recurring tasks, autonomous owner check-ins, proactive operational monitoring, and background task polling
@@ -24,7 +24,7 @@ Known gaps:
 - External calendar, email, and household integrations are not yet approval-first connected actions
 - Anime watchlist/progress migration is now scoped by user, but older callers still use the legacy compatibility scope until account IDs are supplied
 - Full outbound pinning cannot be inherited by third-party subprocesses such as yt-dlp/ffprobe without additional OS-level isolation
-- Companion emotion is an expressive, transparent persona state—not biological consciousness; deeper emotional-state evaluation and richer Atlas narrative context remain future work
+- ARIA has persistent operational identity, memory, initiative, and expressive persona states, but not literal biological or human-like consciousness; deeper emotional-state evaluation and richer Atlas narrative context remain future work
 - Atlas still needs independent role-agent budgets/failure domains, richer GitHub/calendar/file connectors, and deeper provider-specific remediation; Sentinel’s external event sources remain opt-in and require provider webhook configuration
 - Complex multi-file builds can still fail across files even after local syntax/build repair
 `.trim();

@@ -30,7 +30,7 @@ function portalCsrf(req) {
   return crypto.createHmac("sha256", SESSION_SECRET || "missing").update(session).digest("hex").slice(0, 32);
 }
 function portalCsrfOk(req) {
-  return !!req.body?._csrf && req.body._csrf === portalCsrf(req);
+  return !!req.body?._csrf && safeEqual(req.body._csrf, portalCsrf(req));
 }
 function linkedUid(accountId) {
   return linking.getLinkedUid(accountId) || String(accountId || "");
@@ -65,6 +65,29 @@ const GOOGLE_CLIENT_SECRET = String(process.env.GOOGLE_CLIENT_SECRET || "").repl
 const SESSION_SECRET = process.env.PORTAL_SESSION_SECRET || process.env.DASHBOARD_CSRF_SECRET || (GOOGLE_CLIENT_SECRET ? crypto.createHash("sha256").update(GOOGLE_CLIENT_SECRET + "|aria-portal-session").digest("hex") : "");
 // Public URL of this bot, used for the OAuth redirect URI.
 const BASE_URL = String(process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
+const OAUTH_COOKIE = "aria_oauth_state";
+const AUTH_LIMIT = 12;
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const authAttempts = new Map();
+
+function authLimited(req) {
+  const key = req.ip || req.socket?.remoteAddress || "unknown";
+  const now = Date.now();
+  const rec = authAttempts.get(key);
+  if (!rec || rec.resetAt <= now) { authAttempts.set(key, { count: 0, resetAt: now + AUTH_WINDOW_MS }); return false; }
+  return rec.count >= AUTH_LIMIT;
+}
+function recordAuthAttempt(req) {
+  const key = req.ip || req.socket?.remoteAddress || "unknown";
+  const rec = authAttempts.get(key) || { count: 0, resetAt: Date.now() + AUTH_WINDOW_MS };
+  rec.count++;
+  authAttempts.set(key, rec);
+}
+function safeEqual(a, b) {
+  const left = Buffer.from(String(a || ""));
+  const right = Buffer.from(String(b || ""));
+  return left.length === right.length && left.length > 0 && crypto.timingSafeEqual(left, right);
+}
 
 // ── Learner accounts store (JSON file) ──────────────────────────
 const STATE_FILE = path.join(__dirname, "../../data/learnerAccounts.json");
@@ -76,7 +99,13 @@ function load() {
   } catch (_) { accounts = {}; }
 }
 function save() {
-  try { fs.writeFileSync(STATE_FILE, JSON.stringify(accounts)); } catch (_) {}
+  try {
+    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+    const tmp = `${STATE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(accounts), { mode: 0o600 });
+    fs.renameSync(tmp, STATE_FILE);
+    try { fs.chmodSync(STATE_FILE, 0o600); } catch (_) {}
+  } catch (_) {}
 }
 load();
 
@@ -109,7 +138,7 @@ function verifyToken(token) {
   try {
     const [body, sig] = String(token || "").split(".");
     const expect = crypto.createHmac("sha256", SESSION_SECRET).update(body).digest("base64url");
-    if (sig !== expect) return null;
+    if (!safeEqual(sig, expect)) return null;
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
     if (payload.exp < Date.now()) return null;
     return payload;
@@ -127,8 +156,11 @@ function portalAuth(req, res, next) {
 
 // ── Google OAuth ────────────────────────────────────────────────
 router.get("/auth/google", (req, res) => {
+  if (authLimited(req)) return res.redirect("/portal/login?error=auth-rate-limited");
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !BASE_URL) return res.redirect("/portal/login?error=google-not-configured");
-  const state = signToken({ r: crypto.randomBytes(8).toString("hex"), exp: Date.now() + 10 * 60 * 1000 });
+  const nonce = crypto.randomBytes(24).toString("hex");
+  const state = signToken({ r: nonce, exp: Date.now() + 10 * 60 * 1000 });
+  res.cookie(OAUTH_COOKIE, nonce, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 10 * 60 * 1000, path: "/portal" });
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: BASE_URL + "/portal/auth/google/callback",
@@ -142,7 +174,9 @@ router.get("/auth/google", (req, res) => {
 router.get("/auth/google/callback", async (req, res) => {
   const code = req.query.code;
   const state = verifyToken(req.query.state);
-  if (!state?.r) return res.redirect("/portal/login?error=oauth-state-invalid");
+  const browserNonce = req.cookies?.[OAUTH_COOKIE] || "";
+  res.clearCookie(OAUTH_COOKIE, { path: "/portal" });
+  if (!state?.r || !safeEqual(state.r, browserNonce)) return res.redirect("/portal/login?error=oauth-state-invalid");
   if (!code) return res.redirect("/portal/login?error=no-code");
   try {
     const tok = await axios.post("https://oauth2.googleapis.com/token",
@@ -174,16 +208,19 @@ router.get("/auth/google/callback", async (req, res) => {
 });
 
 // ── Email signup / login ────────────────────────────────────────
-router.post("/auth/email", express.json(), (req, res) => {
+router.post("/auth/email", express.json({ limit: "16kb" }), (req, res) => {
+  if (authLimited(req)) return res.status(429).json({ error: "Too many sign-in attempts. Try again later." });
   if (!SESSION_SECRET) return res.status(503).json({ error: "Learner sign-in is not configured. Add PORTAL_SESSION_SECRET in Render." });
   const { email, password, name, mode } = req.body || {};
   const clean = String(email || "").toLowerCase().trim();
   if (!clean || !password) return res.status(400).json({ error: "email and password required" });
+  if (clean.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clean)) return res.status(400).json({ error: "enter a valid email address" });
   if (String(password).length < 8) return res.status(400).json({ error: "password must be at least 8 characters" });
+  if (String(password).length > 256) return res.status(400).json({ error: "password is too long" });
 
   const existing = Object.values(accounts).find((a) => a.email === clean);
   if (mode === "signup") {
-    if (existing) return res.status(409).json({ error: "account already exists — log in" });
+    if (existing) { recordAuthAttempt(req); return res.status(409).json({ error: "account already exists — log in" }); }
     const id = "em_" + crypto.randomBytes(6).toString("hex");
     accounts[id] = { id, name: String(name || clean.split("@")[0]).trim().slice(0, 80), email: clean, passwordHash: hashPw(password), createdAt: Date.now() };
     save();
@@ -193,8 +230,8 @@ router.post("/auth/email", express.json(), (req, res) => {
     return res.json({ ok: true });
   }
   // login
-  if (!existing) return res.status(401).json({ error: "no account with that email" });
-  if (!verifyPw(password, existing.passwordHash)) return res.status(401).json({ error: "wrong password" });
+  if (!existing) { recordAuthAttempt(req); return res.status(401).json({ error: "no account with that email" }); }
+  if (!verifyPw(password, existing.passwordHash)) { recordAuthAttempt(req); return res.status(401).json({ error: "wrong password" }); }
   const token = issuePortalToken(existing);
   res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
   return res.json({ ok: true });
@@ -219,8 +256,8 @@ const PAGE = (title, body) => `<!doctype html><html lang="en"><head>
 <title>${esc(title)} · ARIA Academy</title>
 <style>
 :root{--bg:#071018;--panel:#0d1b28;--panel2:#102534;--line:#1e3a4b;--text:#eff8f6;--muted:#9db7b5;--faint:#6b8a87;--accent:#57e0c4;--accent2:#52a8ff;--danger:#ff8d9a;--shadow:0 24px 70px rgba(0,0,0,.28)}
-*{box-sizing:border-box}html{background:var(--bg)}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}a{color:inherit}.auth-shell{min-height:100vh;display:grid;place-items:center;padding:28px}.auth-layout{width:min(920px,100%);display:grid;grid-template-columns:1fr 1.05fr;overflow:hidden;border:1px solid var(--line);border-radius:26px;background:var(--panel);box-shadow:var(--shadow)}.auth-aside{padding:42px;background:#142331}.brand{display:flex;align-items:center;gap:10px;font-weight:850;letter-spacing:-.02em;font-size:18px}.brand-mark{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#04211f;font-weight:900}.brand-accent{color:var(--accent)}.eyebrow{text-transform:uppercase;letter-spacing:.16em;color:var(--accent);font-size:11px;font-weight:800}.auth-aside h1{font-size:32px;line-height:1.08;letter-spacing:-.04em;margin:54px 0 14px}.auth-aside p{color:var(--muted);max-width:330px}.benefits{display:grid;gap:12px;margin-top:32px}.benefit{display:flex;gap:10px;align-items:flex-start;color:var(--muted);font-size:13px}.benefit b{display:block;color:var(--text);font-size:13px}.auth-form{padding:42px;background:rgba(7,16,24,.36)}.auth-form h2{font-size:26px;letter-spacing:-.03em;margin:28px 0 5px}.sub{color:var(--muted);font-size:14px;margin:0 0 22px}.gbtn,.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:12px;padding:12px 16px;font-size:14px;font-weight:750;cursor:pointer;text-decoration:none;transition:transform .15s,border-color .15s,background .15s}.gbtn{width:100%;background:#fff;color:#14202a;border:1px solid #fff}.gbtn:hover,.btn:hover{transform:translateY(-1px)}.gbtn svg{width:19px;height:19px}.or{display:flex;align-items:center;gap:12px;color:var(--faint);font-size:10px;letter-spacing:.13em;margin:22px 0 14px}.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}.field{display:grid;gap:6px;margin:14px 0}.field label{font-size:12px;color:var(--muted);font-weight:700}.field input,.link-input{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:12px 13px;color:var(--text);font-size:14px;outline:none}.field input:focus,.link-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(87,224,196,.12)}.hint{color:var(--faint);font-size:11px}.btn{border:1px solid transparent;background:linear-gradient(100deg,var(--accent),var(--accent2));color:#06211d;width:100%;margin-top:10px}.foot{color:var(--muted);font-size:13px;text-align:center;margin-top:20px}.foot a{color:var(--accent);font-weight:700;text-decoration:none}.err{background:rgba(255,80,100,.1);border:1px solid rgba(255,141,154,.35);color:#ffc0c7;font-size:13px;padding:11px 12px;border-radius:11px;margin-bottom:15px}.ok{background:rgba(87,224,196,.1);border:1px solid rgba(87,224,196,.3);color:#b8ffed;font-size:13px;padding:11px 12px;border-radius:11px;margin-bottom:15px}.portal-shell{width:min(1080px,100%);margin:0 auto;padding:28px 20px 64px}.portal-top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:30px}.portal-top .actions{display:flex;gap:8px;flex-wrap:wrap}.portal-top .btn{width:auto;margin:0;padding:9px 13px;font-size:12px;background:var(--panel);border-color:var(--line);color:var(--text)}.portal-top .btn.primary{background:linear-gradient(100deg,var(--accent),var(--accent2));color:#06211d;border-color:transparent}.portal-title{font-size:clamp(28px,4vw,42px);letter-spacing:-.045em;line-height:1.05;margin:0 0 6px}.portal-sub{color:var(--muted);font-size:14px}.portal-card{background:rgba(13,27,40,.86);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.16)}.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}.metric{padding:18px;border-radius:15px;background:linear-gradient(145deg,var(--panel2),rgba(16,37,52,.55));border:1px solid var(--line)}.metric .value{font-size:27px;font-weight:850;letter-spacing:-.04em;color:var(--accent)}.metric .label{font-size:11px;color:var(--muted);margin-top:3px}.portal-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.portal-section{margin-top:14px}.section-title{font-size:13px;font-weight:800;margin-bottom:12px}.section-title span{color:var(--accent)}.note{padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}.note:last-child{border-bottom:0}.notice{display:flex;gap:12px;align-items:flex-start;padding:15px;border-radius:14px;background:rgba(87,224,196,.08);border:1px solid rgba(87,224,196,.22);color:var(--muted);font-size:13px}.notice strong{display:block;color:var(--text);margin-bottom:3px}.link-card{margin-top:14px}.link-form{display:flex;gap:8px;flex-wrap:wrap}.link-form .link-input{flex:1;min-width:190px}.link-form .btn{width:auto;margin:0}.empty{color:var(--faint);padding:24px;text-align:center;font-size:13px}.leaderboard{display:grid;gap:8px}.leader-row{display:grid;grid-template-columns:38px 1fr auto auto;gap:10px;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}.leader-row .rank{color:var(--accent);font-weight:800}.leader-row .name{font-weight:700}.leader-row .muted{color:var(--muted);font-size:12px}.tag{display:inline-flex;background:rgba(87,224,196,.1);color:var(--accent);border:1px solid rgba(87,224,196,.2);border-radius:99px;padding:4px 10px;font-size:11px;font-weight:700}
-@media(max-width:760px){.auth-shell{display:block;padding:0}.auth-layout{display:block;min-height:100vh;border:0;border-radius:0}.auth-aside{padding:24px 20px}.auth-aside h1{font-size:28px;margin:26px 0 10px}.auth-aside p{font-size:13px}.benefits{grid-template-columns:1fr 1fr;margin-top:20px}.auth-form{padding:24px 20px 36px}.portal-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:1fr 1fr}.portal-top{align-items:flex-start;flex-direction:column}.leader-row{grid-template-columns:30px 1fr auto}.leader-row .muted{display:none}}
+*{box-sizing:border-box}html{background:var(--bg)}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}a{color:inherit}.auth-shell{min-height:100vh;display:grid;place-items:center;padding:28px}.auth-layout{width:min(920px,100%);display:grid;grid-template-columns:1fr 1.05fr;overflow:hidden;border:1px solid var(--line);border-radius:26px;background:var(--panel);box-shadow:var(--shadow)}.auth-aside{padding:42px;background:#142331}.brand{display:flex;align-items:center;gap:10px;font-weight:850;letter-spacing:-.02em;font-size:18px}.brand-mark{position:relative;display:block;width:38px;height:38px;overflow:hidden;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2))}.brand-mark:before,.brand-mark:after{content:"";position:absolute;display:block;width:7px;border-radius:5px;transform:skewX(-22deg);background:#04211f}.brand-mark:before{height:23px;left:11px;top:7px}.brand-mark:after{height:17px;left:20px;top:12px;opacity:.72}.brand-accent{color:var(--accent)}.eyebrow{text-transform:uppercase;letter-spacing:.16em;color:var(--accent);font-size:11px;font-weight:800}.auth-aside h1{font-size:32px;line-height:1.08;letter-spacing:-.04em;margin:54px 0 14px}.auth-aside p{color:var(--muted);max-width:330px}.benefits{display:grid;gap:12px;margin-top:32px}.benefit{display:flex;gap:10px;align-items:flex-start;color:var(--muted);font-size:13px}.benefit b{display:block;color:var(--text);font-size:13px}.auth-form{padding:42px;background:rgba(7,16,24,.36)}.auth-form h2{font-size:26px;letter-spacing:-.03em;margin:28px 0 5px}.sub{color:var(--muted);font-size:14px;margin:0 0 22px}.gbtn,.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:12px;padding:12px 16px;font-size:14px;font-weight:750;cursor:pointer;text-decoration:none;transition:transform .15s,border-color .15s,background .15s}.gbtn{width:100%;background:#fff;color:#14202a;border:1px solid #fff}.gbtn:hover,.btn:hover{transform:translateY(-1px)}.gbtn svg{width:19px;height:19px}.or{display:flex;align-items:center;gap:12px;color:var(--faint);font-size:10px;letter-spacing:.13em;margin:22px 0 14px}.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}.field{display:grid;gap:6px;margin:14px 0}.field label{font-size:12px;color:var(--muted);font-weight:700}.field input,.link-input{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:12px 13px;color:var(--text);font-size:14px;outline:none}.field input:focus,.link-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(87,224,196,.12)}.hint{color:var(--faint);font-size:11px}.btn{border:1px solid transparent;background:linear-gradient(100deg,var(--accent),var(--accent2));color:#06211d;width:100%;margin-top:10px}.foot{color:var(--muted);font-size:13px;text-align:center;margin-top:20px}.foot a{color:var(--accent);font-weight:700;text-decoration:none}.err{background:rgba(255,80,100,.1);border:1px solid rgba(255,141,154,.35);color:#ffc0c7;font-size:13px;padding:11px 12px;border-radius:11px;margin-bottom:15px}.ok{background:rgba(87,224,196,.1);border:1px solid rgba(87,224,196,.3);color:#b8ffed;font-size:13px;padding:11px 12px;border-radius:11px;margin-bottom:15px}.portal-shell{width:min(1080px,100%);margin:0 auto;padding:28px 20px 64px}.portal-top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:30px}.portal-top .actions{display:flex;gap:8px;flex-wrap:wrap}.portal-top .btn{width:auto;margin:0;padding:9px 13px;font-size:12px;background:var(--panel);border-color:var(--line);color:var(--text)}.portal-top .btn.primary{background:linear-gradient(100deg,var(--accent),var(--accent2));color:#06211d;border-color:transparent}.portal-title{font-size:clamp(28px,4vw,42px);letter-spacing:-.045em;line-height:1.05;margin:0 0 6px}.portal-sub{color:var(--muted);font-size:14px}.portal-card{background:rgba(13,27,40,.86);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.16)}.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}.metric{padding:18px;border-radius:15px;background:linear-gradient(145deg,var(--panel2),rgba(16,37,52,.55));border:1px solid var(--line)}.metric .value{font-size:27px;font-weight:850;letter-spacing:-.04em;color:var(--accent)}.metric .label{font-size:11px;color:var(--muted);margin-top:3px}.portal-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.portal-section{margin-top:14px}.section-title{font-size:13px;font-weight:800;margin-bottom:12px}.section-title span{color:var(--accent)}.note{padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}.note:last-child{border-bottom:0}.notice{display:flex;gap:12px;align-items:flex-start;padding:15px;border-radius:14px;background:rgba(87,224,196,.08);border:1px solid rgba(87,224,196,.22);color:var(--muted);font-size:13px}.notice strong{display:block;color:var(--text);margin-bottom:3px}.link-card{margin-top:14px}.link-form{display:flex;gap:8px;flex-wrap:wrap}.link-form .link-input{flex:1;min-width:190px}.link-form .btn{width:auto;margin:0}.empty{color:var(--faint);padding:24px;text-align:center;font-size:13px}.leaderboard{display:grid;gap:8px}.leader-row{display:grid;grid-template-columns:38px 1fr auto auto;gap:10px;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}.leader-row .rank{color:var(--accent);font-weight:800}.leader-row .name{font-weight:700}.leader-row .muted{color:var(--muted);font-size:12px}.tag{display:inline-flex;background:rgba(87,224,196,.1);color:var(--accent);border:1px solid rgba(87,224,196,.2);border-radius:99px;padding:4px 10px;font-size:11px;font-weight:700}
+@media(max-width:760px){.auth-shell{display:block;padding:0}.auth-layout{display:block;min-height:100vh;border:0;border-radius:0}.auth-aside{padding:20px}.auth-aside h1{font-size:28px;margin:22px 0 10px}.auth-aside p{font-size:13px}.auth-aside .benefits{display:none}.auth-form{padding:22px 20px 36px}.portal-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:1fr 1fr}.portal-top{align-items:flex-start;flex-direction:column}.leader-row{grid-template-columns:30px 1fr auto}.leader-row .muted{display:none}}
 @media(max-width:430px){.benefits{grid-template-columns:1fr}.metric-grid{grid-template-columns:1fr}.portal-shell{padding:20px 14px 40px}}
 </style></head><body>${body}</body></html>`;
 
@@ -232,11 +269,11 @@ router.get("/login", (req, res) => {
   const errMsg = err === "portal-not-configured" ? "Learner sign-in is not configured. Add PORTAL_SESSION_SECRET in Render, or keep GOOGLE_CLIENT_SECRET set for the secure fallback." :
     err === "google-not-configured" ? "Google sign-in isn't set up yet — create an account with email below, or ask ARIA to enable it." :
     err === "no-code" || err === "oauth-failed" || err === "oauth-state-invalid" ? "Google sign-in didn't complete securely. Please try again." :
-    err === "logged-out" ? "You've been logged out." : "";
+    err === "logged-out" ? "You've been logged out." : err === "auth-rate-limited" ? "Too many sign-in attempts. Please wait a few minutes and try again." : "";
   const body = `
   <div class="auth-shell"><div class="auth-layout">
     <section class="auth-aside">
-      <div class="brand"><span class="brand-mark">A</span><span>ARIA <span class="brand-accent">Academy</span></span></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>ARIA <span class="brand-accent">Academy</span></span></div>
       <div class="eyebrow" style="margin-top:42px">Learner account</div>
       <h1>A learning space that remembers your progress.</h1>
       <p>Connect the portal to your WhatsApp academy identity and turn every lesson, challenge, and project into a clear next step.</p>
@@ -292,7 +329,7 @@ router.get("/", portalAuth, (req, res) => {
   const focus = space?.skills?.focus?.length ? space.skills.focus.map((s) => `<span class="tag">${esc(s.skill)} · ${Math.round(s.confidence)}%</span>`).join(" ") : `<div class="empty">No focus areas yet.</div>`;
   const next = space?.next?.text ? inlineText(space.next.text) : "Start with your first academy track.";
   const body = `<div class="portal-shell">
-    <header class="portal-top"><div><div class="brand"><span class="brand-mark">A</span><span>ARIA <span class="brand-accent">Academy</span></span></div><div class="eyebrow" style="margin-top:24px">Learner space</div><h1 class="portal-title">Welcome, ${esc(name)}.</h1><p class="portal-sub">A private view of your learning rhythm, evidence, and next move.</p></div><div class="actions"><a class="btn primary" href="/portal/leaderboard">Leaderboard</a><a class="btn" href="/portal/logout">Log out</a></div></header>
+    <header class="portal-top"><div><div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>ARIA <span class="brand-accent">Academy</span></span></div><div class="eyebrow" style="margin-top:24px">Learner space</div><h1 class="portal-title">Welcome, ${esc(name)}.</h1><p class="portal-sub">A private view of your learning rhythm, evidence, and next move.</p></div><div class="actions"><a class="btn primary" href="/portal/leaderboard">Leaderboard</a><a class="btn" href="/portal/logout">Log out</a></div></header>
     ${linkedNotice}${linkError}${linkPanel}
     <div class="metric-grid"><div class="metric"><div class="value">${Number(stats.xp) || 0}</div><div class="label">XP earned</div></div><div class="metric"><div class="value">${Number(stats.streak) || 0}d</div><div class="label">Current streak</div></div><div class="metric"><div class="value">${Number(sessions) || 0}</div><div class="label">Study attempts</div></div></div>
     <div class="portal-grid">

@@ -71,6 +71,24 @@ const MAX_CONCURRENT_DOWNLOADS = Number(process.env.ANIME_MAX_CONCURRENT || 2);
 const MAX_DOWNLOAD_MB = Number(process.env.ANIME_MAX_MB || 1500);
 // Hard WhatsApp media ceiling. Above this we refuse to upload and say why.
 const WHATSAPP_MAX_MB = Number(process.env.ANIME_WHATSAPP_MAX_MB || 150);
+const MEDIA_RETENTION_MS = Math.max(10 * 60 * 1000, Number(process.env.ANIME_MEDIA_RETENTION_MS || 6 * 60 * 60 * 1000));
+const ORPHAN_RETENTION_MS = Math.max(MEDIA_RETENTION_MS, Number(process.env.ANIME_ORPHAN_RETENTION_MS || 24 * 60 * 60 * 1000));
+
+function cleanupTempFiles(now = Date.now()) {
+  try {
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+    const protectedPaths = new Set([...jobs.values()].map((j) => j.result?.filePath).filter(Boolean));
+    for (const file of fs.readdirSync(TEMP_DIR)) {
+      if (file === ".gitkeep") continue;
+      const full = path.join(TEMP_DIR, file);
+      const stat = fs.statSync(full);
+      if (!stat.isFile() || protectedPaths.has(full)) continue;
+      const age = now - stat.mtimeMs;
+      const limit = /\.part$|\.ytdl$/i.test(file) ? ORPHAN_RETENTION_MS : MEDIA_RETENTION_MS;
+      if (age > limit) fs.unlinkSync(full);
+    }
+  } catch (_) {}
+}
 
 const DEFAULT_HEADERS = {
   "User-Agent":
@@ -239,9 +257,11 @@ let running = 0;
 // the dashboard Downloads panel instead of silently vanishing on restart.
 function persistQueue() {
   try {
+    fs.mkdirSync(path.dirname(QUEUE_FILE), { recursive: true });
     const out = queue
       .map((id) => jobs.get(id))
       .filter(Boolean)
+      .slice(0, 100)
       .map((j) => ({
         id: j.id,
         name: j.name,
@@ -251,7 +271,9 @@ function persistQueue() {
         chatId: j.chatId,
         createdAt: j.createdAt,
       }));
-    fs.writeFileSync(QUEUE_FILE, JSON.stringify(out));
+    const tmp = `${QUEUE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(out));
+    fs.renameSync(tmp, QUEUE_FILE);
   } catch (_) {}
 }
 
@@ -630,8 +652,16 @@ async function runJob(job) {
         }, { quoted: job.quotedMsg });
         step(src.provider, "send", true, "delivered ✓");
       } catch (e) {
-        step(src.provider, "send", false, e?.message || "upload failed");
-        job.failures.push(jobError("UPLOAD_FAILED", src.provider, "send", e?.message || "upload failed", true));
+        const uploadError = e?.message || "upload failed";
+        const failure = jobError("UPLOAD_FAILED", src.provider, "send", uploadError, true);
+        step(src.provider, "send", false, uploadError);
+        job.failures.push(failure);
+        job.status = "failed";
+        job.finishedAt = Date.now();
+        job.error = failure;
+        send(`❌ WhatsApp could not receive *${job.name}* Ep ${job.episode}. The download was cleaned up; retry when the connection is stable.`);
+        emit(job);
+        return job;
       } finally {
         try { fs.unlinkSync(dl.filePath); } catch (_) {}
       }
@@ -726,5 +756,7 @@ module.exports = {
 // still create job records, but must not inherit or execute live downloads.
 if (process.env.ANIME_DISABLE_WORKER !== "1") {
   loadQueue();
+  cleanupTempFiles();
+  setInterval(() => cleanupTempFiles(), 15 * 60 * 1000).unref();
   checkYtDlp();
 }

@@ -58,9 +58,16 @@ function loadWatchlist() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
   catch (_) { return []; }
 }
-function saveWatchlist(list) {
-  try { fs.writeFileSync(DATA_FILE, JSON.stringify(list, null, 2)); } catch (_) {}
+function atomicJsonWrite(file, value) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+    try { fs.chmodSync(file, 0o600); } catch (_) {}
+  } catch (_) {}
 }
+function saveWatchlist(list) { atomicJsonWrite(DATA_FILE, list); }
 function addToWatchlist(entry) {
   const list = loadWatchlist();
   if (!list.some((e) => e.id === entry.id && e.provider === entry.provider)) list.push(entry);
@@ -81,9 +88,7 @@ function loadProgress() {
   try { return JSON.parse(fs.readFileSync(PROGRESS_FILE, "utf8")); }
   catch (_) { return {}; }
 }
-function saveProgress(p) {
-  try { fs.writeFileSync(PROGRESS_FILE, JSON.stringify(p, null, 2)); } catch (_) {}
-}
+function saveProgress(p) { atomicJsonWrite(PROGRESS_FILE, p); }
 
 function trackProgress({ id, provider, title, cover, episode, quality, status }) {
   const p = loadProgress();
@@ -376,7 +381,7 @@ async function getSchedule(day = new Date().getDay()) {
   const end = now + 7 * dayMs;
   const data = await anilist(
     `query($start:Int,$end:Int){Page(perPage:60){airingSchedules(airingAt_greater:$start,airingAt_lesser:$end,sort:TIME){
-      airingAt episode media{id title{english romaji} coverImage{large} format averageScore}}}}`,
+      airingAt episode media{id title{english romaji} coverImage{large} format averageScore isAdult}}}}`,
     { start, end }
   );
   const airings = data?.Page?.airingSchedules || [];
@@ -392,7 +397,11 @@ async function getSchedule(day = new Date().getDay()) {
       rating: a.media.averageScore ? a.media.averageScore / 10 : null,
       type: a.media.format,
       provider: "anilist",
+      isAdult: a.media.isAdult === true,
+      genres: [],
+      tags: [],
     }))
+    .filter(isCatalogSafe)
     .slice(0, 24);
 }
 

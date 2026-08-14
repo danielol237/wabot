@@ -13,6 +13,12 @@ const router = express.Router();
 const service = require("./tools/animeService");
 const { enqueueAnimeJob, retryJob, snapshot } = require("./tools/animeJobManager");
 const { resolveEpisode } = require("./tools/sourceResolver");
+const { issueMediaToken, verifyMediaToken, issueFileToken, verifyFileToken, validateMediaTarget } = require("./utils/mediaAccess");
+const { error: logError } = require("./utils/logger");
+function safeBrowserError(res, scope, err) {
+  logError(`[${scope}]`, err?.stack || err?.message || err);
+  return res.status(500).send("This dashboard page is temporarily unavailable. Please try again.");
+}
 
 router.use(express.urlencoded({ extended: true }));
 
@@ -117,8 +123,7 @@ h1{font-size:26px;font-weight:900;margin-bottom:4px}
 .step-ok{color:var(--green)}.step-no{color:var(--red)}
 .fab{position:fixed;bottom:24px;right:24px;background:var(--accent);color:#fff;border:none;border-radius:99px;padding:12px 16px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(139,124,246,.4)}
 @media(max-width:720px){
-  .detail{flex-direction:column}.detail .poster{width:100%;max-width:200px}
-  .nav-links{display:none}
+  .top-in{padding:10px 14px;display:grid;grid-template-columns:auto 1fr;gap:10px}.brand{font-size:15px}.search{grid-column:1/-1;grid-row:2}.search input{min-width:0}.search button{padding:0 14px}.nav-links{display:none}.main{padding:20px 14px 48px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card .body{padding:10px}.detail{display:grid;grid-template-columns:88px minmax(0,1fr);gap:14px;padding:14px}.detail .poster{width:88px;max-width:none}.detail h1{font-size:22px}.detail .desc{grid-column:1/-1;font-size:13px}.epgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.ep{padding:10px}.ep .watch{min-height:34px}.job{padding:14px}.fab{right:14px;bottom:14px}
 }
 </style></head><body>
 <div class="top"><div class="top-in">
@@ -272,7 +277,7 @@ async function downloadsPage(req) {
       ${j.progress ? `<div style="margin-top:8px"><div style="background:var(--panel2);border-radius:6px;height:10px;overflow:hidden"><div style="background:linear-gradient(90deg,var(--accent),var(--accent2));height:100%;width:${Math.min(100, Math.round(j.progress.percent||0))}%"></div></div><div style="color:var(--muted);font-size:11px;margin-top:4px">${Math.round(j.progress.percent||0)}% ${j.progress.speed?"· "+esc(j.progress.speed):""}${j.progress.eta?" · ETA "+esc(j.progress.eta):""}</div></div>` : ""}
       ${j.current ? `<div class="row" style="margin-top:4px"><span class="k">stage</span><span class="v">${esc(j.current.provider)} · ${esc(j.current.stage)}</span></div>` : ""}
       ${j.result ? `<div class="row" style="margin-top:4px"><span class="k">result</span><span class="v">${(j.result.size / 1048576).toFixed(1)} MB · ${esc(j.result.provider)}</span></div>` : ""}
-      ${j.result && j.source === "browser" ? `<a class="watch" style="margin-top:10px" href="/dashboard/anime/file/${esc(j.id)}">⬇️ Download file</a>` : ""}
+      ${j.result && j.source === "browser" && issueFileToken(j.id) ? `<a class="watch" style="margin-top:10px" href="/dashboard/anime/file/${esc(j.id)}?t=${encodeURIComponent(issueFileToken(j.id))}">⬇️ Download file</a>` : ""}
       ${j.error ? `<div class="row" style="margin-top:4px"><span class="k" style="color:var(--red)">error</span><span class="v" style="color:var(--red)">${esc(j.error.code)}: ${esc(j.error.message)}</span></div>` : ""}
       ${j.steps.length ? `<div class="steps">${j.steps.slice(-10).map((s) => `<div class="${s.ok ? "step-ok" : "step-no"}">${s.ok ? "✓" : "✗"} ${esc(s.provider)} ${esc(s.stage)} — ${esc(s.message)}</div>`).join("")}</div>` : ""}
       ${j.status === "failed" ? `<form method="post" action="/dashboard/anime/retry" style="margin-top:10px">${csrfField(req)}<input type="hidden" name="id" value="${esc(j.id)}" /><button class="watch">↻ Retry</button></form>` : ""}
@@ -292,6 +297,7 @@ async function detailPage(provider, id, req) {
   const wl = service.loadWatchlist().find((e) => e.id === id && e.provider === provider);
   Object.assign(entry, wl || {});
   const d = await service.getDetails(entry);
+  if (!service.isCatalogSafe(d)) return layout("Title unavailable", { html: `<div class="empty"><h1>Title unavailable</h1><p>This title is excluded from the catalog policy.</p><a class="watch" href="/dashboard/anime/browse">Back to browse</a></div>` });
   const eps = await service.getEpisodes(entry);
   const inWl = wl ? true : false;
   // Remember the last quality picked for this title.
@@ -358,26 +364,28 @@ async function detailPage(provider, id, req) {
 
 // ── Routes ────────────────────────────────────────────────────────
 
-router.get("/", async (req, res) => { try { res.send(await homePage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/search", async (req, res) => { try { res.send(await searchPage(req.query.q || "")); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/trending", async (req, res) => { try { res.send(await trendingPage()); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/latest", async (req, res) => { try { res.send(await latestPage()); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/watchlist", async (req, res) => { try { res.send(await watchlistPage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/downloads", async (req, res) => { try { res.send(await downloadsPage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/browse", async (req, res) => { try { res.send(await browsePage(req)); } catch (e) { res.status(500).send(esc(e.message)); } });
-router.get("/schedule", async (req, res) => { try { res.send(await schedulePage(req.query.day ?? new Date().getDay())); } catch (e) { res.status(500).send(esc(e.message)); } });
+router.get("/", async (req, res) => { try { res.send(await homePage(req)); } catch (e) { safeBrowserError(res, "browser-home", e); } });
+router.get("/search", async (req, res) => { try { res.send(await searchPage(req.query.q || "")); } catch (e) { safeBrowserError(res, "browser-search", e); } });
+router.get("/trending", async (req, res) => { try { res.send(await trendingPage()); } catch (e) { safeBrowserError(res, "browser-trending", e); } });
+router.get("/latest", async (req, res) => { try { res.send(await latestPage()); } catch (e) { safeBrowserError(res, "browser-latest", e); } });
+router.get("/watchlist", async (req, res) => { try { res.send(await watchlistPage(req)); } catch (e) { safeBrowserError(res, "browser-watchlist", e); } });
+router.get("/downloads", async (req, res) => { try { res.send(await downloadsPage(req)); } catch (e) { safeBrowserError(res, "browser-downloads", e); } });
+router.get("/browse", async (req, res) => { try { res.send(await browsePage(req)); } catch (e) { safeBrowserError(res, "browser-browse", e); } });
+router.get("/schedule", async (req, res) => { try { res.send(await schedulePage(req.query.day ?? new Date().getDay())); } catch (e) { safeBrowserError(res, "browser-schedule", e); } });
 router.get("/random", async (req, res) => {
   try {
     const a = await service.getRandom();
     if (!a) return res.redirect("/dashboard/anime/browse?random=failed");
     return res.redirect(`/dashboard/anime/${encodeURIComponent(a.provider)}/${encodeURIComponent(a.id)}`);
-  } catch (e) { res.status(500).send(esc(e.message)); }
+  } catch (e) { safeBrowserError(res, "browser-random", e); }
 });
 
 // Serve a finished browser-job file.
 router.get("/file/:id", (req, res) => {
   try {
-    const job = snapshot().recent.find((j) => j.id === req.params.id) || (() => { try { return require("./tools/animeJobManager").getJob(req.params.id); } catch (_) { return null; } })();
+    const jobId = String(req.params.id);
+    if (!verifyFileToken(req.query.t, jobId)) return res.status(401).send("This download link has expired. Return to Downloads and try again.");
+    const job = snapshot().recent.find((j) => j.id === jobId) || (() => { try { return require("./tools/animeJobManager").getJob(jobId); } catch (_) { return null; } })();
     if (!job?.result?.filePath || !job.result.size) return res.status(404).send("File not found or not ready.");
     const fs = require("fs");
     if (!fs.existsSync(job.result.filePath)) return res.status(404).send("File no longer on disk.");
@@ -385,7 +393,7 @@ router.get("/file/:id", (req, res) => {
     res.setHeader("Content-Length", job.result.size);
     res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent((job.name || "anime") + "-ep" + (job.episode || "") + ".mp4")}"`);
     fs.createReadStream(job.result.filePath).pipe(res);
-  } catch (e) { res.status(500).send(esc(e.message)); }
+  } catch (e) { safeBrowserError(res, "browser-file", e); }
 });
 
 // ── Watch online (stream) ────────────────────────────────────────
@@ -408,8 +416,9 @@ async function watchPage(provider, id, req) {
     return layout("Watch", { html: `<h1>${esc(d.title)}</h1><div class="empty">Couldn't resolve a stream for ep ${ep}. ${esc(why)}</div>` });
   }
 
-  // Proxy URL that adds the right headers + CORS so hls.js can fetch it.
-  const proxied = `/dashboard/anime/proxy?u=${encodeURIComponent(src.url)}&r=${encodeURIComponent(src.headers?.Referer || src.headers?.referer || "")}`;
+  const mediaToken = issueMediaToken({ url: src.url, headers: src.headers, provider: src.provider });
+  if (!mediaToken) return layout("Watch", { html: `<h1>${esc(d.title)}</h1><div class="empty">Playback is not configured. Set a media signing secret and try again.</div>` });
+  const proxied = `/dashboard/anime/proxy?t=${encodeURIComponent(mediaToken)}`;
 
   return layout("Watch", { html: `
     <h1>${esc(d.title)} — Ep ${ep}</h1>
@@ -431,22 +440,24 @@ async function watchPage(provider, id, req) {
 }
 
 // Relay an m3u8/segment, preserving the provider's required headers (referer).
-router.get("/proxy", (req, res) => {
-  const target = req.query.u;
-  const referer = req.query.r || "";
-  if (!target || !/^https?:\/\//i.test(target)) return res.status(400).send("bad url");
-  const lib = target.startsWith("https:") ? https : http;
-  const headers = {};
-  if (referer) headers.Referer = referer;
-  headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
-  const p = lib.get(target, { headers }, (up) => {
-    res.status(up.statusCode || 200);
-    res.setHeader("Content-Type", up.headers["content-type"] || "application/vnd.apple.mpegurl");
-    if (up.headers["content-length"]) res.setHeader("Content-Length", up.headers["content-length"]);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    up.pipe(res);
+router.get("/proxy", async (req, res) => {
+  const payload = verifyMediaToken(req.query.t);
+  if (!payload) return res.status(401).send("This playback link has expired. Open the episode again.");
+  const target = await validateMediaTarget(payload.url);
+  if (!target.ok) return res.status(403).send("This media source is not authorized.");
+  const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36", ...(payload.headers || {}) };
+  if (req.headers.range) headers.Range = req.headers.range;
+  const upstream = https.get(target.url, { headers, lookup: (_hostname, _options, callback) => callback(null, target.address, target.family) }, (response) => {
+    res.status(response.statusCode || 200);
+    for (const key of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified"]) if (response.headers[key]) res.setHeader(key, response.headers[key]);
+    res.setHeader("Cache-Control", "private, max-age=60");
+    response.pipe(res);
   });
-  p.on("error", (e) => { if (!res.headersSent) res.status(502).send("proxy error: " + e.message); else res.end(); });
+  const closeUpstream = () => { if (!upstream.destroyed) upstream.destroy(); };
+  req.once("aborted", closeUpstream);
+  res.once("close", closeUpstream);
+  upstream.setTimeout(20000, () => upstream.destroy(new Error("upstream timeout")));
+  upstream.on("error", () => { if (!res.headersSent) res.status(502).send("Media source is temporarily unavailable."); else res.end(); });
 });
 
 router.get("/watch/:provider/:id", async (req, res) => {

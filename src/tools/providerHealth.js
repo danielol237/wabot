@@ -15,12 +15,13 @@ const KEY_ENV = {
 };
 
 // Each probe returns { name, ok, status, latency, error, keySet, checkedAt }.
-async function probe(name, url, headers) {
+async function probe(name, url, headers, auth = "bearer") {
   const t = Date.now();
   const key = process.env[KEY_ENV[name]];
   if (!key) return { name, ok: false, status: null, latency: 0, error: "no API key configured", keySet: false };
   try {
-    const res = await axios.get(url, { timeout: 8000, headers: { ...headers, Authorization: `Bearer ${key}` } });
+    const authHeaders = auth === "xi-api-key" ? { "xi-api-key": key } : { Authorization: `Bearer ${key}` };
+    const res = await axios.get(url, { timeout: 8000, headers: { ...headers, ...authHeaders } });
     return { name, ok: res.status < 400, status: res.status, latency: Date.now() - t, error: "", keySet: true };
   } catch (e) {
     const status = e.response?.status;
@@ -37,7 +38,7 @@ const PROBES = [
   () => probe("Groq", "https://api.groq.com/openai/v1/models", { "Content-Type": "application/json" }),
   () => probe("Cerebras", "https://api.cerebras.ai/v1/models", { "Content-Type": "application/json" }),
   () => probe("Gemini", "https://generativelanguage.googleapis.com/v1beta/models", { "x-goog-api-key": process.env.GEMINI_API_KEY || "", "Content-Type": "application/json" }),
-  () => probe("ElevenLabs", "https://api.elevenlabs.io/v1/user", { "Content-Type": "application/json" }),
+  () => probe("ElevenLabs", "https://api.elevenlabs.io/v1/user", { "Content-Type": "application/json" }, "xi-api-key"),
 ];
 
 // Gemini uses x-goog-api-key, not Bearer — override its probe.

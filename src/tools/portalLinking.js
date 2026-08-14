@@ -17,8 +17,11 @@ function load() {
 }
 function save() {
   try {
-    fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(state, null, 2));
+    fs.mkdirSync(path.dirname(FILE), { recursive: true, mode: 0o700 });
+    const tmp = `${FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, FILE);
+    try { fs.chmodSync(FILE, 0o600); } catch (_) {}
   } catch (_) {}
 }
 function clean() {

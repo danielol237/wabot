@@ -48,7 +48,13 @@ function persistSessions() {
     if (v > now) out[k] = { expires: v };
     else sessions.delete(k);
   }
-  try { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(out)); } catch (_) {}
+  try {
+    fs.mkdirSync(path.dirname(SESSIONS_FILE), { recursive: true, mode: 0o700 });
+    const tmp = `${SESSIONS_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(out), { mode: 0o600 });
+    fs.renameSync(tmp, SESSIONS_FILE);
+    try { fs.chmodSync(SESSIONS_FILE, 0o600); } catch (_) {}
+  } catch (_) {}
 }
 loadSessions();
 
@@ -109,7 +115,21 @@ function constantTimeEqual(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
+function ensureCookies(req) {
+  if (req.cookies) return req.cookies;
+  const cookies = {};
+  const raw = req.headers.cookie || "";
+  for (const part of raw.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (!key) continue;
+    try { cookies[key] = decodeURIComponent(value.join("=") || ""); } catch (_) { cookies[key] = value.join("=") || ""; }
+  }
+  req.cookies = cookies;
+  return cookies;
+}
+
 function checkAuth(req, res, next) {
+  ensureCookies(req);
   const pw = process.env.DASHBOARD_PASSWORD;
   if (!pw) return res.status(503).send(renderPage("Configuration required", loginForm(), false, true));
   const token = req.cookies?.["aria_session"];
@@ -142,7 +162,7 @@ function checkAuth(req, res, next) {
 
 function loginForm() {
   return `<div class="login">
-    <div class="login-logo" aria-hidden="true">◢</div>
+    <div class="login-logo" aria-hidden="true"></div>
     <div class="login-kicker">OWNER CONTROL CENTER</div>
     <h1>Welcome back.</h1>
     <p class="login-lede">Monitor ARIA, inspect activity, manage downloads, and keep the bot healthy from one private workspace.</p>
@@ -177,6 +197,10 @@ router.post("/login", (req, res) => {
     recordLoginAttempt(ip);
     return res.status(401).send(renderPage("Login", loginForm() + '<p class="error">Wrong key.</p>', false, true));
   });
+});
+
+router.get("/api/csrf", checkAuth, (req, res) => {
+  res.json({ csrf: csrfFor(req) });
 });
 
 router.post("/logout", (req, res) => {
@@ -394,7 +418,7 @@ function renderLiveStrip(ls) {
       <div class="page-title">Command center</div><div class="page-sub">A calm overview of ARIA’s current state and the next useful action.</div>
       <div class="hero command-hero">
         <div class="hrow">
-          <div class="avatar">◢</div>
+          <div class="avatar" aria-hidden="true"></div>
           <div><h2>ARIA core <span class="badge ${configured ? "b-green" : "b-amber"}" id="core-badge">● ${configured ? "ONLINE" : "NEEDS AI CONFIG"}</span></h2>
             <div class="sub">Primary model <b>${modelLabel}</b> · fallback <b>${fallbackLabel}</b></div>
           </div>
@@ -411,6 +435,7 @@ function renderLiveStrip(ls) {
       <div class="quick-grid">
         <a class="quick-card" href="/anime"><span class="quick-icon">A</span><span><b>Open anime</b><small>Search, watch, and download episodes</small></span><strong>→</strong></a>
         <a class="quick-card" href="/portal/login"><span class="quick-icon">L</span><span><b>Open learner portal</b><small>View progress and link WhatsApp history</small></span><strong>→</strong></a>
+        <a class="quick-card" href="/qr"><span class="quick-icon">QR</span><span><b>Pair WhatsApp</b><small>Open the protected QR or pairing-code screen</small></span><strong>→</strong></a>
         <button class="quick-card" data-pane="health"><span class="quick-icon">H</span><span><b>Check system health</b><small>Inspect media runtimes and provider status</small></span><strong>→</strong></button>
       </div>
       ${configured ? "" : `<div class="card callout-warning"><strong>AI is not configured yet.</strong><span>Add at least one AI provider key in the deployment environment, then restart ARIA. The rest of the cockpit can be explored, but replies will fail until a model is available.</span></div>`}
@@ -630,7 +655,7 @@ function renderBrainPane(b) {
         ${(b.providers || []).length ? b.providers.map((p) => {
           const circ = p.circuit === "open" ? `<span class="badge b-red">🔴 open</span>` : p.circuit === "half-open" ? `<span class="badge b-amber">🟠 half-open</span>` : `<span class="badge b-green">🟢 closed</span>`;
           const color = p.score >= 70 ? "var(--green)" : p.score >= 40 ? "var(--amber)" : "var(--red)";
-          return `<div class="row"><span class="k mono">${p.provider}</span><span class="v">${p.score}/100 ${circ}</span></div>${bar(p.score, 100, color)}${p.circuit === "open" ? `<div style="color:var(--faint);font-size:10.5px;margin:-6px 0 10px">retry in ${Math.ceil((p.retryAfterMs || 0) / 60000)}min · ${p.lastError || ""}</div>` : ""}`;
+          return `<div class="row"><span class="k mono">${p.provider}</span><span class="v">${p.score}/100 ${circ}</span></div>${bar(p.score, 100, color)}${p.circuit === "open" ? `<div style="color:var(--faint);font-size:10.5px;margin:-6px 0 10px">retry in ${Math.ceil((p.retryAfterMs || 0) / 60000)}min · ${esc(p.lastError || "")}</div>` : ""}`;
         }).join("") : `<div class="empty">No provider activity yet. Send !animedl to start.</div>`}
       </div>
     </div>`;
@@ -678,7 +703,7 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .app{display:flex;min-height:100vh}
 .sidebar{width:240px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
 .sb-brand{display:flex;align-items:center;gap:11px;padding:0 8px;margin-bottom:26px}
-.sb-logo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:19px;font-weight:800;box-shadow:0 4px 12px var(--brand-soft)}
+.sb-logo{position:relative;width:38px;height:38px;overflow:hidden;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--brand2));box-shadow:0 4px 12px var(--brand-soft)}.sb-logo:before,.sb-logo:after{content:"";position:absolute;display:block;width:7px;border-radius:5px;transform:skewX(-22deg);background:#fff}.sb-logo:before{height:23px;left:11px;top:7px}.sb-logo:after{height:17px;left:20px;top:12px;opacity:.72}
 .sb-name{font-size:16px;font-weight:800;color:var(--text);letter-spacing:-.01em}
 .sb-name small{display:block;font-size:11px;color:var(--muted);font-weight:600}
 .sb-group{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--faint);font-weight:700;padding:0 10px;margin:16px 0 6px}
@@ -699,14 +724,14 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .hero{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px;margin-bottom:22px;box-shadow:var(--shadow)}
 .command-hero{background:linear-gradient(135deg,#11183e,#202454 68%,#1c3c53);border-color:rgba(165,180,252,.24)}
 .hero-meta{color:#aeb7d1;font-size:12px;margin-top:8px}
-.quick-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 16px}
+.quick-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:0 0 16px}
 .quick-card{display:flex;align-items:center;gap:11px;text-align:left;width:100%;padding:15px;border:1px solid var(--line);border-radius:13px;background:var(--panel);color:var(--text);text-decoration:none;cursor:pointer;transition:.15s}
 .quick-card:hover{transform:translateY(-1px);border-color:var(--line2);box-shadow:var(--shadow)}
 .quick-card>span:nth-child(2){flex:1;min-width:0}.quick-card b{display:block;font-size:13px}.quick-card small{display:block;color:var(--muted);font-size:11px;margin-top:3px;line-height:1.35}.quick-card>strong{color:var(--accent);font-size:18px}.quick-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--brand-soft);color:var(--accent);font-weight:800;font-size:12px;flex-shrink:0}
 .callout-warning{display:flex;gap:10px;align-items:flex-start;border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.07)}.callout-warning strong{color:var(--amber);font-size:13px;white-space:nowrap}.callout-warning span{color:var(--muted);font-size:12px}
 
 .hero .hrow{display:flex;align-items:center;gap:14px}
-.hero .avatar{width:52px;height:52px;border-radius:15px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0;color:#fff}
+.hero .avatar{position:relative;width:52px;height:52px;overflow:hidden;border-radius:15px;background:linear-gradient(135deg,var(--brand),var(--brand2));flex-shrink:0}.hero .avatar:before,.hero .avatar:after{content:"";position:absolute;display:block;width:10px;border-radius:6px;transform:skewX(-22deg);background:#fff}.hero .avatar:before{height:32px;left:16px;top:10px}.hero .avatar:after{height:23px;left:29px;top:17px;opacity:.72}
 .hero h2{font-size:18px;font-weight:800;display:flex;align-items:center;gap:10px;color:var(--text)}
 .hero .sub{color:var(--muted);font-size:13px;margin-top:3px}
 .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
@@ -752,7 +777,7 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
 .login{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line2);border-radius:22px;padding:38px 30px;text-align:center;box-shadow:var(--shadow)}
-.login-logo{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--cyan));display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:800}
+.login-logo{position:relative;width:56px;height:56px;overflow:hidden;margin:0 auto 14px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--cyan))}.login-logo:before,.login-logo:after{content:"";position:absolute;display:block;width:9px;border-radius:6px;transform:skewX(-22deg);background:#fff}.login-logo:before{height:34px;left:17px;top:10px}.login-logo:after{height:25px;left:29px;top:17px;opacity:.72}
 .login h1{font-size:20px;font-weight:800}
 .login p{color:var(--muted);font-size:13px;margin:8px 0 22px}.login-kicker{font-size:10px;letter-spacing:.14em;color:var(--accent);font-weight:800;margin-bottom:14px}.login-lede{line-height:1.55;max-width:300px;margin-left:auto!important;margin-right:auto!important}.login-label{display:block;text-align:left;color:var(--muted);font-size:12px;font-weight:700;margin:0 0 7px}.login-foot{display:flex;justify-content:space-between;gap:12px;margin-top:16px;color:var(--faint);font-size:11px}.login-foot a{color:var(--accent);text-decoration:none;font-weight:700}
 .login input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:13px;border-radius:11px;font-size:15px;outline:none;margin-bottom:12px}
@@ -764,7 +789,7 @@ body{font-family:-apple-system,'Segoe UI','Inter',system-ui,sans-serif;backgroun
 .hint{color:var(--faint);margin-top:12px;font-size:11px}
 
 @media(max-width:820px){
-  .sidebar{width:100%;height:auto;position:sticky;top:0;z-index:40;padding:10px 12px;border-right:0;border-bottom:1px solid var(--line);display:block}
+  .sidebar{width:100%;height:auto;position:sticky;top:0;z-index:40;padding:10px 12px;border-right:0;border-bottom:1px solid var(--line);display:block;overflow-x:auto}
   .app{display:block}.sb-brand{padding:0 4px;margin-bottom:10px}.sb-name,.sb-group,.sb-online span{display:none}.sb-bottom{position:absolute;right:12px;top:12px;border:0;padding:0}.logout{width:auto;padding:7px 10px;font-size:11px}.navitem{display:inline-flex;justify-content:center;padding:8px 10px;margin:2px;font-size:11px}.navitem span:not(.ico){display:inline}.navitem .ico{font-size:14px;width:auto}.main{max-width:none;padding:22px 16px 50px}.grid2{grid-template-columns:1fr}.quick-grid{grid-template-columns:1fr}.theme-toggle{top:12px;right:12px}
 }
 </style>
@@ -774,7 +799,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 <div class="app">
   <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
   <aside class="sidebar">
-    <div class="sb-brand"><div class="sb-logo">◢</div><div class="sb-name">ARIA<small>control center</small></div></div>
+    <div class="sb-brand"><div class="sb-logo" aria-hidden="true"></div><div class="sb-name">ARIA<small>control center</small></div></div>
     <div class="sb-group">Overview</div>
     <div class="navitem active" data-pane="home"><span class="ico">◉</span><span>Command</span></div>
     <div class="navitem" data-pane="activity"><span class="ico">📈</span><span>Activity</span></div>
@@ -811,6 +836,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 const CSRF=${JSON.stringify(csrf || "")};
 const titles={home:['Command',"ARIA core · live telemetry"],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
+const htmlEscClient=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
   document.querySelectorAll('.pane').forEach(x=>x.classList.remove('show'));
@@ -853,16 +879,16 @@ async function openLearner(uid){
     html+='<div class="row"><span class="k">XP</span><span class="v">'+(d.stats?.xp||0)+'</span></div>';
     html+='<div class="row"><span class="k">Streak</span><span class="v">'+(d.stats?.streak||0)+'d</span></div>';
     html+='<div class="row"><span class="k">Attempts</span><span class="v">'+(d.stats?.attempts||0)+'</span></div>';
-    if(d.career) html+='<div class="row"><span class="k">Best-fit</span><span class="v">'+d.career.emoji+' '+d.career.role+' ('+d.career.fit+'%)</span></div>';
-    if(d.recommendation) html+='<div class="feed-item" style="margin-top:8px"><div class="feed-ico">🎯</div><div class="feed-body"><div class="m">'+d.recommendation.reason+'</div>'+(d.recommendation.action?'<div class="s">→ '+d.recommendation.action+'</div>':'')+'</div></div>';
+    if(d.career) html+='<div class="row"><span class="k">Best-fit</span><span class="v">'+htmlEscClient(d.career.emoji)+' '+htmlEscClient(d.career.role)+' ('+Number(d.career.fit||0)+'%)</span></div>';
+    if(d.recommendation) html+='<div class="feed-item" style="margin-top:8px"><div class="feed-ico">🎯</div><div class="feed-body"><div class="m">'+htmlEscClient(d.recommendation.reason)+'</div>'+(d.recommendation.action?'<div class="s">→ '+htmlEscClient(d.recommendation.action)+'</div>':'')+'</div></div>';
     if(d.dna&&d.dna.length){
       html+='<div style="margin-top:12px"><b>DNA</b></div>';
-      for(const c of d.dna) html+='<div class="row"><span class="k">'+c.cluster+'</span><span class="v">'+c.score+'%</span></div><div class="bar"><div class="bar-fill" style="width:'+Math.min(100,c.score)+'%;background:'+(c.score>=60?'var(--green)':c.score>=35?'var(--amber)':'var(--red)')+'"></div></div>';
+      for(const c of d.dna) { const score=Math.max(0,Math.min(100,Number(c.score)||0)); html+='<div class="row"><span class="k">'+htmlEscClient(c.cluster)+'</span><span class="v">'+score+'%</span></div><div class="bar"><div class="bar-fill" style="width:'+score+'%;background:'+(score>=60?'var(--green)':score>=35?'var(--amber)':'var(--red)')+'"></div></div>'; }
     }
-    if(d.roadmapList&&d.roadmapList.length) html+='<div style="margin-top:10px"><b>Recommended next:</b> '+d.roadmapList.slice(0,6).join(', ')+'</div>';
+    if(d.roadmapList&&d.roadmapList.length) html+='<div style="margin-top:10px"><b>Recommended next:</b> '+d.roadmapList.slice(0,6).map(htmlEscClient).join(', ')+'</div>';
     if(d.evidence&&d.evidence.length){
       html+='<div style="margin-top:12px"><b>Evidence-backed mastery</b></div>';
-      for(const e of d.evidence) html+='<div class="row"><span class="k">'+e.track+'/'+e.level+'</span><span class="v">'+e.percent+'%</span></div>';
+      for(const e of d.evidence) html+='<div class="row"><span class="k">'+htmlEscClient(e.track)+'/'+htmlEscClient(e.level)+'</span><span class="v">'+Math.max(0,Math.min(100,Number(e.percent)||0))+'%</span></div>';
     } else html+='<div class="empty" style="margin-top:8px">No assessment evidence yet.</div>';
     body.innerHTML=html;
   }catch(_){ body.innerHTML='<div class="empty">Could not load learner.</div>'; }
@@ -1201,3 +1227,4 @@ router.get("/", checkAuth, (req, res) => {
 module.exports = router;
 module.exports.checkAuth = checkAuth;
 module.exports.csrfOk = csrfOk;
+module.exports.csrfFor = csrfFor;

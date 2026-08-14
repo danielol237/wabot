@@ -20,6 +20,9 @@ const MAX_RETROSPECTIVES = 60;
 const MAX_OPERATOR_TEAMS = 20;
 const MAX_TEAM_PACKETS = 5;
 const MAX_TEAM_HANDOFFS = 30;
+const MAX_KNOWLEDGE_NODES = 400;
+const MAX_KNOWLEDGE_EDGES = 800;
+const MAX_ARTIFACTS = 200;
 
 function ensureDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -75,6 +78,11 @@ function normalizeWorkspace(workspace) {
   workspace.executions = Array.isArray(workspace.executions) ? workspace.executions.slice(-MAX_EXECUTIONS) : [];
   workspace.retrospectives = Array.isArray(workspace.retrospectives) ? workspace.retrospectives.slice(-MAX_RETROSPECTIVES) : [];
   workspace.operatorTeams = Array.isArray(workspace.operatorTeams) ? workspace.operatorTeams.slice(-MAX_OPERATOR_TEAMS).map(operatorTeamValue) : [];
+  workspace.knowledgeNodes = Array.isArray(workspace.knowledgeNodes) ? workspace.knowledgeNodes.slice(-MAX_KNOWLEDGE_NODES).map(knowledgeNodeValue) : [];
+  workspace.knowledgeEdges = Array.isArray(workspace.knowledgeEdges) ? workspace.knowledgeEdges.slice(-MAX_KNOWLEDGE_EDGES).map(knowledgeEdgeValue) : [];
+  workspace.artifacts = Array.isArray(workspace.artifacts) ? workspace.artifacts.slice(-MAX_ARTIFACTS).map(artifactValue) : [];
+  workspace.knowledgeRevision = Math.max(0, Number(workspace.knowledgeRevision) || 0);
+  workspace.lastProjectedAt = Number(workspace.lastProjectedAt) || 0;
   const defaults = defaultSentinel();
   workspace.sentinel = {
     ...defaults,
@@ -176,6 +184,11 @@ function createWorkspace(ownerId, input = {}) {
     executions: [],
     retrospectives: [],
     operatorTeams: [],
+    knowledgeNodes: [],
+    knowledgeEdges: [],
+    artifacts: [],
+    knowledgeRevision: 0,
+    lastProjectedAt: 0,
     sentinel: defaultSentinel(),
     missionIds: [],
     missionOutcomes: {},
@@ -547,6 +560,169 @@ function operatorHandoffValue(handoff = {}) {
     status: ["accepted", "needs_review", "blocked"].includes(handoff.status) ? handoff.status : "accepted",
     createdAt: Number(handoff.createdAt) || Date.now(),
   };
+}
+
+function safeRelativePath(value) {
+  const raw = cleanText(value, 500).replace(/\\/g, "/");
+  if (!raw || raw.startsWith("/") || /^[a-zA-Z]:/.test(raw)) return null;
+  const normalized = path.posix.normalize(raw);
+  return normalized === "." || normalized.startsWith("../") || normalized.includes("/../") ? null : normalized;
+}
+
+function knowledgeNodeValue(node = {}) {
+  const types = ["requirement", "decision", "risk", "task", "evidence", "artifact", "execution", "external_reference"];
+  const freshness = ["fresh", "stale", "unknown", "superseded"];
+  const status = ["active", "archived", "stale", "superseded"];
+  return {
+    id: cleanText(node.id || "node_" + crypto.randomUUID(), 120),
+    type: types.includes(node.type) ? node.type : "external_reference",
+    title: cleanText(node.title || "Untitled knowledge", 240),
+    summary: cleanText(node.summary, 1600),
+    status: status.includes(node.status) ? node.status : "active",
+    freshness: freshness.includes(node.freshness) ? node.freshness : "unknown",
+    sourceType: cleanText(node.sourceType, 60) || null,
+    sourceId: cleanText(node.sourceId, 160) || null,
+    artifactIds: Array.isArray(node.artifactIds) ? node.artifactIds.map(String).slice(0, 30) : [],
+    confidence: Math.max(0, Math.min(100, Number.isFinite(Number(node.confidence)) ? Number(node.confidence) : 50)),
+    sensitivity: ["normal", "private", "secret"].includes(node.sensitivity) ? node.sensitivity : "normal",
+    sourceUpdatedAt: Number(node.sourceUpdatedAt) || 0,
+    lastSeenAt: Number(node.lastSeenAt) || Date.now(),
+    createdAt: Number(node.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function knowledgeEdgeValue(edge = {}) {
+  const types = ["supports", "contradicts", "depends_on", "produced_by", "derived_from", "satisfies", "blocks", "supersedes", "references", "related_to"];
+  return {
+    id: cleanText(edge.id || "edge_" + crypto.randomUUID(), 120),
+    type: types.includes(edge.type) ? edge.type : "related_to",
+    sourceId: cleanText(edge.sourceId, 120),
+    targetId: cleanText(edge.targetId, 120),
+    rationale: cleanText(edge.rationale, 800),
+    provenanceIds: Array.isArray(edge.provenanceIds) ? edge.provenanceIds.map(String).slice(0, 20) : [],
+    confidence: Math.max(0, Math.min(100, Number.isFinite(Number(edge.confidence)) ? Number(edge.confidence) : 50)),
+    createdAt: Number(edge.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function artifactValue(artifact = {}) {
+  const statuses = ["active", "stale", "superseded", "archived"];
+  const freshness = ["fresh", "stale", "unknown", "superseded"];
+  return {
+    id: cleanText(artifact.id || "artifact_" + crypto.randomUUID(), 120),
+    kind: cleanText(artifact.kind || "output", 60),
+    title: cleanText(artifact.title || "Untitled artifact", 240),
+    summary: cleanText(artifact.summary, 1600),
+    url: safeHttpUrl(artifact.url),
+    localPath: safeRelativePath(artifact.localPath),
+    contentType: cleanText(artifact.contentType, 120) || null,
+    size: Math.max(0, Number(artifact.size) || 0),
+    checksum: cleanText(artifact.checksum, 160) || null,
+    sourceType: cleanText(artifact.sourceType, 60) || null,
+    sourceId: cleanText(artifact.sourceId, 160) || null,
+    sourceRole: cleanText(artifact.sourceRole, 60) || null,
+    relatedNodeIds: Array.isArray(artifact.relatedNodeIds) ? artifact.relatedNodeIds.map(String).slice(0, 30) : [],
+    status: statuses.includes(artifact.status) ? artifact.status : "active",
+    freshness: freshness.includes(artifact.freshness) ? artifact.freshness : "unknown",
+    sensitivity: ["normal", "private", "secret"].includes(artifact.sensitivity) ? artifact.sensitivity : "normal",
+    createdAt: Number(artifact.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function bumpKnowledge(workspace, projectedAt = 0) {
+  workspace.knowledgeRevision = (Number(workspace.knowledgeRevision) || 0) + 1;
+  if (projectedAt) workspace.lastProjectedAt = Number(projectedAt) || Date.now();
+}
+
+function upsertKnowledgeNode(ownerId, id, node = {}) {
+  let result = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const normalized = knowledgeNodeValue(node);
+    const existing = value.knowledgeNodes.find((item) => item.id === normalized.id || (normalized.sourceType && normalized.sourceId && item.sourceType === normalized.sourceType && item.sourceId === normalized.sourceId));
+    if (existing) {
+      const candidate = { ...existing, ...normalized, id: existing.id, createdAt: existing.createdAt, lastSeenAt: existing.lastSeenAt, updatedAt: existing.updatedAt };
+      const changed = JSON.stringify({ ...existing, updatedAt: 0 }) !== JSON.stringify({ ...candidate, updatedAt: 0 });
+      result = changed ? { ...candidate, lastSeenAt: Date.now(), updatedAt: Date.now() } : existing;
+      if (changed) {
+        value.knowledgeNodes = value.knowledgeNodes.map((item) => item.id === existing.id ? result : item);
+        bumpKnowledge(value);
+      }
+    } else {
+      result = normalized;
+      value.knowledgeNodes.push(result);
+      value.knowledgeNodes = value.knowledgeNodes.slice(-MAX_KNOWLEDGE_NODES);
+      bumpKnowledge(value);
+    }
+  });
+  return workspace ? result : null;
+}
+
+function getKnowledgeNode(ownerId, id, nodeId) {
+  const workspace = getWorkspace(ownerId, id);
+  return workspace?.knowledgeNodes?.find((node) => node.id === nodeId) || null;
+}
+
+function listKnowledgeNodes(ownerId, id, options = {}) {
+  const workspace = getWorkspace(ownerId, id);
+  if (!workspace) return [];
+  return workspace.knowledgeNodes.filter((node) => (!options.type || node.type === options.type) && (!options.status || node.status === options.status) && (!options.freshness || node.freshness === options.freshness)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+function addKnowledgeEdge(ownerId, id, edge = {}) {
+  let result = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const normalized = knowledgeEdgeValue(edge);
+    if (!normalized.sourceId || !normalized.targetId || normalized.sourceId === normalized.targetId) return;
+    if (!value.knowledgeNodes.some((node) => node.id === normalized.sourceId) || !value.knowledgeNodes.some((node) => node.id === normalized.targetId)) return;
+    const existing = value.knowledgeEdges.find((item) => item.type === normalized.type && item.sourceId === normalized.sourceId && item.targetId === normalized.targetId);
+    if (existing) { result = { edge: existing, duplicate: true }; return; }
+    value.knowledgeEdges.push(normalized);
+    value.knowledgeEdges = value.knowledgeEdges.slice(-MAX_KNOWLEDGE_EDGES);
+    bumpKnowledge(value);
+    result = { edge: normalized, duplicate: false };
+  });
+  return workspace ? result : null;
+}
+
+function listKnowledgeEdges(ownerId, id, options = {}) {
+  const workspace = getWorkspace(ownerId, id);
+  if (!workspace) return [];
+  return workspace.knowledgeEdges.filter((edge) => (!options.nodeId || edge.sourceId === options.nodeId || edge.targetId === options.nodeId) && (!options.type || edge.type === options.type));
+}
+
+function addArtifact(ownerId, id, artifact = {}) {
+  let result = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const normalized = artifactValue(artifact);
+    const duplicate = value.artifacts.find((item) => (normalized.checksum && item.checksum === normalized.checksum) || (normalized.url && item.url === normalized.url) || (normalized.localPath && item.localPath === normalized.localPath));
+    if (duplicate) { result = { artifact: duplicate, duplicate: true }; return; }
+    value.artifacts.push(normalized);
+    value.artifacts = value.artifacts.slice(-MAX_ARTIFACTS);
+    bumpKnowledge(value);
+    result = { artifact: normalized, duplicate: false };
+  });
+  return workspace ? result : null;
+}
+
+function getArtifact(ownerId, id, artifactId) {
+  const workspace = getWorkspace(ownerId, id);
+  return workspace?.artifacts?.find((artifact) => artifact.id === artifactId) || null;
+}
+
+function listArtifacts(ownerId, id, options = {}) {
+  const workspace = getWorkspace(ownerId, id);
+  if (!workspace) return [];
+  return workspace.artifacts.filter((artifact) => (!options.status || artifact.status === options.status) && (!options.freshness || artifact.freshness === options.freshness)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+function updateKnowledgeMeta(ownerId, id, patch = {}) {
+  return mutate(ownerId, id, (workspace) => {
+    if (patch.lastProjectedAt !== undefined) workspace.lastProjectedAt = Number(patch.lastProjectedAt) || Date.now();
+    if (patch.bump) bumpKnowledge(workspace, patch.lastProjectedAt);
+  });
 }
 
 function operatorTeamValue(team = {}) {
@@ -1042,6 +1218,15 @@ module.exports = {
   listOperatorTeams,
   updateOperatorTeam,
   addOperatorHandoff,
+  upsertKnowledgeNode,
+  getKnowledgeNode,
+  listKnowledgeNodes,
+  addKnowledgeEdge,
+  listKnowledgeEdges,
+  addArtifact,
+  getArtifact,
+  listArtifacts,
+  updateKnowledgeMeta,
   recordSentinelDelivery,
   recordSentinelDeliveryForSource,
   getSentinelHealth,

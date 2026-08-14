@@ -9,6 +9,7 @@ const { handlePlanner } = require("./atlasPlanner");
 const { handleSentinel } = require("./atlasSentinel");
 const { handleExecution } = require("./atlasExecution");
 const { handleOperatorTeams } = require("./atlasOperatorTeams");
+const { handleKnowledge } = require("./atlasKnowledge");
 
 function clean(value, max = 1000) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -92,6 +93,10 @@ async function handleAtlas(ownerId, text, options = {}) {
   const lower = input.toLowerCase();
   if (/^(?:aria[,:!]?\s*)?(?:this is|this is my|new|create|start)\s+(?:a\s+)?(?:new\s+)?project\b/i.test(input)) {
     return { kind: "created", workspace: createAtlasProject(ownerId, input) };
+  }
+
+  if (/\b(?:show|refresh|rebuild|project|what changed)\b.*(?:knowledge|graph)|\bknowledge graph\b|\bproject knowledge\b|\b(?:show|check|what is|what's)\b.*\b(?:stale|conflicts?|contradictions?)\b|\bwhat\s+supports\b|\bwhat\s+is\s+blocking\s+this\s+project\b|\btrace\b.*\b(?:artifact|output|file|report)\b|\badd\b.*\bartifact\b|\b(?:record|add)\b.*\brequirement\b|\blink\b.*\b(?:evidence|artifact|decision|requirement)\b/i.test(lower)) {
+    return handleKnowledge(ownerId, input, options);
   }
 
   if (/\b(?:start|begin|run|create|delegate)\b.*\b(?:operator\s+)?team\b|\b(?:show|check|what is|what's)\b.*\b(?:team\s+status|team\s+handoff|current\s+handoff)\b|\b(?:approve|reject|pause|stop|retry|recover|resume|retrospect|review)\b.*\b(?:operator\s+)?team\b|\b(?:why|what)\b.*\bteam\b.*\b(?:blocked|stuck)\b|\brelease\s+readiness\b/i.test(lower)) {

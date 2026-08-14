@@ -99,3 +99,19 @@ test("natural routing resolves V6 operator-team controls without a prefix", () =
   ];
   for (const phrase of phrases) assert.equal(router.resolveNaturalAction(phrase).intent, "atlas", phrase);
 });
+
+
+test("natural routing resolves V7 project knowledge and artifact controls without a prefix", () => {
+  const phrases = [
+    "show the project knowledge graph",
+    "what supports this requirement",
+    "what is blocking this project",
+    "show stale project knowledge",
+    "show conflicts in the project",
+    "trace this artifact",
+    "record this as a project requirement",
+    "add this artifact to the project vault",
+    "what changed in the project knowledge",
+  ];
+  for (const phrase of phrases) assert.equal(router.resolveNaturalAction(phrase).intent, "atlas", phrase);
+});

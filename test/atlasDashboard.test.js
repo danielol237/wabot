@@ -226,3 +226,45 @@ test("Atlas dashboard renders Operator Teams and protects team actions", async (
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+
+test("Atlas dashboard renders V7 Knowledge Graph and Artifact Vault safely", async () => {
+  const app = express();
+  app.use(express.json({ limit: "256kb" }));
+  app.use(express.urlencoded({ extended: true }));
+  app.use("/dashboard", dashboard);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  let workspaceId = null;
+  try {
+    const csrf = (await request(server, "/dashboard/api/csrf")).json().csrf;
+    const created = await request(server, "/dashboard/api/atlas/workspaces", { method: "POST", body: { title: "Knowledge cockpit", outcome: "Trace project context", _csrf: csrf } });
+    assert.equal(created.status, 201);
+    workspaceId = created.json().id;
+
+    const page = await request(server, `/dashboard/atlas?workspace=${workspaceId}`);
+    assert.equal(page.status, 200);
+    assert.match(page.body, /Knowledge Graph/);
+    assert.match(page.body, /Artifact Vault/);
+    assert.match(page.body, /knowledgeAction/);
+
+    const unauthenticated = await request(server, `/dashboard/api/atlas/${workspaceId}/knowledge`, { auth: false, headers: { Accept: "application/json" } });
+    assert.equal(unauthenticated.status, 401);
+    const state = await request(server, `/dashboard/api/atlas/${workspaceId}/knowledge`);
+    assert.equal(state.status, 200);
+    assert.equal(typeof state.json().summary.revision, "number");
+
+    const noCsrf = await request(server, `/dashboard/api/atlas/${workspaceId}/knowledge`, { method: "POST", body: { action: "project", _csrf: "wrong" } });
+    assert.equal(noCsrf.status, 403);
+    assert.equal(noCsrf.json().code, "csrf_invalid");
+    const projected = await request(server, `/dashboard/api/atlas/${workspaceId}/knowledge`, { method: "POST", body: { action: "project", _csrf: csrf } });
+    assert.equal(projected.status, 200);
+    assert.equal(projected.json().ok, true);
+    assert.equal(projected.json().action, "project");
+  } finally {
+    if (workspaceId) {
+      try { require("fs").rmSync(require("path").join(atlas.ATLAS_DIR, workspaceId + ".json"), { force: true }); } catch (_) {}
+    }
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

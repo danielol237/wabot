@@ -19,15 +19,17 @@ Built and working:
 - ARIA Atlas v4 Sentinel: owner-scoped project contracts, dependency-linked discover/design/execute/verify roadmaps, signed GitHub/Render event intake, durable signal deduplication, bounded redacted delivery ledgers, per-provider health states, safe signature-mismatch reason codes, local HMAC/raw-body verifier, risk escalation, evidence-linked decision briefs, approval-aware signal controls, mission/runtime monitoring, natural-language diagnostics, and an authenticated dashboard cockpit
 - ARIA Atlas v5 Execution Core: durable research/design/build/verify/release execution lanes, automatic starts for read-only research and verify work, explicit owner approval gates for design/build/release work, durable checkpoints with evidence IDs, mission-to-checkpoint reconciliation, idempotent recovery proposals for blocked runs, bounded retrospectives, natural-language execution controls, and dashboard execution-lane visibility
 - ARIA Atlas v6 Delegated Operator Teams: owner-scoped researcher, designer, builder, verifier, and release-review role packets; bounded attempts, duration, and output budgets; accepted evidence-backed handoffs; explicit verifier quality gates; blocked-packet recovery proposals; approval-aware team sequencing; natural-language team controls; and authenticated dashboard visibility
+- ARIA Atlas v7 Project Knowledge Graph and Artifact Vault: bounded owner-scoped requirement, decision, risk, task, evidence, artifact, execution, and external-reference nodes; typed provenance edges; deterministic projections from existing Atlas records; artifact deduplication and safe URL/path metadata; freshness and conflict diagnostics; artifact tracing; natural-language graph queries; and authenticated dashboard graph visibility
 
 Known gaps:
 - V6 roles are bounded specialist prompt contexts coordinated by one durable mission runtime, not isolated conscious agents or independent services with separate failure domains
+- V7 is a bounded projection and provenance index, not a general-purpose graph database or an autonomous truth engine; it reports stale and conflicting records for owner review rather than silently rewriting project state
 - Generated-project dependency graphs and repository-wide AST/test analysis are incomplete
 - External calendar, email, and household integrations are not yet approval-first connected actions
 - Anime watchlist/progress migration is now scoped by user, but older callers still use the legacy compatibility scope until account IDs are supplied
 - Full outbound pinning cannot be inherited by third-party subprocesses such as yt-dlp/ffprobe without additional OS-level isolation
 - ARIA has persistent operational identity, memory, initiative, and expressive persona states, but not literal biological or human-like consciousness; deeper emotional-state evaluation and richer Atlas narrative context remain future work
-- Atlas still needs independent role-service failure domains, richer GitHub/calendar/file connectors, and deeper provider-specific remediation; V6 records role budgets and handoffs but does not make consequential commits, deploys, external posts, or provider-side changes without explicit owner-authorized integrations and approvals
+- Atlas still needs independent role-service failure domains, richer GitHub/calendar/file connectors, and deeper provider-specific remediation; V7 records provenance and artifacts but does not synchronize GitHub/Render, execute artifacts, publish files, or make consequential commits, deploys, external posts, or provider-side changes without explicit owner-authorized integrations and approvals
 - Complex multi-file builds can still fail across files even after local syntax/build repair
 `.trim();
 

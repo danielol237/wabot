@@ -5,6 +5,7 @@ const express = require("express");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
 process.env.PORTAL_SESSION_SECRET = "test-portal-secret";
 process.env.GOOGLE_CLIENT_ID = "";
@@ -32,7 +33,7 @@ test("portal: login page renders CoreRipper-style signup", async () => {
     assert.ok(html.includes("Create your account"));
     assert.ok(html.includes("Continue with Google"));
     assert.ok(html.includes("OR USE EMAIL"));
-    assert.ok(html.includes("learning space that remembers your progress"));
+    assert.ok(html.includes("Start with email, then link your WhatsApp learning history."));
     assert.ok(html.includes("name-field"));
   } finally { server.close(); wipe(); }
 });
@@ -96,4 +97,44 @@ test("portal: weak password rejected", async () => {
     const r = await fetch(base + "/auth/email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "x@x.com", password: "short", mode: "signup" }) });
     assert.strictEqual(r.status, 400);
   } finally { server.close(); wipe(); }
+});
+
+
+const oauthHarness = path.join(__dirname, "fixtures", "learnerOAuthHarness.js");
+function runOAuthHarness(mode) {
+  const result = spawnSync(process.execPath, [oauthHarness, mode], { cwd: path.join(__dirname, ".."), encoding: "utf8", env: { ...process.env } });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return JSON.parse(result.stdout);
+}
+
+test("portal: Google config derives the deployed callback URI and OAuth start includes OIDC protections", () => {
+  const config = runOAuthHarness("config");
+  assert.equal(config.redirectUri, "https://wabot-ytal.onrender.com/portal/auth/google/callback");
+  assert.equal(config.configured, true);
+  const start = runOAuthHarness("start");
+  assert.equal(start.status, 302);
+  assert.equal(start.redirectUri, config.redirectUri);
+  assert.equal(start.scope, "openid email profile");
+  assert.equal(start.hasNonce, true);
+  assert.equal(start.secureCookie, true);
+});
+
+test("portal: explicit Google redirect URI wins over the derived origin", () => {
+  const config = runOAuthHarness("explicit");
+  assert.equal(config.redirectUri, "https://custom.example/portal/auth/google/callback");
+});
+
+test("portal: Google rejects unverified identities and reuses an email account", () => {
+  const rejected = runOAuthHarness("unverified");
+  assert.equal(rejected.status, 302);
+  assert.match(rejected.location, /oauth-failed/);
+
+  const reused = runOAuthHarness("email-reuse");
+  assert.equal(reused.status, 302);
+  assert.equal(reused.location, "/portal");
+  assert.equal(reused.accountCount, 1);
+  assert.equal(reused.account.id, "em_existing");
+  assert.equal(reused.account.email, "learner@example.com");
+  assert.equal(reused.account.googleSub, "google-existing");
+  assert.equal(reused.account.name, "Google Learner");
 });

@@ -1,6 +1,7 @@
 const Groq = require("groq-sdk");
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
+const zai = require("./zaiMedia");
 
 // Vision-capable models on Groq, in priority order. Groq retires preview models
 // frequently with little notice (we already got burned twice — llama-3.2-90b-vision
@@ -23,7 +24,12 @@ const DEFAULT_VISION_PROMPT = `Look at this image and actually explain what's ha
 Talk like you're explaining it to a friend who can't see it, not like you're filling out a checklist.`;
 
 async function analyzeImage(base64Image, mimeType, question) {
-  if (!groq) return "❌ No Groq API key configured.";
+  if (zai.configured()) {
+    const result = await zai.analyzeImage(base64Image, mimeType, question || DEFAULT_VISION_PROMPT);
+    if (result.success) return result.text;
+    console.warn("Z.AI vision error:", result.error);
+  }
+  if (!groq) return "❌ No vision provider configured. Add ZHIPU_API_KEY or GROQ_API_KEY.";
 
   let lastError = null;
 

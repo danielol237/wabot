@@ -54,18 +54,32 @@ router.use((req, res, next) => {
 });
 
 // ── Config (env) ────────────────────────────────────────────────
-// Strip any scheme/URL wrapper that may have been pasted around the values
-// (e.g. someone pastes the full URL "https://5090...apps.googleusercontent.com"
-// into the Client ID field). Google rejects an invalid_client otherwise.
-const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || "").replace(/^https?:\/\//i, "").trim();
-const GOOGLE_CLIENT_SECRET = String(process.env.GOOGLE_CLIENT_SECRET || "").replace(/^https?:\/\//i, "").trim();
+function cleanEnv(value) {
+  return String(value || "").trim().replace(/^['\"]|['\"]$/g, "");
+}
+function publicOrigin(value) {
+  const raw = cleanEnv(value).replace(/\/+$/, "");
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    return parsed.origin;
+  } catch (_) { return ""; }
+}
+// Google client IDs are not URLs. Remove accidental scheme wrappers while
+// keeping the credential itself unchanged.
+const GOOGLE_CLIENT_ID = cleanEnv(process.env.GOOGLE_CLIENT_ID).replace(/^https?:\/\//i, "");
+const GOOGLE_CLIENT_SECRET = cleanEnv(process.env.GOOGLE_CLIENT_SECRET).replace(/^https?:\/\//i, "");
 // An explicit PORTAL_SESSION_SECRET is recommended. If Render already has the
 // Google secret configured, derive a stable HMAC key so email signup still works
 // while the optional dedicated secret is added.
-const SESSION_SECRET = process.env.PORTAL_SESSION_SECRET || process.env.DASHBOARD_CSRF_SECRET || (GOOGLE_CLIENT_SECRET ? crypto.createHash("sha256").update(GOOGLE_CLIENT_SECRET + "|aria-portal-session").digest("hex") : "");
-// Public URL of this bot, used for the OAuth redirect URI.
-const BASE_URL = String(process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
+const SESSION_SECRET = cleanEnv(process.env.PORTAL_SESSION_SECRET) || cleanEnv(process.env.DASHBOARD_CSRF_SECRET) || (GOOGLE_CLIENT_SECRET ? crypto.createHash("sha256").update(GOOGLE_CLIENT_SECRET + "|aria-portal-session").digest("hex") : "");
+const PUBLIC_ORIGIN = publicOrigin(process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL);
+// Set GOOGLE_REDIRECT_URI explicitly when multiple public domains exist. It
+// must exactly match one URI in Google Cloud Console.
+const GOOGLE_REDIRECT_URI = cleanEnv(process.env.GOOGLE_REDIRECT_URI) || (PUBLIC_ORIGIN ? `${PUBLIC_ORIGIN}/portal/auth/google/callback` : "");
 const OAUTH_COOKIE = "aria_oauth_state";
+const COOKIE_SECURE = PUBLIC_ORIGIN.startsWith("https://") || cleanEnv(process.env.NODE_ENV).toLowerCase() === "production";
 const AUTH_LIMIT = 12;
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const authAttempts = new Map();
@@ -157,16 +171,18 @@ function portalAuth(req, res, next) {
 // ── Google OAuth ────────────────────────────────────────────────
 router.get("/auth/google", (req, res) => {
   if (authLimited(req)) return res.redirect("/portal/login?error=auth-rate-limited");
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !BASE_URL) return res.redirect("/portal/login?error=google-not-configured");
-  const nonce = crypto.randomBytes(24).toString("hex");
-  const state = signToken({ r: nonce, exp: Date.now() + 10 * 60 * 1000 });
-  res.cookie(OAUTH_COOKIE, nonce, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 10 * 60 * 1000, path: "/portal" });
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI || !SESSION_SECRET) return res.redirect("/portal/login?error=google-not-configured");
+  const stateNonce = crypto.randomBytes(24).toString("hex");
+  const oidcNonce = crypto.randomBytes(24).toString("hex");
+  const state = signToken({ r: stateNonce, n: oidcNonce, exp: Date.now() + 10 * 60 * 1000 });
+  res.cookie(OAUTH_COOKIE, stateNonce, { httpOnly: true, secure: GOOGLE_REDIRECT_URI.startsWith("https://"), sameSite: "lax", maxAge: 10 * 60 * 1000, path: "/portal" });
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
-    redirect_uri: BASE_URL + "/portal/auth/google/callback",
+    redirect_uri: GOOGLE_REDIRECT_URI,
     response_type: "code",
     scope: "openid email profile",
     state,
+    nonce: oidcNonce,
   });
   res.redirect("https://accounts.google.com/o/oauth2/v2/auth?" + params.toString());
 });
@@ -184,23 +200,29 @@ router.get("/auth/google/callback", async (req, res) => {
         code,
         client_id: GOOGLE_CLIENT_ID,
         client_secret: GOOGLE_CLIENT_SECRET,
-        redirect_uri: BASE_URL + "/portal/auth/google/callback",
+        redirect_uri: GOOGLE_REDIRECT_URI,
         grant_type: "authorization_code",
       }).toString(),
       { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 20000 }
     );
+    if (!tok.data?.access_token) throw new Error("Google did not return an access token");
     const info = await axios.get("https://www.googleapis.com/oauth2/v2/userinfo", {
       headers: { Authorization: `Bearer ${tok.data.access_token}` }, timeout: 20000,
     });
-    const p = info.data; // { id, email, name, picture }
-    const sub = String(p.id);
-    if (!accounts[sub]) {
-      accounts[sub] = { id: sub, name: p.name || p.email, email: p.email, googleSub: sub, createdAt: Date.now() };
-      save();
-    }
-    const learner = accounts[sub];
+    const p = info.data || {}; // { id, email, verified_email, name, picture }
+    const sub = String(p.id || "").trim();
+    const email = String(p.email || "").toLowerCase().trim();
+    if (!sub || !email || p.verified_email === false) throw new Error("Google identity was incomplete or unverified");
+    const existingGoogle = accounts[sub];
+    const existingEmail = Object.values(accounts).find((account) => String(account.email || "").toLowerCase() === email);
+    const learner = existingGoogle || existingEmail || { id: `go_${sub}`, name: p.name || email, email, createdAt: Date.now() };
+    learner.name = String(p.name || learner.name || email).trim().slice(0, 80);
+    learner.email = email;
+    learner.googleSub = sub;
+    accounts[learner.id] = learner;
+    save();
     const token = issuePortalToken(learner);
-    res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
+    res.cookie("aria_portal", token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
     return res.redirect("/portal");
   } catch (e) {
     return res.redirect("/portal/login?error=oauth-failed");
@@ -226,14 +248,14 @@ router.post("/auth/email", express.json({ limit: "16kb" }), (req, res) => {
     save();
     const learner = accounts[id];
     const token = issuePortalToken(learner);
-    res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
+    res.cookie("aria_portal", token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
     return res.json({ ok: true });
   }
   // login
   if (!existing) { recordAuthAttempt(req); return res.status(401).json({ error: "no account with that email" }); }
   if (!verifyPw(password, existing.passwordHash)) { recordAuthAttempt(req); return res.status(401).json({ error: "wrong password" }); }
   const token = issuePortalToken(existing);
-  res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
+  res.cookie("aria_portal", token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
   return res.json({ ok: true });
 });
 
@@ -259,6 +281,11 @@ const PAGE = (title, body) => `<!doctype html><html lang="en"><head>
 *{box-sizing:border-box}html{background:var(--bg)}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}a{color:inherit}.auth-shell{min-height:100vh;display:grid;place-items:center;padding:28px}.auth-layout{width:min(920px,100%);display:grid;grid-template-columns:1fr 1.05fr;overflow:hidden;border:1px solid var(--line);border-radius:26px;background:var(--panel);box-shadow:var(--shadow)}.auth-aside{padding:42px;background:#142331}.brand{display:flex;align-items:center;gap:10px;font-weight:850;letter-spacing:-.02em;font-size:18px}.brand-mark{display:block;width:38px;height:38px;object-fit:cover;overflow:hidden;border-radius:12px;background:#0b0d12;box-shadow:0 8px 22px rgba(85,214,190,.14)}.brand-accent{color:var(--accent)}.eyebrow{text-transform:uppercase;letter-spacing:.16em;color:var(--accent);font-size:11px;font-weight:800}.auth-aside h1{font-size:32px;line-height:1.08;letter-spacing:-.04em;margin:54px 0 14px}.auth-aside p{color:var(--muted);max-width:330px}.benefits{display:grid;gap:12px;margin-top:32px}.benefit{display:flex;gap:10px;align-items:flex-start;color:var(--muted);font-size:13px}.benefit b{display:block;color:var(--text);font-size:13px}.auth-form{padding:42px;background:rgba(7,16,24,.36)}.auth-form h2{font-size:26px;letter-spacing:-.03em;margin:28px 0 5px}.sub{color:var(--muted);font-size:14px;margin:0 0 22px}.gbtn,.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:12px;padding:12px 16px;font-size:14px;font-weight:750;cursor:pointer;text-decoration:none;transition:transform .15s,border-color .15s,background .15s}.gbtn{width:100%;background:#fff;color:#14202a;border:1px solid #fff}.gbtn:hover,.btn:hover{transform:translateY(-1px)}.gbtn svg{width:19px;height:19px}.or{display:flex;align-items:center;gap:12px;color:var(--faint);font-size:10px;letter-spacing:.13em;margin:22px 0 14px}.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}.field{display:grid;gap:6px;margin:14px 0}.field label{font-size:12px;color:var(--muted);font-weight:700}.field input,.link-input{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:12px 13px;color:var(--text);font-size:14px;outline:none}.field input:focus,.link-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(87,224,196,.12)}.hint{color:var(--faint);font-size:11px}.btn{border:1px solid transparent;background:linear-gradient(100deg,var(--accent),var(--accent2));color:#06211d;width:100%;margin-top:10px}.foot{color:var(--muted);font-size:13px;text-align:center;margin-top:20px}.foot a{color:var(--accent);font-weight:700;text-decoration:none}.err{background:rgba(255,80,100,.1);border:1px solid rgba(255,141,154,.35);color:#ffc0c7;font-size:13px;padding:11px 12px;border-radius:11px;margin-bottom:15px}.ok{background:rgba(87,224,196,.1);border:1px solid rgba(87,224,196,.3);color:#b8ffed;font-size:13px;padding:11px 12px;border-radius:11px;margin-bottom:15px}.portal-shell{width:min(1080px,100%);margin:0 auto;padding:28px 20px 64px}.portal-top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:30px}.portal-top .actions{display:flex;gap:8px;flex-wrap:wrap}.portal-top .btn{width:auto;margin:0;padding:9px 13px;font-size:12px;background:var(--panel);border-color:var(--line);color:var(--text)}.portal-top .btn.primary{background:linear-gradient(100deg,var(--accent),var(--accent2));color:#06211d;border-color:transparent}.portal-title{font-size:clamp(28px,4vw,42px);letter-spacing:-.045em;line-height:1.05;margin:0 0 6px}.portal-sub{color:var(--muted);font-size:14px}.portal-card{background:rgba(13,27,40,.86);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.16)}.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}.metric{padding:18px;border-radius:15px;background:linear-gradient(145deg,var(--panel2),rgba(16,37,52,.55));border:1px solid var(--line)}.metric .value{font-size:27px;font-weight:850;letter-spacing:-.04em;color:var(--accent)}.metric .label{font-size:11px;color:var(--muted);margin-top:3px}.portal-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.portal-section{margin-top:14px}.section-title{font-size:13px;font-weight:800;margin-bottom:12px}.section-title span{color:var(--accent)}.note{padding:11px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}.note:last-child{border-bottom:0}.notice{display:flex;gap:12px;align-items:flex-start;padding:15px;border-radius:14px;background:rgba(87,224,196,.08);border:1px solid rgba(87,224,196,.22);color:var(--muted);font-size:13px}.notice strong{display:block;color:var(--text);margin-bottom:3px}.link-card{margin-top:14px}.link-form{display:flex;gap:8px;flex-wrap:wrap}.link-form .link-input{flex:1;min-width:190px}.link-form .btn{width:auto;margin:0}.empty{color:var(--faint);padding:24px;text-align:center;font-size:13px}.leaderboard{display:grid;gap:8px}.leader-row{display:grid;grid-template-columns:38px 1fr auto auto;gap:10px;align-items:center;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}.leader-row .rank{color:var(--accent);font-weight:800}.leader-row .name{font-weight:700}.leader-row .muted{color:var(--muted);font-size:12px}.tag{display:inline-flex;background:rgba(87,224,196,.1);color:var(--accent);border:1px solid rgba(87,224,196,.2);border-radius:99px;padding:4px 10px;font-size:11px;font-weight:700}
 @media(max-width:760px){.auth-shell{display:block;padding:0}.auth-layout{display:block;min-height:100vh;border:0;border-radius:0}.auth-aside{padding:20px}.auth-aside h1{font-size:28px;margin:22px 0 10px}.auth-aside p{font-size:13px}.auth-aside .benefits{display:none}.auth-form{padding:22px 20px 36px}.portal-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:1fr 1fr}.portal-top{align-items:flex-start;flex-direction:column}.portal-top .actions{width:100%}.portal-top .actions .btn{flex:1}.leader-row{grid-template-columns:30px 1fr auto}.leader-row .muted{display:none}}
 @media(max-width:430px){.benefits{grid-template-columns:1fr}.metric-grid{grid-template-columns:1fr}.portal-shell{padding:20px 14px 40px}}
+/* ARIA V9 learner system */
+:root{--bg:#fbfafc;--panel:#fff;--panel2:#f6f1f8;--line:#e8e1ed;--text:#1b1721;--muted:#6e6678;--faint:#958b9f;--accent:#8e6bd6;--accent2:#ed7184;--teal:#3a9c8e;--shadow:0 24px 70px rgba(55,36,76,.10)}
+html{background:var(--bg)}body{background:radial-gradient(circle at 0 0,#f3eafa 0,transparent 36%),var(--bg);color:var(--text);font-family:"DM Sans",Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.auth-shell{padding:32px}.auth-layout{width:min(1040px,100%);grid-template-columns:.9fr 1.1fr;border:1px solid var(--line);border-radius:28px;background:var(--panel);box-shadow:var(--shadow)}.auth-aside{padding:48px;background:linear-gradient(155deg,#f2eafa,#fff 74%);border-right:1px solid var(--line)}.auth-aside h1{font-family:Georgia,"Times New Roman",serif;font-size:clamp(34px,4vw,50px);font-weight:500;color:var(--text);letter-spacing:-.055em}.auth-aside p,.sub,.auth-form .foot,.portal-sub{color:var(--muted)}.brand{color:var(--text);letter-spacing:.04em}.brand-mark{width:42px;height:42px;border:0;border-radius:13px;background:#f2eafa;box-shadow:0 8px 24px rgba(142,107,214,.18)}.brand-accent{color:var(--accent)}.eyebrow{color:var(--accent);letter-spacing:.18em}.benefit{color:var(--muted)}.benefit b{color:var(--text)}.tag{background:#f3edf9;color:var(--accent);border-color:#e4d8f0}.auth-form{padding:48px;background:#fff}.auth-form h2,.portal-title{font-family:Georgia,"Times New Roman",serif;font-weight:500;color:var(--text)}.auth-form h2{font-size:34px;letter-spacing:-.05em}.gbtn,.btn{min-height:46px;border-radius:12px;transition:transform .15s,box-shadow .15s,border-color .15s}.gbtn{border:1px solid var(--line);background:#fff;color:var(--text);box-shadow:0 7px 18px rgba(55,36,76,.06)}.gbtn:hover{border-color:#cbb9e7;box-shadow:0 12px 24px rgba(142,107,214,.12)}.or{color:var(--faint)}.or::before,.or::after{background:var(--line)}.field input,.link-input{background:#fff;border-color:var(--line);border-radius:12px;padding:13px 14px;color:var(--text);min-height:46px}.field input:focus,.link-input:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(142,107,214,.12)}.field label{color:var(--muted)}.btn{background:var(--text);color:#fff;box-shadow:0 10px 22px rgba(27,23,33,.12)}.btn:hover{background:#342c3f;transform:translateY(-1px)}.portal-shell{padding:38px 24px 72px}.portal-top{margin-bottom:38px}.portal-title{font-size:clamp(34px,5vw,58px)}.portal-card,.metric{background:var(--panel);border-color:var(--line);box-shadow:0 10px 30px rgba(55,36,76,.05)}.metric{background:linear-gradient(145deg,#fff,#f7f1fa)}.metric .value{color:var(--accent)}.metric .label{color:var(--muted)}.notice{background:#f2faf8;border-color:#cceae4;color:var(--muted)}.notice strong,.section-title{color:var(--text)}.note{border-color:var(--line);color:var(--muted)}.empty{color:var(--faint)}.leader-row{background:#fff;border-color:var(--line)}.leader-row .rank{color:var(--accent-2)}.leader-row .name{color:var(--text)}.leader-row .muted{color:var(--muted)}
+@media(max-width:760px){.auth-shell{padding:0}.auth-layout{border:0;border-radius:0;box-shadow:none}.auth-aside{padding:26px 22px 24px;border-right:0;border-bottom:1px solid var(--line)}.auth-aside h1{font-size:36px;margin-top:28px}.auth-form{padding:28px 22px 42px}.auth-form h2{font-size:30px}.portal-shell{padding:24px 16px 52px}.portal-top{gap:18px}.portal-top .actions{gap:9px}.portal-top .actions .btn{min-height:44px}.portal-card{padding:18px}.metric-grid{gap:10px}.metric{padding:15px 14px}.metric .value{font-size:24px}}
+@media(max-width:420px){.metric-grid{grid-template-columns:1fr}.portal-title{font-size:40px}.auth-aside h1{font-size:32px}}
 </style></head><body>${body}</body></html>`;
 
 function googleSvg() { return `<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98-.66-2.23-1.06-3.71-1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>`; }
@@ -275,12 +302,12 @@ router.get("/login", (req, res) => {
     <section class="auth-aside">
       <div class="brand"><img class="brand-mark" src="/aria-mark.png" alt="" width="38" height="38" /><span>ARIA <span class="brand-accent">Academy</span></span></div>
       <div class="eyebrow" style="margin-top:42px">Learner account</div>
-      <h1>A learning space that remembers your progress.</h1>
+      <h1>A calmer place to build momentum.</h1>
       <p>Connect the portal to your WhatsApp academy identity and turn every lesson, challenge, and project into a clear next step.</p>
       <div class="benefits">
         <div class="benefit"><span class="tag">01</span><span><b>One progress view</b>XP, streaks, mastery, and recommendations in one place.</span></div>
         <div class="benefit"><span class="tag">02</span><span><b>Private by default</b>Your learner space is protected by your own session.</span></div>
-        <div class="benefit"><span class="tag">03</span><span><b>Link when ready</b>Use <b>!portal</b> in WhatsApp to connect existing progress.</span></div>
+        <div class="benefit"><span class="tag">03</span><span><b>Link when ready</b>Ask ARIA for a learner link to connect existing progress.</span></div>
       </div>
     </section>
     <section class="auth-form">
@@ -320,9 +347,9 @@ router.get("/", portalAuth, (req, res) => {
   const sessions = space?.engagement?.totalSessions || 0;
   const notes = space?.ariaNotes || [];
   const linkedNotice = req.query.linked === "1" ? `<div class="ok" role="status">Your WhatsApp academy progress is now connected to this learner space.</div>` : "";
-  const linkError = req.query.error === "invalid-link-code" ? `<div class="err" role="alert">That link code is invalid or expired. Send <code>!portal</code> in WhatsApp to create a new one.</div>` : "";
+  const linkError = req.query.error === "invalid-link-code" ? `<div class="err" role="alert">That link code is invalid or expired. Ask ARIA for a fresh learner link and try again.</div>` : "";
   const linkPanel = req.learner.linked ? `<div class="notice"><span class="tag">Linked</span><div><strong>WhatsApp progress connected</strong>Your XP, lessons, streaks, and ARIA notes are sourced from learner ID <code>${esc(req.learner.uid)}</code>.</div></div>` : `
-    <div class="portal-card link-card"><div class="section-title">Connect your WhatsApp progress <span>recommended</span></div><p class="portal-sub">Open WhatsApp, send <code>!portal</code> to ARIA, then paste the one-time code here. This keeps your account separate while connecting your existing academy history.</p><form class="link-form" method="post" action="/portal/link"><input type="hidden" name="_csrf" value="${portalCsrf(req)}"><input class="link-input" name="code" inputmode="text" autocomplete="one-time-code" placeholder="e.g. 4F8A2C19D7B6C0EF" maxlength="16" required><button class="btn" type="submit">Link progress</button></form></div>`;
+    <div class="portal-card link-card"><div class="section-title">Connect your WhatsApp progress <span>recommended</span></div><p class="portal-sub">Open WhatsApp, ask ARIA for a learner link, then paste the one-time code here. This keeps your account separate while connecting your existing academy history.</p><form class="link-form" method="post" action="/portal/link"><input type="hidden" name="_csrf" value="${portalCsrf(req)}"><input class="link-input" name="code" inputmode="text" autocomplete="one-time-code" placeholder="e.g. 4F8A2C19D7B6C0EF" maxlength="16" required><button class="btn" type="submit">Link progress</button></form></div>`;
   const card = (title, content) => `<section class="portal-card portal-section"><div class="section-title">${esc(title)}</div>${content}</section>`;
   const notesHtml = notes.length ? notes.slice(0, 6).map((n) => `<div class="note">${inlineText(n.text)}<div class="hint">${esc(new Date(n.ts).toLocaleDateString())}</div></div>`).join("") : `<div class="empty">No notes yet. ARIA will add observations as you study.</div>`;
   const strengths = space?.skills?.strong?.length ? space.skills.strong.map((s) => `<span class="tag">${esc(s.skill)} · ${Math.round(s.confidence)}%</span>`).join(" ") : `<div class="empty">Your strengths appear after a few attempts.</div>`;
@@ -358,9 +385,15 @@ router.get("/leaderboard", portalAuth, (req, res) => {
   } catch (_) { rows = []; }
   const body = `<div class="portal-shell">
     <header class="portal-top"><div><div class="eyebrow">Community progress</div><h1 class="portal-title">Academy leaderboard</h1><p class="portal-sub">A lightweight view of learners who have started building momentum.</p></div><div class="actions"><a class="btn primary" href="/portal">My learner space</a><a class="btn" href="/portal/logout">Log out</a></div></header>
-    <section class="portal-card">${rows.length ? `<div class="leaderboard">${rows.map((r, i) => `<div class="leader-row"><div class="rank">${i + 1}</div><div class="name">${esc(r.name)}${r.uid === req.learner.uid ? ' <span class="tag">you</span>' : ""}</div><div class="muted">${Number(r.streak) || 0}d streak</div><strong>${Number(r.xp) || 0} XP</strong></div>`).join("")}</div>` : `<div class="empty">No learners have earned XP yet. Start with <code>!academy</code> in WhatsApp, then return here to see progress appear.</div>`}</section>
+    <section class="portal-card">${rows.length ? `<div class="leaderboard">${rows.map((r, i) => `<div class="leader-row"><div class="rank">${i + 1}</div><div class="name">${esc(r.name)}${r.uid === req.learner.uid ? ' <span class="tag">you</span>' : ""}</div><div class="muted">${Number(r.streak) || 0}d streak</div><strong>${Number(r.xp) || 0} XP</strong></div>`).join("")}</div>` : `<div class="empty">No learners have earned XP yet. Ask ARIA for your first academy track, then return here to see progress appear.</div>`}</section>
   </div>`;
   res.send(PAGE("Leaderboard", body));
 });
 
-module.exports = { router, portalAuth, verifyToken, accounts };
+module.exports = {
+  router,
+  portalAuth,
+  verifyToken,
+  accounts,
+  getGoogleOAuthConfig: () => ({ clientId: GOOGLE_CLIENT_ID, redirectUri: GOOGLE_REDIRECT_URI, configured: Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REDIRECT_URI && SESSION_SECRET) }),
+};

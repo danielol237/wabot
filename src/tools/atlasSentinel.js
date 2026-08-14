@@ -3,6 +3,7 @@
 // authentication is handled by atlasWebhooks.js.
 
 const atlas = require("./atlasStore");
+const connectedDelivery = require("./atlasConnectedDelivery");
 const { getSock } = require("./missionSock");
 
 const NOTIFY_COOLDOWN_MS = 30 * 60 * 1000;
@@ -175,7 +176,10 @@ function addDerivedState(ownerId, workspace, result) {
     riskId: risk?.id,
     briefId: brief?.id,
   });
-  return { signal: linked || signal, evidence, risk, brief };
+  const delivery = ["github", "render"].includes(signal.source)
+    ? connectedDelivery.recordVerifiedSignal(ownerId, workspace.id, { ...(linked || signal), evidenceId: evidence?.id })
+    : null;
+  return { signal: linked || signal, evidence, risk, brief, delivery };
 }
 
 async function maybeNotify(ownerId, workspace, derived, options = {}) {

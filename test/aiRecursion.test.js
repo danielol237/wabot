@@ -28,10 +28,12 @@ test("ai: src/tools/ai.js loads and returns without RangeError", async () => {
   assert.ok(true);
 });
 
-test("ai: normal Gemini STOP completions do not append a false truncation notice", () => {
+test("ai: only a genuinely large request gets a truncation notice", () => {
   const { _test } = require("../src/tools/ai");
-  const stopped = _test.withTruncationNotice("Show Sentinel", "STOP", "MAX_TOKENS");
-  const exhausted = _test.withTruncationNotice("A long build", "MAX_TOKENS", "MAX_TOKENS");
+  const stopped = _test.withTruncationNotice("Show Sentinel", "STOP", "MAX_TOKENS", false);
+  const shortButMislabelled = _test.withTruncationNotice("Aria", "MAX_TOKENS", "MAX_TOKENS", false);
+  const exhaustedLargeBuild = _test.withTruncationNotice("A long build", "MAX_TOKENS", "MAX_TOKENS", true);
   assert.equal(stopped, "Show Sentinel");
-  assert.match(exhausted, /tell me to continue/);
+  assert.equal(shortButMislabelled, "Aria");
+  assert.match(exhaustedLargeBuild, /tell me to continue/);
 });

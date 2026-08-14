@@ -170,3 +170,18 @@ test("Atlas Sentinel maps a failed Render deployment to a critical release signa
     cleanup(workspace.id);
   }
 });
+
+test("Atlas Sentinel explains enabled-but-quiet local monitoring in plain language", () => {
+  const owner = "atlas-v3-owner-" + Date.now() + "-quiet";
+  const workspace = atlas.createWorkspace(owner, { title: "Quiet monitoring", outcome: "Watch the project without noise" });
+  atlas.configureSentinel(owner, workspace.id, { enabled: true });
+  try {
+    const result = sentinel.handleSentinel(owner, "show Sentinel");
+    assert.match(result.text, /enabled and watching/);
+    assert.match(result.text, /monitor, not a second chatbot/);
+    assert.match(result.text, /stalled Atlas missions/);
+    assert.match(result.text, /No tracked issue has been recorded/);
+  } finally {
+    cleanup(workspace.id);
+  }
+});

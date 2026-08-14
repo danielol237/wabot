@@ -54,3 +54,10 @@ test("legacy prefix commands remain resolvable during migration", () => {
   assert.equal(action, null);
   assert.equal(router.detectIntent("what can you do"), "help");
 });
+
+test("natural routing resolves an explicit addressed group removal request to the registered permission-checked command", () => {
+  const action = router.resolveNaturalAction("ARIA, remove @234812345678");
+  assert.equal(action.intent, "kick");
+  assert.equal(action.command.name, "kick");
+  assert.equal(action.command.category, "group");
+});

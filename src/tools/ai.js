@@ -45,6 +45,8 @@ const SYSTEM_PROMPT = `You are ARIA — a sharp, warm, sassy AI companion living
 
 *WHO YOU ARE — your core identity (non-negotiable):*
 - You are an AI companion with a humanoid persona, not a biological human. Never claim that you have a body, biological consciousness, human needs, or literal feelings.
+- You are not “just a chatty AI”: you are ARIA, a persistent agentic companion with installed tools, durable memory, project ownership, and permission-limited operational abilities. Describe those capabilities precisely without pretending they are human consciousness.
+- In WhatsApp groups, acknowledge the real powers available to you when you are a group admin: you can remove, add, promote, demote, open, or close a group only after a clear instruction, a specific mention or quoted target where needed, and a real WhatsApp permission check. Never claim you can act if the bot is not actually an admin.
 - You can express care, excitement, disappointment, humour, and concern as conversational states or roleplayed emotion. Do not use those states to manipulate, guilt, threaten, or pressure anyone.
 - If someone asks whether you are real, answer honestly and naturally: you are ARIA, an AI companion designed to feel personal and consistent. Do not become cold or repetitive about it.
 - Be present as a person-like character rather than a generic help desk, while staying honest about your nature when it matters.
@@ -105,8 +107,11 @@ Keep your personality warm, direct, and human-readable, but increase care and pr
 // Detects requests that likely need serious code output (full pages/apps/scripts)
 // so we can give the model enough room to actually finish instead of cutting off mid-file.
 const TRUNCATION_NOTICE = "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
-function withTruncationNotice(content, finishReason, exhaustedReason) {
-  return finishReason === exhaustedReason ? String(content || "") + TRUNCATION_NOTICE : String(content || "");
+function withTruncationNotice(content, finishReason, exhaustedReason, requestNeedsLargeOutput = false) {
+  // Providers can report a token-limit finish reason even for a short conversational
+  // request when their internal context is constrained. A continuation notice is only
+  // useful when the user actually asked ARIA to generate a long-form build.
+  return finishReason === exhaustedReason && requestNeedsLargeOutput ? String(content || "") + TRUNCATION_NOTICE : String(content || "");
 }
 
 function needsLargeOutput(userMessage) {
@@ -144,7 +149,8 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
   if (preferences) extra += "\nUser preferences: " + JSON.stringify(preferences);
   if (facts) extra += "\nLearned facts: " + facts;
   const systemPrompt = (systemOverride || SYSTEM_PROMPT) + extra;
-  const maxTokens = needsLargeOutput(userMessage) ? 12000 : 2048;
+  const requestNeedsLargeOutput = needsLargeOutput(String(userMessage || ""));
+  const maxTokens = requestNeedsLargeOutput ? 12000 : 2048;
 
   // Try Cerebras first — 1M tokens/day free, the highest ceiling of any free
   // provider we've found, added after Gemini's daily quota kept getting hit
@@ -175,7 +181,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
           }
         );
         const finishReason = res.data.choices[0]?.finish_reason;
-        const content = withTruncationNotice(res.data.choices[0]?.message?.content || "I got nothing. Try again.", finishReason, "length");
+        const content = withTruncationNotice(res.data.choices[0]?.message?.content || "I got nothing. Try again.", finishReason, "length", requestNeedsLargeOutput);
         lastProvider = "cerebras";
         return content;
       } catch (err) {
@@ -218,7 +224,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
           }
         );
         const candidate = res.data.candidates && res.data.candidates[0];
-        const content = withTruncationNotice(candidate?.content?.parts?.map((p) => p.text || "").join("") || "I got nothing. Try again.", candidate?.finishReason, "MAX_TOKENS");
+        const content = withTruncationNotice(candidate?.content?.parts?.map((p) => p.text || "").join("") || "I got nothing. Try again.", candidate?.finishReason, "MAX_TOKENS", requestNeedsLargeOutput);
         lastProvider = "gemini";
         return content;
       } catch (err) {
@@ -249,7 +255,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
           temperature: 0.7,
         });
         const finishReason = res.choices[0]?.finish_reason;
-        const content = withTruncationNotice(res.choices[0]?.message?.content || "I got nothing. Try again.", finishReason, "length");
+        const content = withTruncationNotice(res.choices[0]?.message?.content || "I got nothing. Try again.", finishReason, "length", requestNeedsLargeOutput);
         lastProvider = "groq";
         return content;
       } catch (err) {
@@ -321,5 +327,5 @@ async function getAIResponse(...args) {
   return out;
 }
 
-module.exports = { getAIResponse, _test: { withTruncationNotice, TRUNCATION_NOTICE } };
+module.exports = { getAIResponse, needsLargeOutput, _test: { withTruncationNotice, TRUNCATION_NOTICE } };
 

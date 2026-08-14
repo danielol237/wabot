@@ -30,3 +30,14 @@ test("router: !add command is registered with invite aliases", () => {
   assert.ok(c.aliases.includes("invite") && c.aliases.includes("addmember"), "has invite aliases");
   assert.strictEqual(c.category, "group", "group command");
 });
+
+test("groupAdmin: isSenderAdmin normalizes multi-device sender and participant JIDs", async () => {
+  const ga = require("../src/tools/groupAdmin");
+  const sock = {
+    groupMetadata: async () => ({
+      participants: [{ id: "234812345678:17@s.whatsapp.net", admin: "admin" }],
+    }),
+  };
+  const isAdmin = await ga.isSenderAdmin(sock, "group@g.us", "234812345678:4@s.whatsapp.net");
+  assert.strictEqual(isAdmin, true, "same phone number must match regardless of Baileys device suffix");
+});

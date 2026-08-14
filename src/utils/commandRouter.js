@@ -575,11 +575,20 @@ async function handleUnmute(sock, msg, args, ctx) {
 }
 
 // Group admin handlers
+async function ensureBotGroupAdmin(sock, msg, chatId) {
+  const { reply } = require("./baileysHelpers");
+  const { isBotAdmin } = require("../tools/groupAdmin");
+  if (await isBotAdmin(sock, chatId).catch(() => false)) return true;
+  await reply(sock, msg, "❌ I have the group-control command, but WhatsApp says ARIA is not an admin in this group. Promote ARIA, then send the same clear request again.");
+  return false;
+}
+
 async function handleKick(sock, msg, args, ctx) {
   const { reply, react, getTargetJid } = require("./baileysHelpers");
   if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  if (!(await ensureBotGroupAdmin(sock, msg, ctx.chatId))) return;
   const target = getTargetJid(msg);
-  if (!target) return reply(sock, msg, "Mention or quote the user.");
+  if (!target) return reply(sock, msg, "Mention or quote the member, then say “ARIA, remove @member”. I will not guess who “him” is before removing someone.");
   const result = await kickUser(sock, ctx.chatId, target);
   await react(sock, msg, "👢");
   if (result?.success === false) await reply(sock, msg, `❌ Kick failed: ${result.error}`);
@@ -631,6 +640,7 @@ async function handleOpen(sock, msg, args, ctx) {
 async function handleAddMember(sock, msg, args, ctx) {
   const { reply, react, getTargetJid } = require("./baileysHelpers");
   if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  if (!(await ensureBotGroupAdmin(sock, msg, ctx.chatId))) return;
   // Require the caller to be the owner or a real group admin (adding members is
   // a group-mod action; the router's category="group" already checks admin).
   let target = getTargetJid(msg);
@@ -651,8 +661,9 @@ async function handleAddMember(sock, msg, args, ctx) {
 async function handlePromote(sock, msg, args, ctx) {
   const { reply, react, getTargetJid } = require("./baileysHelpers");
   if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  if (!(await ensureBotGroupAdmin(sock, msg, ctx.chatId))) return;
   const target = getTargetJid(msg);
-  if (!target) return reply(sock, msg, "Mention or quote the user.");
+  if (!target) return reply(sock, msg, "Mention or quote the member, then say “ARIA, promote @member”.");
   const result = await promoteUser(sock, ctx.chatId, target);
   await react(sock, msg, "⭐");
   if (result?.success === false) await reply(sock, msg, `❌ Promote failed: ${result.error}`);
@@ -662,8 +673,9 @@ async function handlePromote(sock, msg, args, ctx) {
 async function handleDemote(sock, msg, args, ctx) {
   const { reply, react, getTargetJid } = require("./baileysHelpers");
   if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  if (!(await ensureBotGroupAdmin(sock, msg, ctx.chatId))) return;
   const target = getTargetJid(msg);
-  if (!target) return reply(sock, msg, "Mention or quote the user.");
+  if (!target) return reply(sock, msg, "Mention or quote the member, then say “ARIA, demote @member”.");
   const result = await demoteUser(sock, ctx.chatId, target);
   await react(sock, msg, "⬇️");
   if (result?.success === false) await reply(sock, msg, `❌ Demote failed: ${result.error}`);
@@ -673,6 +685,7 @@ async function handleDemote(sock, msg, args, ctx) {
 async function handleTagAll(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  if (!(await ensureBotGroupAdmin(sock, msg, ctx.chatId))) return;
   const result = await tagAll(sock, msg, ctx.chatId, args || "📢 @everyone");
   // tagAll already sends the tagged message to the group; only reply on error.
   if (result?.success === false) await reply(sock, msg, `❌ ${result.error}`);

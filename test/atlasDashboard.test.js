@@ -40,10 +40,16 @@ test("Atlas dashboard page and API are owner-authenticated and render", async ()
     const page = await request(server, "/dashboard/atlas");
     assert.equal(page.status, 200);
     assert.match(page.body, /PROJECT BRAIN/);
-    assert.match(page.body, /North Star|Give ARIA a project/);
+    assert.match(page.body, /NORTH STAR|Select or create a project/);
+    assert.match(page.body, /Private operator workspace/);
+    assert.match(page.body, /mobile-nav/);
+    assert.match(page.body, /atlas-layout/);
     const api = await request(server, "/dashboard/api/atlas");
     assert.equal(api.status, 200);
     assert.match(api.body, /workspaces/);
+    const missionsPage = await request(server, "/dashboard?pane=missions");
+    assert.equal(missionsPage.status, 200);
+    assert.match(missionsPage.body, /INITIAL_PANE=\"missions\"/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

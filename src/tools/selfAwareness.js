@@ -16,7 +16,7 @@ Built and working:
 - Anime catalog, provider-race source resolution, validation, signed playback/file capabilities, safe catalog filtering, and queued downloads
 - Academy/LMS with hidden assessments, learner profiles, engineering-skill signals, durable XP ledger, portal accounts, Google OAuth, and WhatsApp linking
 - Reminders, recurring tasks, autonomous owner check-ins, proactive operational monitoring, and background task polling
-- ARIA Atlas v3 Sentinel: owner-scoped project contracts, dependency-linked discover/design/execute/verify roadmaps, signed GitHub/Render event intake, durable signal deduplication, risk escalation, evidence-linked decision briefs, approval-aware signal controls, mission/runtime monitoring, natural-language project operations, and an authenticated dashboard cockpit
+- ARIA Atlas v4 Sentinel: owner-scoped project contracts, dependency-linked discover/design/execute/verify roadmaps, signed GitHub/Render event intake, durable signal deduplication, bounded redacted delivery ledgers, per-provider health states, safe signature-mismatch reason codes, local HMAC/raw-body verifier, risk escalation, evidence-linked decision briefs, approval-aware signal controls, mission/runtime monitoring, natural-language diagnostics, and an authenticated dashboard cockpit
 
 Known gaps:
 - Role-based agent prompts exist, but planner/researcher/builder/verifier are not isolated services with independent budgets and failure domains
@@ -25,7 +25,7 @@ Known gaps:
 - Anime watchlist/progress migration is now scoped by user, but older callers still use the legacy compatibility scope until account IDs are supplied
 - Full outbound pinning cannot be inherited by third-party subprocesses such as yt-dlp/ffprobe without additional OS-level isolation
 - ARIA has persistent operational identity, memory, initiative, and expressive persona states, but not literal biological or human-like consciousness; deeper emotional-state evaluation and richer Atlas narrative context remain future work
-- Atlas still needs independent role-agent budgets/failure domains, richer GitHub/calendar/file connectors, and deeper provider-specific remediation; Sentinel’s external event sources remain opt-in and require provider webhook configuration
+- Atlas still needs independent role-agent budgets/failure domains, richer GitHub/calendar/file connectors, and deeper provider-specific remediation; Sentinel’s external event sources remain opt-in and require provider webhook configuration, and V4 can diagnose a mismatch but cannot verify or rotate a provider-side secret without owner access
 - Complex multi-file builds can still fail across files even after local syntax/build repair
 `.trim();
 

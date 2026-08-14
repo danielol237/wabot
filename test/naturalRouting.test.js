@@ -61,3 +61,9 @@ test("natural routing resolves an explicit addressed group removal request to th
   assert.equal(action.command.name, "kick");
   assert.equal(action.command.category, "group");
 });
+
+test("natural routing resolves V4 integration diagnostics without a prefix", () => {
+  assert.equal(router.resolveNaturalAction("diagnose integrations").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("check the webhook connection").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("show delivery diagnostics").intent, "atlas");
+});

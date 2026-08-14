@@ -14,6 +14,7 @@ const MAX_DECISIONS = 200;
 const MAX_RISKS = 100;
 const MAX_SIGNALS = 200;
 const MAX_BRIEFS = 100;
+const MAX_DELIVERIES = 120;
 
 function ensureDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -31,11 +32,31 @@ function fileFor(id) {
   return path.join(ATLAS_DIR, safe + ".json");
 }
 
+function defaultIntegrationHealth(source) {
+  return {
+    source,
+    status: "disabled",
+    reasonCode: "not_configured",
+    message: "Integration is not configured.",
+    lastAttemptAt: 0,
+    lastSuccessAt: 0,
+    lastFailureAt: 0,
+    lastDeliveryId: null,
+    lastEvent: null,
+    lastHttpStatus: null,
+    attempts: 0,
+    successes: 0,
+    failures: 0,
+  };
+}
+
 function defaultSentinel() {
   return {
-    version: 1,
+    version: 4,
     enabled: false,
     sources: { github: { repository: null }, render: { serviceId: null } },
+    health: { github: defaultIntegrationHealth("github"), render: defaultIntegrationHealth("render") },
+    deliveries: [],
     lastPassAt: 0,
     lastSignalAt: 0,
     lastNotifiedAt: 0,
@@ -46,16 +67,25 @@ function normalizeWorkspace(workspace) {
   if (!workspace || typeof workspace !== "object") return workspace;
   workspace.signals = Array.isArray(workspace.signals) ? workspace.signals : [];
   workspace.briefs = Array.isArray(workspace.briefs) ? workspace.briefs : [];
+  const defaults = defaultSentinel();
   workspace.sentinel = {
-    ...defaultSentinel(),
+    ...defaults,
     ...(workspace.sentinel || {}),
     sources: {
-      ...defaultSentinel().sources,
+      ...defaults.sources,
       ...(workspace.sentinel?.sources || {}),
-      github: { ...defaultSentinel().sources.github, ...(workspace.sentinel?.sources?.github || {}) },
-      render: { ...defaultSentinel().sources.render, ...(workspace.sentinel?.sources?.render || {}) },
+      github: { ...defaults.sources.github, ...(workspace.sentinel?.sources?.github || {}) },
+      render: { ...defaults.sources.render, ...(workspace.sentinel?.sources?.render || {}) },
     },
+    health: {
+      ...defaults.health,
+      ...(workspace.sentinel?.health || {}),
+      github: { ...defaults.health.github, ...(workspace.sentinel?.health?.github || {}) },
+      render: { ...defaults.health.render, ...(workspace.sentinel?.health?.render || {}) },
+    },
+    deliveries: Array.isArray(workspace.sentinel?.deliveries) ? workspace.sentinel.deliveries.slice(-MAX_DELIVERIES) : [],
   };
+  workspace.sentinel = sentinelConfigValue(workspace.sentinel);
   return workspace;
 }
 
@@ -368,14 +398,72 @@ function addRisk(ownerId, id, risk = {}) {
   return workspace ? created : null;
 }
 
+function healthValue(source, health = {}) {
+  const statuses = ["disabled", "unconfigured", "healthy", "attention", "misconfigured"];
+  return {
+    ...defaultIntegrationHealth(source),
+    ...health,
+    source,
+    status: statuses.includes(health.status) ? health.status : "attention",
+    reasonCode: cleanText(health.reasonCode || "unknown", 80),
+    message: cleanText(health.message || "Integration needs review.", 240),
+    lastAttemptAt: Number(health.lastAttemptAt) || 0,
+    lastSuccessAt: Number(health.lastSuccessAt) || 0,
+    lastFailureAt: Number(health.lastFailureAt) || 0,
+    lastDeliveryId: cleanText(health.lastDeliveryId, 160) || null,
+    lastEvent: cleanText(health.lastEvent, 80) || null,
+    lastHttpStatus: Number(health.lastHttpStatus) || null,
+    attempts: Math.max(0, Number(health.attempts) || 0),
+    successes: Math.max(0, Number(health.successes) || 0),
+    failures: Math.max(0, Number(health.failures) || 0),
+  };
+}
+
+function deliveryValue(delivery = {}) {
+  const source = ["github", "render"].includes(delivery.source) ? delivery.source : "local";
+  const statuses = ["accepted", "duplicate", "rejected", "failed", "ignored"];
+  return {
+    id: cleanText(delivery.id || "delivery_" + crypto.randomUUID(), 120),
+    source,
+    deliveryId: cleanText(delivery.deliveryId, 160) || null,
+    eventName: cleanText(delivery.eventName || delivery.kind || "event", 80),
+    status: statuses.includes(delivery.status) ? delivery.status : "failed",
+    reasonCode: cleanText(delivery.reasonCode || "unknown", 80),
+    httpStatus: Number(delivery.httpStatus) || null,
+    receivedAt: Number(delivery.receivedAt) || Date.now(),
+    durationMs: Math.max(0, Number(delivery.durationMs) || 0),
+    workspaceId: cleanText(delivery.workspaceId, 120) || null,
+    signaturePresent: delivery.signaturePresent === true,
+    rawBodyAvailable: delivery.rawBodyAvailable === true,
+    detail: cleanText(delivery.detail, 300),
+  };
+}
+
 function sentinelConfigValue(sentinel = {}) {
   const repoCandidate = cleanText(sentinel.sources?.github?.repository || sentinel.githubRepository, 160);
   const repo = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(repoCandidate) ? repoCandidate : "";
   const serviceId = cleanText(sentinel.sources?.render?.serviceId || sentinel.renderServiceId, 120);
+  const enabled = sentinel.enabled === true;
+  const health = {
+    github: healthValue("github", sentinel.health?.github),
+    render: healthValue("render", sentinel.health?.render),
+  };
+  for (const source of ["github", "render"]) {
+    const configured = source === "github" ? Boolean(repo) : Boolean(serviceId);
+    if (!enabled) {
+      health[source] = healthValue(source, { ...health[source], status: "disabled", reasonCode: "sentinel_disabled", message: "Sentinel is disabled." });
+    } else if (!configured) {
+      health[source] = healthValue(source, { ...health[source], status: "unconfigured", reasonCode: "source_unconfigured", message: `No ${source} source is mapped to this workspace.` });
+    } else if (health[source].status === "disabled" || health[source].reasonCode === "not_configured") {
+      health[source] = healthValue(source, { ...health[source], status: "attention", reasonCode: "awaiting_first_delivery", message: `${source} is mapped and waiting for its first verified delivery.` });
+    }
+  }
   return {
-    version: 1,
-    enabled: sentinel.enabled === true,
+    version: 4,
+    enabled,
     sources: { github: { repository: repo || null }, render: { serviceId: serviceId || null } },
+    health,
+    deliveries: Array.isArray(sentinel.deliveries) ? sentinel.deliveries.slice(-MAX_DELIVERIES).map(deliveryValue) : [],
     lastPassAt: Number(sentinel.lastPassAt) || 0,
     lastSignalAt: Number(sentinel.lastSignalAt) || 0,
     lastNotifiedAt: Number(sentinel.lastNotifiedAt) || 0,
@@ -390,6 +478,57 @@ function configureSentinel(ownerId, id, patch = {}) {
     configured = value.sentinel;
   });
   return workspace ? configured : null;
+}
+
+function findSentinelWorkspace(ownerId, source, identity = "") {
+  const workspaces = listWorkspaces(ownerId, { state: "active" });
+  const term = cleanText(identity, 180).toLowerCase();
+  return workspaces.find((workspace) => {
+    if (!workspace.sentinel?.enabled) return false;
+    if (source === "github") return !term || String(workspace.sentinel.sources?.github?.repository || "").toLowerCase() === term;
+    if (source === "render") return !term || String(workspace.sentinel.sources?.render?.serviceId || "") === String(identity || "");
+    return false;
+  }) || null;
+}
+
+function recordSentinelDelivery(ownerId, id, delivery = {}) {
+  let result = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const incoming = deliveryValue({ ...delivery, workspaceId: id });
+    const duplicate = incoming.deliveryId && value.sentinel.deliveries.find((item) => item.source === incoming.source && item.deliveryId === incoming.deliveryId);
+    if (duplicate) {
+      result = { delivery: duplicate, duplicate: true, health: value.sentinel.health[incoming.source] };
+      return;
+    }
+    value.sentinel.deliveries.push(incoming);
+    value.sentinel.deliveries = value.sentinel.deliveries.slice(-MAX_DELIVERIES);
+    const previous = value.sentinel.health[incoming.source] || defaultIntegrationHealth(incoming.source);
+    const accepted = incoming.status === "accepted" || incoming.status === "duplicate";
+    const health = healthValue(incoming.source, {
+      ...previous,
+      status: accepted ? "healthy" : (incoming.reasonCode === "missing_secret" || incoming.reasonCode === "invalid_signature" ? "misconfigured" : "attention"),
+      reasonCode: accepted ? "delivery_accepted" : incoming.reasonCode,
+      message: accepted ? "Verified deliveries are arriving." : incoming.detail || "The provider delivery needs review.",
+      lastAttemptAt: incoming.receivedAt,
+      lastSuccessAt: accepted ? incoming.receivedAt : previous.lastSuccessAt,
+      lastFailureAt: accepted ? previous.lastFailureAt : incoming.receivedAt,
+      lastDeliveryId: incoming.deliveryId,
+      lastEvent: incoming.eventName,
+      lastHttpStatus: incoming.httpStatus,
+      attempts: previous.attempts + 1,
+      successes: previous.successes + (accepted ? 1 : 0),
+      failures: previous.failures + (accepted ? 0 : 1),
+    });
+    value.sentinel.health[incoming.source] = health;
+    addEventToWorkspace(value, "sentinel_delivery", `${incoming.source} delivery ${incoming.status}: ${incoming.reasonCode}`);
+    result = { delivery: incoming, duplicate: false, health };
+  });
+  return workspace ? result : null;
+}
+
+function recordSentinelDeliveryForSource(ownerId, source, identity, delivery = {}) {
+  const workspace = findSentinelWorkspace(ownerId, source, identity);
+  return workspace ? recordSentinelDelivery(ownerId, workspace.id, { ...delivery, source }) : null;
 }
 
 function signalValue(signal = {}) {
@@ -528,6 +667,12 @@ function markSentinelPass(ownerId, id, at = Date.now()) {
   });
 }
 
+function getSentinelHealth(ownerId, id) {
+  const workspace = getWorkspace(ownerId, id);
+  if (!workspace) return null;
+  return { health: workspace.sentinel.health, deliveries: workspace.sentinel.deliveries.slice(-MAX_DELIVERIES) };
+}
+
 function addDecision(ownerId, id, decision = {}) {
   let created = null;
   const workspace = mutate(ownerId, id, (value) => {
@@ -657,6 +802,10 @@ module.exports = {
   applyPlan,
   addRisk,
   configureSentinel,
+  findSentinelWorkspace,
+  recordSentinelDelivery,
+  recordSentinelDeliveryForSource,
+  getSentinelHealth,
   recordSignal,
   addBrief,
   updateSignal,

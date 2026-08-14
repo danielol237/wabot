@@ -47,6 +47,8 @@ test("Atlas dashboard page and API are owner-authenticated and render", async ()
     assert.match(page.body, /atlas-layout/);
     assert.match(page.body, /dashboardJson/);
     assert.match(page.body, /Dashboard session expired/);
+    assert.match(page.body, /Integration health/);
+    assert.match(page.body, /Recent deliveries/);
     const unauthenticatedApi = await request(server, "/dashboard/api/atlas", { auth: false, headers: { Accept: "application/json" } });
     assert.equal(unauthenticatedApi.status, 401);
     assert.equal(unauthenticatedApi.json().code, "auth_required");
@@ -109,6 +111,13 @@ test("Atlas dashboard exposes Sentinel state and keeps signal resolution owner-c
     const enabled = await request(server, `/dashboard/api/atlas/${workspaceId}/sentinel`, { method: "POST", body: { action: "enable", githubRepository: "danielol237/wabot", _csrf: csrf } });
     assert.equal(enabled.status, 200);
     assert.equal(enabled.json().sentinel.enabled, true);
+    assert.equal(enabled.json().sentinel.health.github.status, "attention");
+    const diagnosed = await request(server, `/dashboard/api/atlas/${workspaceId}/sentinel`, { method: "POST", body: { action: "diagnose", _csrf: csrf } });
+    assert.equal(diagnosed.status, 200);
+    assert.equal(diagnosed.json().diagnostics.sources[0].source, "github");
+    const selfTest = await request(server, `/dashboard/api/atlas/${workspaceId}/sentinel`, { method: "POST", body: { action: "self_test", _csrf: csrf } });
+    assert.equal(selfTest.status, 200);
+    assert.equal(typeof selfTest.json().selfTest.pass, "boolean");
     const owner = process.env.OWNER_NUMBER.includes("@") ? process.env.OWNER_NUMBER : process.env.OWNER_NUMBER + "@s.whatsapp.net";
     const sentinel = require("../src/tools/atlasSentinel");
     const signal = sentinel.ingestGithub(owner, { action: "completed", check_run: { conclusion: "failure" }, repository: { full_name: "danielol237/wabot" } }, "check_run", "dashboard-sentinel-1");

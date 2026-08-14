@@ -8,6 +8,7 @@ const { decisionCard, LEVELS } = require("./atlasPolicy");
 const { handlePlanner } = require("./atlasPlanner");
 const { handleSentinel } = require("./atlasSentinel");
 const { handleExecution } = require("./atlasExecution");
+const { handleOperatorTeams } = require("./atlasOperatorTeams");
 
 function clean(value, max = 1000) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -91,6 +92,10 @@ async function handleAtlas(ownerId, text, options = {}) {
   const lower = input.toLowerCase();
   if (/^(?:aria[,:!]?\s*)?(?:this is|this is my|new|create|start)\s+(?:a\s+)?(?:new\s+)?project\b/i.test(input)) {
     return { kind: "created", workspace: createAtlasProject(ownerId, input) };
+  }
+
+  if (/\b(?:start|begin|run|create|delegate)\b.*\b(?:operator\s+)?team\b|\b(?:show|check|what is|what's)\b.*\b(?:team\s+status|team\s+handoff|current\s+handoff)\b|\b(?:approve|reject|pause|stop|retry|recover|resume|retrospect|review)\b.*\b(?:operator\s+)?team\b|\b(?:why|what)\b.*\bteam\b.*\b(?:blocked|stuck)\b|\brelease\s+readiness\b/i.test(lower)) {
+    return handleOperatorTeams(ownerId, input, options);
   }
 
   if (/\b(?:execute|take|run)\s+(?:the\s+)?(?:next\s+(?:safe\s+)?step|execution|run)|\b(?:start|begin|run)\s+(?:research|design|build|verify|release)?\s*(?:execution|run)|\b(?:show|check|what is|what's)\s+(?:the\s+)?(?:execution|run)\s+status|\b(?:pause|stop|approve|reject|retrospect|propose recovery|recover)\b.*\b(?:execution|run)|\b(?:what evidence is missing|missing execution evidence)\b/i.test(lower)) {

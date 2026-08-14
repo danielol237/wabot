@@ -185,3 +185,44 @@ test("Atlas dashboard execution cockpit is owner-authenticated and CSRF-protecte
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+
+test("Atlas dashboard renders Operator Teams and protects team actions", async () => {
+  const app = express();
+  app.use(express.json({ limit: "256kb" }));
+  app.use(express.urlencoded({ extended: true }));
+  app.use("/dashboard", dashboard);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  let workspaceId = null;
+  try {
+    const csrf = (await request(server, "/dashboard/api/csrf")).json().csrf;
+    const created = await request(server, "/dashboard/api/atlas/workspaces", { method: "POST", body: { title: "Operator team cockpit", outcome: "Coordinate specialist work", _csrf: csrf } });
+    assert.equal(created.status, 201);
+    workspaceId = created.json().id;
+    const owner = process.env.OWNER_NUMBER.includes("@") ? process.env.OWNER_NUMBER : process.env.OWNER_NUMBER + "@s.whatsapp.net";
+    const teams = require("../src/tools/atlasOperatorTeams");
+    const team = teams.createOperatorTeam(owner, workspaceId, { objective: "Coordinate specialist work", roles: ["designer"] });
+
+    const page = await request(server, `/dashboard/atlas?workspace=${workspaceId}`);
+    assert.equal(page.status, 200);
+    assert.match(page.body, /Operator Teams/);
+    assert.match(page.body, /Latest team handoff/);
+    assert.match(page.body, /operatorTeamAction/);
+
+    const unauthenticated = await request(server, `/dashboard/api/atlas/${workspaceId}/operator-teams`, { auth: false, headers: { Accept: "application/json" } });
+    assert.equal(unauthenticated.status, 401);
+    const state = await request(server, `/dashboard/api/atlas/${workspaceId}/operator-teams`);
+    assert.equal(state.status, 200);
+    assert.equal(state.json().teams[0].id, team.id);
+
+    const noCsrf = await request(server, `/dashboard/api/atlas/${workspaceId}/operator-teams`, { method: "POST", body: { action: "start", _csrf: "wrong" } });
+    assert.equal(noCsrf.status, 403);
+    assert.equal(noCsrf.json().code, "csrf_invalid");
+  } finally {
+    if (workspaceId) {
+      try { require("fs").rmSync(require("path").join(atlas.ATLAS_DIR, workspaceId + ".json"), { force: true }); } catch (_) {}
+    }
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

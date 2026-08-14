@@ -70,6 +70,7 @@ const INTENTS = {
   remind: ["remind me", "set a reminder", "alert me", "notify me in"],
   help: ["help", "show commands", "what can you do", "what do you do", "menu"],
   memories: ["what do you remember", "show me what you remember", "my memories", "your memories"],
+  atlas: ["this is a project", "this is my project", "new project", "add this to", "add that to", "what is next", "what's next", "what is blocking us", "what's blocking us", "project brief", "give me the project brief", "take the next safe step", "why did you choose this", "morning brief", "morning briefing", "add a task", "create a task", "record a decision", "log a decision", "atlas"],
   links: ["give me the dashboard link", "give me link to dashboard", "link to dashboard", "open dashboard", "open the dashboard", "show me the dashboard", "dashboard link", "anime website", "open the anime website", "show me the anime website", "anime site", "give me the anime link", "give me link to anime website", "links"],
   anime: ["find anime", "search anime", "show me anime", "anime"],
   project: ["start a project", "create a learner project", "start a capstone"],
@@ -277,7 +278,7 @@ function detectIntent(text) {
       // Only match clear intent at the START of the message, never mid-sentence.
       // Using startsWith prevents normal chat like "help me search stake..." from
       // being hijacked by the help command.
-      if (lower === pattern || lower.startsWith(pattern + " ") || lower.startsWith(pattern + ",") || lower.startsWith(pattern + "?")) {
+      if (lower === pattern || lower.startsWith(pattern + " ") || lower.startsWith(pattern + ",") || lower.startsWith(pattern + "?") || lower.startsWith(pattern + ":") || lower.startsWith(pattern + "-")) {
         return intent;
       }
     }
@@ -311,7 +312,7 @@ function naturalArgs(intent, text) {
     mission: /^(?:please\s+)?(?:start|create|run)\s+(?:a\s+)?mission\s*/i,
     poll: /^(?:please\s+)?(?:create|make)\s+(?:a\s+)?poll\s*/i,
   };
-  if (["help", "memories", "links"].includes(intent)) return "";
+  if (["help", "memories", "atlas", "links"].includes(intent)) return "";
   return patterns[intent] ? value.replace(patterns[intent], "").trim() : value;
 }
 
@@ -1915,6 +1916,13 @@ const intentHandlers = {
   clear: handleClear,
   help: handleHelp,
   memories: handleMemories,
+  atlas: async (sock, msg, text, ctx) => {
+    const { reply, react } = require("./baileysHelpers");
+    const { handleAtlas, formatCreated } = require("../tools/atlasBrain");
+    await react(sock, msg, "🧭");
+    const result = await handleAtlas(ctx.senderJid, text, { chatId: ctx.chatId });
+    await reply(sock, msg, result.kind === "created" ? formatCreated(result.workspace) : result.text);
+  },
   anime: handleAnimeSearch,
   project: handleProject,
   mission: handleMission,

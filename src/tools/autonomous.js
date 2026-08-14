@@ -48,23 +48,27 @@ async function autonomousTick() {
   const ownerNumber = process.env.OWNER_NUMBER;
   if (!ownerNumber) return;
 
-  const ownerJid = ownerNumber + "@s.whatsapp.net";
+  const ownerJid = ownerNumber.includes("@") ? ownerNumber : ownerNumber + "@s.whatsapp.net";
   const lastCheck = specialUsers.get(ownerJid)?.lastCheck || 0;
   
   // Only send if more than 2 hours since last interaction
   if (now - lastCheck < 2 * 60 * 60 * 1000) return;
 
-  // Good morning / goodnight ritual check (once per day, proactive)
+  // Once daily, prefer a concrete Atlas briefing over a generic check-in.
+  // It is workspace-rate-limited and only summarizes durable project state.
   const { ritualDue, markRitualDone } = require("./humanizer");
   if (ritualDue(ownerJid, "morning")) {
-    markRitualDone(ownerJid, "morning");
     try {
-      await sockRef.sendMessage(ownerJid, { text: "morning 😊 how'd you sleep?" });
+      const { composeDailyBrief, markDelivered } = require("./atlasDigest");
+      const digest = composeDailyBrief(ownerJid, now);
+      await sockRef.sendMessage(ownerJid, { text: digest?.text || "Good morning — when you’re ready, tell me what you want to move forward today." });
+      if (digest) markDelivered(digest, now);
+      markRitualDone(ownerJid, "morning");
       specialUsers.set(ownerJid, { lastCheck: now, mood: "warm" });
-      console.log("🌅 ARIA sent good-morning ritual");
+      console.log(digest ? "🧭 ARIA sent Atlas project brief" : "🌅 ARIA sent good-morning ritual");
       return;
     } catch (e) {
-      console.error("Good-morning ritual failed:", e.message);
+      console.error("Morning Atlas briefing failed:", e.message);
     }
   }
 

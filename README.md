@@ -86,6 +86,11 @@ ARIA is conversational by default: ask naturally for help, research, builds, edi
 ### 🌐 Web surfaces
 The public root opens the catalog at `/anime`. Browse/search remain login-free; watch and download links are short-lived signed capabilities. The learner portal is at `/portal/login`, and the owner dashboard is at `/dashboard`.
 
+### 🧭 ARIA Atlas — Project Brain
+Atlas gives ARIA durable project workspaces instead of isolated one-off tasks. Say “ARIA, this is a project: launch the anime site by December,” “add this to Wabot,” “what is blocking us?”, “what is next?”, “record a decision,” “what evidence do we have?”, or “give me the project brief.” ARIA stores the project contract, tasks, milestones, evidence, decisions, mission links, and living timeline in owner-scoped atomic records under `data/atlas/`.
+
+Open `/dashboard/atlas` after owner login to see the Atlas cockpit. It shows workspaces, the North Star outcome, progress, Now/Next work, blockers, the decision ledger, the evidence vault, and recent activity. Atlas uses a balanced action policy: observation and preparation can proceed automatically, while deployments, external posts, permission changes, spending, deletion, and other commit actions require explicit approval.
+
 When the bot is running, open `https://your-public-origin/dashboard` in your browser.
 
 The dashboard requires `DASHBOARD_PASSWORD` in `.env`. The QR pairing screen is intentionally protected by the same owner session; it is not removed.

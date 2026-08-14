@@ -33,6 +33,10 @@ test("natural routing resolves capability discovery, memory recall, and website 
   assert.equal(router.resolveNaturalAction("start a project backend beginner").intent, "project");
   assert.equal(router.resolveNaturalAction("start a mission audit the bot").intent, "mission");
   assert.equal(router.resolveNaturalAction("create a poll Best anime? | One Piece | Naruto").intent, "poll");
+  assert.equal(router.resolveNaturalAction("ARIA, this is a project: launch the site by December").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("what is blocking us?").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("add a task: verify Android downloads").intent, "atlas");
+  assert.equal(router.resolveNaturalAction("record a decision: keep QR pairing owner-only").intent, "atlas");
 });
 
 test("legacy prefix commands remain resolvable during migration", () => {

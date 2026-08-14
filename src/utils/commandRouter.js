@@ -21,7 +21,7 @@ const { trackInteraction } = require("../utils/userMemory");
 const { addPreference, getPreferences, clearPreferences } = require("../utils/userPreferences");
 const { learnFact, getFacts, forgetFact } = require("../utils/learnedFacts");
 const { getMemory, saveMemory } = require("../utils/memory");
-const { getUserStore, getProfile, memoryEnabled, setMemoryEnabled, deleteMemory, clearMemories, exportMemories } = require("../utils/semanticMemory");
+const { getUserStore, getProfile, memoryEnabled } = require("../utils/semanticMemory");
 const { isOwner, isAdmin, addAdmin, removeAdmin, listAdmins, banUser, unbanUser, isBanned, muteChat, unmuteChat, isMuted } = require("../utils/permissions");
 const { findPluginCommand } = require("../utils/pluginLoader");
 const { createTask, getTasksForChat, deactivateTaskForChat } = require("../utils/backgroundTasks");
@@ -47,7 +47,14 @@ const { setReminder } = require("../tools/reminders");
 const { buildProject, continueProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
-const PREFIX = process.env.BOT_PREFIX || "!";
+// Natural-language routing is the default. The legacy prefix remains accepted
+// as a compatibility path so existing chats and scheduled instructions survive.
+const PREFIX = String(process.env.BOT_PREFIX || "").trim().toLowerCase();
+const LEGACY_PREFIX = "!";
+
+function getMatchedPrefix(lower) {
+  return [PREFIX, LEGACY_PREFIX].filter(Boolean).sort((a, b) => b.length - a.length).find((prefix) => lower.startsWith(prefix)) || "";
+}
 
 const NAME_TRIGGERS = [
   BOT_NAME, BOT_NAME + ",", BOT_NAME + "!",
@@ -61,15 +68,22 @@ const INTENTS = {
   download: ["download", "dl this", "get this video", "save this"],
   scrape: ["read this link", "open this link", "check this site", "visit", "browse", "summarize this link", "what's on this site"],
   remind: ["remind me", "set a reminder", "alert me", "notify me in"],
-  clear: ["clear memory", "reset chat", "forget everything", "start over"],
-  help: ["help", "show commands", "what can you do", "menu"],
+  help: ["help", "show commands", "what can you do", "what do you do", "menu"],
+  memories: ["what do you remember", "show me what you remember", "my memories", "your memories"],
+  links: ["give me the dashboard link", "give me link to dashboard", "link to dashboard", "open dashboard", "open the dashboard", "show me the dashboard", "dashboard link", "anime website", "open the anime website", "show me the anime website", "anime site", "give me the anime link", "give me link to anime website", "links"],
+  anime: ["find anime", "search anime", "show me anime", "anime"],
+  project: ["start a project", "create a learner project", "start a capstone"],
+  mission: ["start a mission", "create a mission", "run a mission"],
+  poll: ["create a poll", "make a poll"],
   sticker: ["make this a sticker", "sticker this", "turn into sticker", "create sticker"],
   voiceReply: ["say this", "voice note", "speak this", "read this out", "say it out loud"],
   translate: ["translate", "say this in", "how do you say"],
   weather: ["weather in", "weather for", "what's the weather"],
   news: ["news about", "latest news", "news on", "what's happening with"],
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
-  build: ["build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
+  delegate: ["delegate", "delegate this", "orchestrate", "hand this off"],
+  build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
+  edit: ["edit", "edit this", "change the file", "update the file", "fix the file"],
   github: ["on github", "look on github", "github search", "search github", "find it on github", "git hub"],
   reddit: ["on reddit", "look on reddit", "reddit search", "search reddit", "find it on reddit"],
   wikipedia: ["on wikipedia", "wikipedia search", "search wikipedia", "on wiki", "wikipedia about"],
@@ -229,7 +243,6 @@ function registerBuiltinCommands() {
   registerCommand({ name: "clearprefs", aliases: ["resetprefs"], category: "dev", description: "Clear preferences", handler: handleClearPrefs, ownerOnly: false });
   registerCommand({ name: "voicemode", aliases: ["voice", "vm"], category: "dev", description: "Toggle voice replies", handler: handleVoiceMode, ownerOnly: false });
   registerCommand({ name: "memories", aliases: ["remembered", "mymemory"], category: "dev", description: "See what I remember about you", handler: handleMemories, ownerOnly: false });
-  registerCommand({ name: "memory", aliases: ["memorysettings", "privacy"], category: "dev", description: "Control ARIA memory: !memory on|off|export|clear|forget <id>", handler: handleMemoryControl, ownerOnly: false });
   registerCommand({ name: "mission", aliases: ["missions", "msn"], category: "dev", description: "Create/resume durable background missions", handler: handleMission, ownerOnly: true });
   registerCommand({ name: "world", aliases: ["worldmodel", "model"], category: "dev", description: "View ARIA's world model", handler: handleWorld, ownerOnly: true });
   registerCommand({ name: "delegate", aliases: ["orbit", "orchestrate"], category: "dev", description: "Run the agent-team mission orchestrator", handler: handleDelegate, ownerOnly: true });
@@ -277,9 +290,54 @@ function triggeredByName(text) {
   return NAME_TRIGGERS.some(t => lower.startsWith(t) || lower.includes(t));
 }
 
+function stripAriaAddress(text) {
+  let value = String(text || "").trim();
+  const escaped = BOT_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  value = value.replace(new RegExp(`^(?:hey\\s+|yo\\s+|ok\\s+)?${escaped}(?:\\s*[,!:?-]\\s*|\\s+)`, "i"), "").trim();
+  if (value.toLowerCase() === BOT_NAME) return "";
+  return value;
+}
+
+function naturalArgs(intent, text) {
+  const value = stripAriaAddress(text);
+  const patterns = {
+    build: /^(?:please\s+)?(?:build|create|make)(?:\s+me)?(?:\s+(?:a|an))?\s*/i,
+    delegate: /^(?:please\s+)?(?:delegate|orchestrate|hand this off)(?:\s+(?:this|that|task|mission))?\s*/i,
+    agent: /^(?:please\s+)?(?:figure out|plan and|research and|find and compare|deep dive on)\s*/i,
+    edit: /^(?:please\s+)?(?:edit|change|update|fix)(?:\s+(?:this|the file))?\s*/i,
+    links: /^(?:please\s+)?(?:give me|show me|open)?\s*(?:the\s+)?(?:dashboard|anime)(?:\s+(?:link|website|site))?\s*/i,
+    anime: /^(?:please\s+)?(?:(?:find|search|show me)\s+(?:some\s+)?)?anime\s*/i,
+    project: /^(?:please\s+)?(?:start|create)\s+(?:a\s+)?(?:learner\s+)?(?:project|capstone)\s*/i,
+    mission: /^(?:please\s+)?(?:start|create|run)\s+(?:a\s+)?mission\s*/i,
+    poll: /^(?:please\s+)?(?:create|make)\s+(?:a\s+)?poll\s*/i,
+  };
+  if (["help", "memories", "links"].includes(intent)) return "";
+  return patterns[intent] ? value.replace(patterns[intent], "").trim() : value;
+}
+
+function findRegisteredCommand(token) {
+  const normalized = String(token || "").toLowerCase();
+  return commands.find((command) => command.name === normalized) ||
+    commands.find((command) => (command.aliases || []).includes(normalized)) || null;
+}
+
+function resolveNaturalAction(text) {
+  const cleaned = stripAriaAddress(text);
+  if (!cleaned) return null;
+  const intent = detectIntent(cleaned);
+  if (intent && intentHandlers[intent]) {
+    return { handler: intentHandlers[intent], intent, args: naturalArgs(intent, cleaned), command: findRegisteredCommand(intent) };
+  }
+  const token = cleaned.split(/\s+/)[0];
+  const command = findRegisteredCommand(token);
+  if (!command) return null;
+  return { handler: command.handler, intent: command.name, args: cleaned.slice(token.length).trim(), command };
+}
+
 // ── Route message ────────────────────────────────────────────
 async function routeMessage(sock, msg, context) {
   const { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins } = context;
+  const matchedPrefix = getMatchedPrefix(lower);
   
   // ── MODERATION CHECK ───────────────────────────────────────
   if (isGroup) {
@@ -296,10 +354,10 @@ async function routeMessage(sock, msg, context) {
   }
 
   // ── PREFIX COMMANDS ────────────────────────────────────────
-  if (lower.startsWith(PREFIX)) {
-    const cmdText = lower.slice(PREFIX.length).trim();
+  if (matchedPrefix) {
+    const cmdText = lower.slice(matchedPrefix.length).trim();
     const cmdName = cmdText.split(/\s+/)[0];
-    const args = text.slice(PREFIX.length).trim().slice(cmdName.length).trim();
+    const args = text.slice(matchedPrefix.length).trim().slice(cmdName.length).trim();
     
     // Resolve collisions deterministically: an exact command NAME always beats
     // an alias. e.g. !build → the "build" command, not academy's "project"
@@ -342,9 +400,9 @@ async function routeMessage(sock, msg, context) {
 
   // ── PLUGIN COMMANDS (via findPluginCommand) ────────────────
   // Only reached if no built-in command matched the prefix
-  if (lower.startsWith(PREFIX)) {
-    const commandName = lower.slice(PREFIX.length).split(/\s+/)[0];
-    const args = text.slice(PREFIX.length).trim().slice(commandName.length).trim().split(/\s+/);
+  if (matchedPrefix) {
+    const commandName = lower.slice(matchedPrefix.length).split(/\s+/)[0];
+    const args = text.slice(matchedPrefix.length).trim().slice(commandName.length).trim().split(/\s+/);
     const found = findPluginCommand(loadedPlugins, commandName);
     if (found) {
       const ctx = {
@@ -368,6 +426,39 @@ async function routeMessage(sock, msg, context) {
     return;
   }
 
+  // ── NATURAL-LANGUAGE ACTIONS ────────────────────────────────
+  // Normal conversation still falls through to the AI. Clear action-shaped
+  // requests reuse the registered command handlers so build/edit/delegate and
+  // other capabilities behave identically without a prefix.
+  const natural = resolveNaturalAction(text);
+  if (natural) {
+    const cmd = natural.command;
+    if (cmd?.ownerOnly && !isOwner(senderJid)) {
+      const { reply: _rp } = require("./baileysHelpers");
+      await _rp(sock, msg, "❌ That capability is owner-only.");
+      return;
+    }
+    if (cmd?.category === "group" && !isOwner(senderJid)) {
+      const localAdmin = isAdmin(senderJid, chatId);
+      const groupAdmin = isSenderAdmin ? await isSenderAdmin(sock, chatId, senderJid).catch(() => false) : false;
+      if (!localAdmin && !groupAdmin) {
+        const { reply: _rp } = require("./baileysHelpers");
+        await _rp(sock, msg, "❌ You need admin rights for that.");
+        return;
+      }
+    }
+    try {
+      try { require("../tools/dashboardTelemetry").record("natural_action", { detail: natural.intent }); } catch (_) {}
+      await natural.handler(sock, msg, natural.args || text, context);
+      try { require("./eventLog").track("natural_action", natural.intent); } catch (_) {}
+    } catch (err) {
+      const { reply: _rp } = require("./baileysHelpers");
+      await _rp(sock, msg, `⚠️ I couldn't complete that action: ${err.message}`).catch(() => {});
+      try { require("./eventLog").track("error", `Natural action ${natural.intent} failed: ${err.message.slice(0, 80)}`); } catch (_) {}
+    }
+    return;
+  }
+
   // ── AI RESPONSE ────────────────────────────────────────────
   return handleAIResponse(sock, msg, text, context);
 }
@@ -385,47 +476,25 @@ async function handleAlive(sock, msg, args, ctx) {
 async function handleHelp(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "✨");
-
-  const catEmoji = {
-    meta: "🛠️", admin: "👑", group: "👥", utility: "🔧", fun: "🎲",
-    anime: "🎬", economy: "💰", dev: "💻",
-    games: "🎮", music: "🎵", ai: "🤖", research: "🔍",
-  };
-
-  const categories = {};
-  for (const cmd of commands) {
-    if (cmd.ownerOnly && !isOwner(ctx.senderJid)) continue;
-    if (!categories[cmd.category]) categories[cmd.category] = [];
-    categories[cmd.category].push(cmd);
-  }
-
-  const want = args?.trim().toLowerCase();
-  const keys = want && categories[want] ? [want] : Object.keys(categories);
-
-  const total = commands.length;
-  const tag = isOwner(ctx.senderJid) ? "dad" : "bestie";
-
-  // Stylish, ARIA-flavored menu header + a call-to-action
-  const parts = [
-    `╭── ✨ *ARIA* ✨ ──╮`,
-    `_Hey ${tag}, I've got ${total} tricks up my sleeve._`, ``,
+  const owner = isOwner(ctx.senderJid);
+  const base = String(process.env.BASE_URL || "").replace(/\/$/, "");
+  const lines = [
+    "╭── ✨ *ARIA* ✨ ──╮",
+    "I understand ordinary requests. You do not need a command prefix.",
+    "",
+    "💬 *Everyday help* — ask questions, explain things, translate, summarize links, search the web, check weather/news, or talk normally.",
+    "🏗️ *Build and code* — say ‘build a website for…’, ‘debug this’, ‘edit this file…’, or ‘research and compare…’.",
+    "🎬 *Anime and media* — say ‘find anime…’, ‘watch episode…’, ‘download this’, or ‘make this a sticker’.",
+    "⏰ *Personal operator* — say ‘remind me…’, ‘track this project’, ‘start a mission’, or ‘open my learner portal’.",
+    "🧠 *Companion memory* — ask ‘what do you remember about me?’ or tell ARIA something worth keeping; memory is curated internally rather than controlled by prefix commands.",
+    "🔗 *Web surfaces* — ask ‘give me the dashboard link’ or ‘open the anime website’.",
   ];
-  for (const cat of keys) {
-    const cmds = categories[cat].slice().sort((a, b) => a.name.localeCompare(b.name));
-    const emoji = catEmoji[cat] || "📦";
-    parts.push(`${emoji} *${cat.charAt(0).toUpperCase() + cat.slice(1)}*`);
-    for (const cmd of cmds) {
-      const aliases = cmd.aliases.length > 0 ? ` _(${cmd.aliases[0]})_` : "";
-      parts.push(`  ▸ !${cmd.name}${aliases} — ${cmd.description}`);
-    }
-    parts.push(``);
+  if (owner) {
+    lines.push("", "🔐 *Owner capabilities* — build, edit, delegate missions, manage the dashboard, configure WhatsApp, inspect health, and administer the bot. These still require owner authorization even without a prefix.");
   }
-  if (want && !categories[want]) {
-    return reply(sock, msg, `🤨 *${want}?* Never heard of that category, ${tag}. Try one of these:\n${Object.keys(categories).map(c=>`▸ ${c}`).join("\n")}`);
-  }
-  parts.push(`╰────────────────╯`);
-  parts.push(`_Type !help <category> to see one section. Or just talk to me normally — I don't bite... much. 😌_`);
-  await reply(sock, msg, parts.join("\n"));
+  if (base) lines.push("", `Dashboard: ${base}/dashboard\nAnime: ${base}/anime\nLearner portal: ${base}/portal/login`);
+  lines.push("", "Try speaking naturally: ‘ARIA, build me a landing page’, ‘delegate this research’, ‘give me the dashboard link’, or ‘what do you remember about me?’", "╰────────────────╯");
+  await reply(sock, msg, lines.join("\n"));
 }
 
 async function handleStats(sock, msg, args, ctx) {
@@ -1759,35 +1828,6 @@ async function handleMemories(sock, msg, args, ctx) {
   await reply(sock, msg, out);
 }
 
-async function handleMemoryControl(sock, msg, args, ctx) {
-  const { reply } = require("./baileysHelpers");
-  const input = String(args || "").trim();
-  const [command, ...rest] = input.split(/\s+/);
-  const op = (command || "status").toLowerCase();
-  if (op === "on" || op === "enable") {
-    setMemoryEnabled(ctx.senderJid, true);
-    return reply(sock, msg, "🧠 Memory capture is on. You can turn it off any time with !memory off.");
-  }
-  if (op === "off" || op === "disable") {
-    setMemoryEnabled(ctx.senderJid, false);
-    return reply(sock, msg, "🧠 Memory capture is off. Existing memories remain until you use !memory clear.");
-  }
-  if (op === "clear" || op === "delete-all") {
-    clearMemories(ctx.senderJid);
-    return reply(sock, msg, "🗑️ Your semantic memories and learned companion profile have been cleared from ARIA’s memory store.");
-  }
-  if (op === "forget" || op === "delete") {
-    const id = rest.join(" ").trim();
-    if (!id) return reply(sock, msg, "Usage: !memory forget <memory id>\nUse !memories to see stored memory IDs.");
-    return reply(sock, msg, deleteMemory(ctx.senderJid, id) ? "✅ Deleted that memory." : "I couldn't find that memory ID.");
-  }
-  if (op === "export") {
-    const payload = JSON.stringify(exportMemories(ctx.senderJid), null, 2);
-    return reply(sock, msg, "🧾 *Your ARIA memory export*\n\n```json\n" + payload.slice(0, 6000) + "\n```");
-  }
-  return reply(sock, msg, `Memory capture is currently ${memoryEnabled(ctx.senderJid) ? "ON" : "OFF"}.\n\nCommands:\n• !memory on\n• !memory off\n• !memory export\n• !memory forget <id>\n• !memory clear`);
-}
-
 async function handleLearn(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !learn <fact>");
@@ -1874,6 +1914,20 @@ const intentHandlers = {
   },
   clear: handleClear,
   help: handleHelp,
+  memories: handleMemories,
+  anime: handleAnimeSearch,
+  project: handleProject,
+  mission: handleMission,
+  poll: handlePoll,
+  links: async (sock, msg, text, ctx) => {
+    const { reply, react } = require("./baileysHelpers");
+    const base = String(process.env.BASE_URL || "").replace(/\/$/, "");
+    const origin = base || "(set BASE_URL to receive absolute links)";
+    await react(sock, msg, "🔗");
+    await reply(sock, msg, `Here you go:\n\n🌐 Dashboard: ${base ? `${origin}/dashboard` : "/dashboard"}\n🎬 Anime site: ${base ? `${origin}/anime` : "/anime"}\n🎓 Learner portal: ${base ? `${origin}/portal/login` : "/portal/login"}`);
+  },
+  delegate: async (sock, msg, text, ctx) => handleDelegate(sock, msg, naturalArgs("delegate", text), ctx),
+  edit: async (sock, msg, text, ctx) => handleEditFile(sock, msg, naturalArgs("edit", text), ctx),
   sticker: handleStickerIntent,
   voiceReply: async (sock, msg, text, ctx) => {
     const { reply, react } = require("./baileysHelpers");
@@ -2217,5 +2271,7 @@ module.exports = {
   commands,
   detectIntent,
   triggeredByName,
+  resolveNaturalAction,
+  naturalArgs,
   detectCommandCollisions,
 };

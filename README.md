@@ -26,7 +26,7 @@ Pair WhatsApp from the owner dashboard. Open `/dashboard`, sign in with `DASHBOA
 | `DASHBOARD_PASSWORD` | No | Password for web dashboard |
 | `ELEVENLABS_API_KEY` | No | Text-to-speech voice responses |
 | `BOT_NAME` | No | Bot name trigger (default: aria) |
-| `BOT_PREFIX` | No | Command prefix (default: !) |
+| `BOT_PREFIX` | No | Optional legacy command prefix; leave empty for natural-language-first mode |
 | `BASE_URL` | Required for Google sign-in | Public origin with no trailing slash, for example `https://wabot-ytal.onrender.com` |
 | `GOOGLE_CLIENT_ID` | No | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | No | Google OAuth client secret |
@@ -76,18 +76,12 @@ Send a voice note → ARIA transcribes it (Groq Whisper) → AI thinks → repli
 Spawns happen automatically across all chats. Rarity tiers: Common → Uncommon → Rare → Super Rare → Legendary → Mythical. Time-of-day type bonuses. Shiny chance.
 
 ### 🎮 Games
-`!joke`, `!truth`, `!dare`, `!roast`, `!ship`, `!ttt`, `!dice`, `!card`, `!flip`, `!balance`, `!inventory`, `!leaderboard`
+Ask ARIA for a joke, truth, dare, roast, ship calculation, tic-tac-toe, dice roll, coin flip, card draw, balance, inventory, or leaderboard. Legacy prefix forms remain compatible.
 
 ### 🛠️ Development Tools (Owner Only)
-These execute code or write files on the server, so they're restricted to `OWNER_NUMBER`:
-`!run js/py/sh <code>` — execute code
-`!build <app description>` — AI builds full apps
-`!edit <file> <instruction>` — edit project files
-`!agent <task>` — multi-step AI agent
-`!job create <task>` — background AI job
-`!evolve` / `!selfcheck` — self-improvement engine
+These execute code or write files on the server, so they remain restricted to `OWNER_NUMBER`. Ask ARIA naturally: “run this code”, “build me an app”, “edit this file”, “figure this out”, “delegate this mission”, “check your health”, or “improve this project”. Legacy prefix forms are still accepted during migration, but natural requests use the same authorization checks.
 
-Other dev commands open to everyone: `!remember`, `!preferences`, `!learn`, `!facts`, and `!memories`. Use `!memory on|off|export|forget <id>|clear` to control ARIA’s semantic memory. Memory capture is transparent, and clearing it removes the stored semantic memories and learned companion profile.
+ARIA is conversational by default: ask naturally for help, research, builds, edits, missions, anime, reminders, links, or memory recall. Legacy prefix commands remain accepted for compatibility, but they are no longer required. Ask “what do you remember about me?” to inspect relevant companion memory; ARIA curates her own memory internally, with storage safeguards and retention limits handled by the application rather than user-facing toggle commands.
 
 ### 🌐 Web surfaces
 The public root opens the catalog at `/anime`. Browse/search remain login-free; watch and download links are short-lived signed capabilities. The learner portal is at `/portal/login`, and the owner dashboard is at `/dashboard`.
@@ -106,11 +100,11 @@ The dashboard requires `DASHBOARD_PASSWORD` in `.env`. The QR pairing screen is 
 - `/portal/login` — learner email/password and Google sign-in
 - `/anime` — public catalog, watch, and download pages
 
-### 🔧 Other Commands
-`!search`, `!weather`, `!translate`, `!news`, `!lyrics`, `!sticker`, `!carbon`, `!wallpaper`, `!anime`, `!episodes`, `!trending`, `!remind`, `!poll`, `!say` (TTS), `!kick`, `!promote`, `!tagall`, `!warn`, `!clear`, `!remember`
+### 🔧 Natural requests
+Say “search the web for…”, “what’s the weather in…”, “translate this…”, “find the latest news about…”, “make this a sticker”, “show me anime…”, “remind me…”, “create a poll”, “say this out loud”, “kick this member”, “promote this member”, or “remember that I prefer…”. ARIA resolves the request without a prefix. Legacy forms such as `!search` still work during migration.
 
 ### 🎬 Anime Downloads — runtime requirements
-Anime downloads (`!animedl`, the web browser) depend on two things that are
+Anime downloads (natural anime requests and the web browser) depend on two things that are
 **not npm packages**, so they must exist on the host:
 
 - **Node 22**, **`yt-dlp`**, **`yt-dlp-ejs`**, **`ffmpeg`**, and **`ffprobe`** — used to solve current JavaScript challenges, download, merge, validate, and deliver the final video. The production Dockerfile pins and verifies them; Render deployments must use that Dockerfile or run `build.sh` with the same Node 22 baseline. If one is missing, ARIA logs a clear error
@@ -163,4 +157,4 @@ pm2 startup
 ```
 
 ## Scheduled & Recurring Messages
-`!schedule`/`!remind` messages are persisted to `data/schedules.json` and re-armed automatically on restart, so they survive redeploys. For persistent production operation, use Render/Docker/PM2 or another always-on host; the default sandbox is not a production scheduler.
+Natural reminder and schedule requests are persisted to `data/schedules.json` and re-armed automatically on restart, so they survive redeploys. Legacy prefix forms remain compatible. For persistent production operation, use Render/Docker/PM2 or another always-on host; the default sandbox is not a production scheduler.

@@ -73,6 +73,7 @@ const MAX_DOWNLOAD_MB = Number(process.env.ANIME_MAX_MB || 1500);
 const WHATSAPP_MAX_MB = Number(process.env.ANIME_WHATSAPP_MAX_MB || 150);
 const MEDIA_RETENTION_MS = Math.max(10 * 60 * 1000, Number(process.env.ANIME_MEDIA_RETENTION_MS || 6 * 60 * 60 * 1000));
 const ORPHAN_RETENTION_MS = Math.max(MEDIA_RETENTION_MS, Number(process.env.ANIME_ORPHAN_RETENTION_MS || 24 * 60 * 60 * 1000));
+const DOWNLOAD_TIMEOUT_MS = Math.max(60 * 1000, Number(process.env.ANIME_DOWNLOAD_TIMEOUT_MS || 8 * 60 * 1000));
 
 function cleanupTempFiles(now = Date.now()) {
   try {
@@ -241,8 +242,15 @@ function downloadStream(job, url, headers, maxMB, quality = "best", onProgress) 
     }
     args.push(url);
 
-    const proc = spawn("yt-dlp", args, { timeout: 600000 });
+    const proc = spawn("yt-dlp", args, { timeout: DOWNLOAD_TIMEOUT_MS });
     let errTail = "";
+    let timedOut = false;
+    const killTimer = setTimeout(() => {
+      timedOut = true;
+      errTail = (errTail + "\nDownload timed out while waiting for the media source.").slice(-800);
+      try { proc.kill("SIGKILL"); } catch (_) {}
+    }, DOWNLOAD_TIMEOUT_MS);
+    killTimer.unref?.();
     const onLine = (line) => {
       if (!line) return;
       const p = parseProgress(line);
@@ -257,11 +265,13 @@ function downloadStream(job, url, headers, maxMB, quality = "best", onProgress) 
     proc.stderr.on("data", (d) => String(d).split(/\r?\n/).forEach(onLine));
 
     proc.on("error", (err) => {
+      clearTimeout(killTimer);
       cleanup();
       resolve({ success: false, error: err.message });
     });
 
     proc.on("close", async (code) => {
+      clearTimeout(killTimer);
       const files = fs.readdirSync(TEMP_DIR).filter((f) => f.startsWith(id));
       const fp = files.length ? path.join(TEMP_DIR, files[0]) : null;
       if (fp) {
@@ -278,7 +288,7 @@ function downloadStream(job, url, headers, maxMB, quality = "best", onProgress) 
         } catch (_) {}
       }
       cleanup();
-      resolve({ success: false, error: (code !== 0 ? "yt-dlp exited " + code + ": " : "") + (errTail.trim().split("\n").pop() || "Download failed.") });
+      resolve({ success: false, error: (timedOut ? "yt-dlp timed out while waiting for the media source." : (code !== 0 ? "yt-dlp exited " + code + ": " : "")) + (timedOut ? "" : (errTail.trim().split("\n").pop() || "Download failed.")) });
     });
 
     function cleanup() {
@@ -613,13 +623,13 @@ function getOwnerStats(ownerId) {
   return { active: active.length, queued: active.filter((job) => job.status === "queued").length, running: active.filter((job) => job.status === "running").length };
 }
 
-function findActiveJob({ ownerId, name, episode, preferred } = {}) {
+function findActiveJob({ ownerId, name, episode, preferred, quality } = {}) {
   const key = ownerId ? String(ownerId) : null;
   const title = String(name || "").trim().toLowerCase();
   const ep = Number(episode) || 1;
   const pref = preferred || null;
   return [...jobs.values()].find((job) => (job.status === "queued" || job.status === "running") &&
-    job.ownerId === key && String(job.name || "").trim().toLowerCase() === title && Number(job.episode) === ep && (job.preferred || null) === pref) || null;
+    job.ownerId === key && String(job.name || "").trim().toLowerCase() === title && Number(job.episode) === ep && (job.preferred || null) === pref && (quality == null || String(job.quality || "best") === String(quality))) || null;
 }
 
 function emit(job) {
@@ -641,6 +651,9 @@ module.exports = {
 // still create job records, but must not inherit or execute live downloads.
 if (process.env.ANIME_DISABLE_WORKER !== "1") {
   loadQueue();
+  // Recovery populates the queue before the worker loop starts. Pump now so
+  // queued website/WhatsApp downloads do not remain stranded after a restart.
+  pump();
   cleanupTempFiles();
   setInterval(() => cleanupTempFiles(), 15 * 60 * 1000).unref();
   checkYtDlp();

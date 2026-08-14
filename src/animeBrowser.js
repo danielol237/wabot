@@ -447,7 +447,7 @@ router.get("/proxy", async (req, res) => {
   if (!target.ok) return res.status(403).send("This media source is not authorized.");
   const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36", ...(payload.headers || {}) };
   if (req.headers.range) headers.Range = req.headers.range;
-  const upstream = https.get(target.url, { headers, lookup: (_hostname, _options, callback) => callback(null, target.address, target.family) }, (response) => {
+  const upstream = https.get(target.url, { headers, lookup: (_hostname, options, callback) => options?.all ? callback(null, [{ address: target.address, family: target.family }]) : callback(null, target.address, target.family) }, (response) => {
     res.status(response.statusCode || 200);
     for (const key of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified"]) if (response.headers[key]) res.setHeader(key, response.headers[key]);
     res.setHeader("Cache-Control", "private, max-age=60");

@@ -109,10 +109,13 @@ async function probeFfprobe(url, candidate) {
     "-select_streams", "v:0",
     "-show_entries", "stream=codec_type,width,height,codec_name:format=duration",
     "-of", "json",
+    "-rw_timeout", "15000000",
   ];
-  if (candidate?.headers?.Referer) args.push("-headers", `Referer: ${candidate.headers.Referer}\r\n`);
+  const forwarded = sanitizeHeaders(candidate?.headers || {});
+  const headerText = Object.entries(forwarded).map(([key, value]) => `${key}: ${value}\r\n`).join("");
+  if (headerText) args.push("-headers", headerText);
   args.push(url);
-  const r = await exec("ffprobe", args, 45000);
+  const r = await exec("ffprobe", args, 18000);
   if (r.err) return { ok: false, reason: "ffprobe failed: " + String(r.stderr).slice(0, 200) };
   try {
     const j = JSON.parse(r.stdout);
@@ -143,7 +146,9 @@ async function validateCandidate(candidate) {
   // proceed to yt-dlp which is authoritative.
   const isHls = /m3u8/i.test(url) || /m3u8/i.test(http.contentType || "");
   if (!http.ok && !isHls) {
-    out.ok = false; out.reason = `HTTP ${http.status} — not a media response`; out.status = http.status;
+    out.ok = false;
+    out.status = http.status || null;
+    out.reason = http.error ? `HTTP probe failed: ${http.error}` : `HTTP ${http.status || "unavailable"} — not a media response`;
     return out;
   }
 
@@ -158,10 +163,26 @@ async function validateCandidate(candidate) {
   // 4. ffprobe stream check — confirm real video, get dimensions/duration.
   //    Skip for HLS if it's slow; direct MP4 we always probe.
   if (!isHls) {
+    const signedDirect = candidate.type === "mp4" && /[?&](?:sign|token|expires|t)=/i.test(target.url.toString());
+    if (signedDirect) {
+      out.steps.push({ name: "ffprobe", ok: true, detail: "deferred to local file validation after download (signed direct MP4)" });
+      out.ffprobeDeferred = true;
+    } else {
     const ff = await probeFfprobe(target.url.toString(), candidate);
-    out.steps.push({ name: "ffprobe", ok: ff.ok, detail: ff.ok ? `${ff.width}x${ff.height} · ${ff.codec}` : ff.reason });
-    if (!ff.ok) { out.ok = false; out.reason = "ffprobe rejected stream: " + ff.reason; return out; }
-    out.width = ff.width; out.height = ff.height; out.codec = ff.codec; out.duration = ff.duration;
+    if (!ff.ok) {
+      // Some signed direct MP4 CDNs support HTTP range + yt-dlp extraction but
+      // do not answer a second remote ffprobe seek reliably. Accept the source
+      // only when both earlier checks succeeded; the downloaded file is still
+      // required to pass local ffprobe in animeJobManager before delivery.
+      const directMedia = http.ok && /video|mp4|octet-stream/i.test(http.contentType || "") && yt.ok;
+      if (!directMedia) { out.ok = false; out.reason = "ffprobe rejected stream: " + ff.reason; return out; }
+      out.steps.push({ name: "ffprobe", ok: true, detail: "deferred to local file validation after download" });
+      out.ffprobeDeferred = true;
+    } else {
+      out.steps.push({ name: "ffprobe", ok: true, detail: `${ff.width}x${ff.height} · ${ff.codec}` });
+      out.width = ff.width; out.height = ff.height; out.codec = ff.codec; out.duration = ff.duration;
+    }
+    }
   } else {
     out.steps.push({ name: "ffprobe", ok: true, detail: "hls — validated via yt-dlp" });
   }

@@ -8,6 +8,7 @@ Built and working:
 - Multi-provider AI chat with provider telemetry and fallback chains (Cerebras, Gemini, Groq, OpenRouter)
 - Persistent per-chat history, unified profile data, semantic memories, preferences, facts, project context, and a transparent operational self-model that carries continuity across sessions
 - Vision, voice transcription, text-to-speech, stickers, image generation, and yt-dlp-backed media tools
+- Z.AI is scoped exclusively to image generation, asynchronous video generation, and vision/image analysis; text and chat remain on the existing provider stack, with bounded fallback behavior where configured
 - Web search and URL browsing with outbound URL safety checks
 - App builder with planning, generation, build verification, repair, project state, zip delivery, and optional deployment
 - Think mode, file editing, code debugging, sandboxed code execution, and durable mission execution
@@ -21,6 +22,7 @@ Built and working:
 - ARIA Atlas v6 Delegated Operator Teams: owner-scoped researcher, designer, builder, verifier, and release-review role packets; bounded attempts, duration, and output budgets; accepted evidence-backed handoffs; explicit verifier quality gates; blocked-packet recovery proposals; approval-aware team sequencing; natural-language team controls; and authenticated dashboard visibility
 - ARIA Atlas v7 Project Knowledge Graph and Artifact Vault: bounded owner-scoped requirement, decision, risk, task, evidence, artifact, execution, and external-reference nodes; typed provenance edges; deterministic projections from existing Atlas records; artifact deduplication and safe URL/path metadata; freshness and conflict diagnostics; artifact tracing; natural-language graph queries; and authenticated dashboard graph visibility
 - ARIA Atlas v8 Connected Delivery: verified GitHub and Render awareness through the existing signed Sentinel intake; owner-scoped repository/service mappings; provider snapshots for pull requests, checks, builds, deploys, and availability; release-readiness assessment; evidence-linked delivery proposals; owner approve/reject/resolve decisions with explicit no-side-effect status; protected dashboard controls; and one shared ARIA visual mark across the dashboard, anime catalog, learner portal, and pairing page
+- ARIA V9: a shared orbital-ribbon feminine identity across public surfaces, a light editorial/operator visual system, deterministic Google OAuth redirect handling, verified identity and email checks, and account reuse by email across learner signup paths
 
 Known gaps:
 - V6 roles are bounded specialist prompt contexts coordinated by one durable mission runtime, not isolated conscious agents or independent services with separate failure domains

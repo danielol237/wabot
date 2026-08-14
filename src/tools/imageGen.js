@@ -1,6 +1,12 @@
 const axios = require("axios");
+const zai = require("./zaiMedia");
 
 async function generateImage(prompt) {
+  if (zai.configured() && process.env.ZHIPU_IMAGE_ENABLED !== "0") {
+    const generated = await zai.generateImage(prompt, { userId: "aria-image" });
+    if (generated.success) return generated;
+    console.warn("Z.AI image generation failed; using Pollinations fallback:", generated.error);
+  }
   try {
     // Pollinations.ai — free, no API key, no rate limits
     const encodedPrompt = encodeURIComponent(prompt);

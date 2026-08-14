@@ -9,6 +9,7 @@ const path = require("path");
 const { execFile } = require("child_process");
 const axios = require("axios");
 const { generateImage } = require("./imageGen");
+const zai = require("./zaiMedia");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 
@@ -72,6 +73,15 @@ function buildFightVideo(imageBuffers, overlayText, outputPath) {
 
 // High-level: generate N fight images + build a motion-comic video.
 async function createDeathBattleVideo(characterA, characterB, winner, extra = "") {
+  if (zai.configured() && process.env.ZHIPU_VIDEO_ENABLED !== "0") {
+    const prompt = `Create a short anime-style death battle video: ${characterA} versus ${characterB}. Show a dramatic confrontation, clear readable movement, an energy clash, and a decisive final pose for ${winner || "the winner"}. Keep the characters visually consistent, use cinematic framing, and avoid text overlays. ${String(extra || "").slice(0, 180)}`;
+    const generated = await zai.generateVideo(prompt, { userId: "aria-deathbattle" });
+    if (generated.success) {
+      return { success: true, provider: "zai", url: generated.url, fileUrl: generated.url, taskId: generated.taskId };
+    }
+    console.warn("Z.AI video generation failed; using motion-comic fallback:", generated.error);
+  }
+
   const scenes = [
     `anime fight, ${characterA} vs ${characterB}, facing off, dramatic pose, manga style`,
     `anime battle, ${characterA} attacking ${characterB}, energy clash, intense, manga`,

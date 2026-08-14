@@ -294,6 +294,8 @@ main{max-width:1100px;margin:0 auto;padding:84px 22px 40px}
 .mobile-nav a .i{font-size:18px;display:block}
 @media(min-width:641px){.mobile-nav{display:none}}
 @media(max-width:640px){main{padding-bottom:70px}}
+/* ARIA V9 public editorial system */
+:root{--bg:#fbfafc;--panel:#fff;--panel2:#f7f3f9;--panel3:#eee8f2;--line:#e7e1eb;--line2:#d7cce0;--text:#1a1720;--muted:#6d6678;--faint:#958b9f;--accent:#8e6bd6;--cyan:#548fb4;--pink:#ed7184;--green:#3a9c8e;--amber:#b47a31;--red:#c54f66}body{background:radial-gradient(900px 500px at 92% -8%,#f2eafa,transparent 62%),radial-gradient(700px 420px at -8% 108%,#e5f3f1,transparent 58%),var(--bg);color:var(--text);font-family:"DM Sans",Inter,"Segoe UI",system-ui,sans-serif}.grad{background:none;color:var(--accent)}.kicker{color:var(--accent);letter-spacing:.18em}.hint{color:var(--faint)}.nav{padding:15px 28px;background:rgba(255,255,255,.86);border-bottom-color:var(--line);box-shadow:0 8px 30px rgba(55,36,76,.04)}.nav .brand{display:flex;align-items:center;gap:9px;font-size:15px;letter-spacing:.1em}.nav .brand span{color:var(--text)}.nav .brand img{width:30px;height:30px;border-radius:9px;background:#f2eafa;box-shadow:0 5px 14px rgba(142,107,214,.13)}.nav .links{color:var(--muted)}.nav .links a:hover{color:var(--text)}.nav .links a.cbtn{color:var(--accent)}main{max-width:1180px;padding:106px 28px 56px}.section{margin:82px 0}.section-head{margin-bottom:28px}.section-head h2{font-family:Georgia,"Times New Roman",serif;font-size:clamp(30px,4vw,44px);font-weight:500;letter-spacing:-.05em}.hero{gap:56px;min-height:68vh}.hero>div:first-child{flex:1 1 480px}.hero h1{font-family:Georgia,"Times New Roman",serif;font-size:clamp(52px,8vw,86px);font-weight:500;letter-spacing:-.07em}.lede{color:var(--muted);font-size:18px;line-height:1.7}.hero-cta{gap:10px}.btn{border-color:var(--line2);border-radius:12px;color:var(--text);background:rgba(255,255,255,.7)}.btn:hover{border-color:#cbb9e7;box-shadow:0 8px 22px rgba(55,36,76,.07)}.btn-primary{background:var(--text);color:#fff;border:1px solid var(--text)}.btn-primary:hover{background:var(--accent);border-color:var(--accent)}.pill{background:var(--panel);border-color:var(--line);color:var(--muted)}.pill.on{color:var(--green);background:#e3f4f1;border-color:#c6e9e3}.avatar-stage{flex:0 0 300px;min-height:320px}.aura{width:290px;height:290px;background:radial-gradient(circle,#f1eafa 0,#eadff5 34%,transparent 70%);animation:breathe 5s ease-in-out infinite}.avatar-mark{width:220px;height:220px;border:0;border-radius:48px;background:#f2eafa;box-shadow:0 24px 70px rgba(142,107,214,.18);animation:floaty 5s ease-in-out infinite}.speech{margin-top:20px;background:var(--panel);border-color:var(--line);border-radius:12px;color:var(--muted);box-shadow:0 8px 24px rgba(55,36,76,.06)}.card,.chat-wrap{background:rgba(255,255,255,.9);border-color:var(--line);border-radius:16px;box-shadow:0 8px 26px rgba(55,36,76,.045)}.card:hover{border-color:#cbb9e7}.card .h{color:var(--faint)}.num{background:none;color:var(--accent)}.row,.feed-item{border-color:var(--line)}.row .k,.feed .m{color:var(--muted)}.input,.chat-input input{background:#fff;border-color:var(--line);color:var(--text);border-radius:11px}.input:focus,.chat-input input:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(142,107,214,.1)}.chat-input button{background:var(--text);border-radius:10px}.msg.aria{background:#f1eafa;border-color:#dfd1ef;color:var(--text)}.msg.user{background:var(--text);color:#fff}.empty{color:var(--faint)}.mobile-nav{background:rgba(255,255,255,.95);border-top-color:var(--line);box-shadow:0 -8px 28px rgba(55,36,76,.08)}.mobile-nav a{color:var(--muted)}.mobile-nav a .i{color:var(--accent);font-size:12px;letter-spacing:.08em}.footer{border-color:var(--line);color:var(--faint)}.footer span{color:var(--accent)}@media(max-width:640px){.nav{padding:12px 16px}main{padding:88px 16px 76px}.hero{min-height:auto;padding:24px 0 10px;gap:30px}.hero h1{font-size:clamp(48px,17vw,68px)}.lede{font-size:16px}.avatar-stage{flex-basis:100%;min-height:270px}.avatar-mark{width:180px;height:180px}.aura{width:240px;height:240px}.section{margin:64px 0}.section-head h2{font-size:34px}.chat-input{gap:6px}.chat-input input{min-width:0}}
 </style>
 </head>
 <body>
@@ -307,20 +309,20 @@ main{max-width:1100px;margin:0 auto;padding:84px 22px 40px}
 </nav>
 <nav class="mobile-nav">
   <a href="#home"><span class="i">◉</span>Home</a>
-  <a href="#chat"><span class="i">💬</span>Chat</a>
+  <a href="#chat"><span class="i">CHAT</span>Chat</a>
   <a href="#missions"><span class="i">◆</span>Missions</a>
-  <a href="#memory"><span class="i">🧠</span>Memory</a>
-  <a href="/dashboard"><span class="i">⚙️</span>Panel</a>
+  <a href="#memory"><span class="i">MEM</span>Memory</a>
+  <a href="/dashboard"><span class="i">PANEL</span>Panel</a>
 </nav>
 
 <main>
   <section class="hero" id="home">
     <div>
-      <span class="kicker">✦ personal intelligence</span>
+      <span class="kicker">personal intelligence</span>
       <h1>I'm <span class="grad">ARIA</span>.</h1>
       <p class="lede">A persistent project operator with memory, real tools, and clear boundaries. I track context, explain decisions, and help you move work forward without pretending to be human.</p>
       <div class="hero-cta">
-        <button class="btn btn-primary" onclick="scrollToId('chat')">💬 Talk to me</button>
+        <button class="btn btn-primary" onclick="scrollToId('chat')">Start a conversation</button>
         <button class="btn" onclick="scrollToId('missions')">Missions</button>
         <a class="btn" href="/dashboard">Control Panel</a>
       </div>
@@ -337,10 +339,10 @@ main{max-width:1100px;margin:0 auto;padding:84px 22px 40px}
     <div class="section-head"><span class="kicker">chat</span><h2>Talk to me</h2></div>
     <div class="chat-wrap">
       <div class="chat-log" id="chatLog">
-        <div class="msg aria">hey — I'm ARIA 🤍 ask me anything, or tell me something to remember.</div>
+        <div class="msg aria">Hello. I’m ARIA — ask me something, or tell me what you want to keep in context.</div>
       </div>
       <div class="chat-input">
-        <input id="chatInput" placeholder="message me..." onkeydown="if(event.key==='Enter')sendChat()">
+        <input id="chatInput" placeholder="Ask ARIA anything..." onkeydown="if(event.key==='Enter')sendChat()">
         <button onclick="sendChat()">Send</button>
       </div>
     </div>

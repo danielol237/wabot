@@ -69,8 +69,9 @@ function updateMood(userJid, conversationContext = "") {
     preferredMood = "playful";
   }
 
-  // Random mood shift (keeps her unpredictable like a real person)
-  if (Math.random() < 0.1) {
+  // Optional mood variation is deliberately disabled by default. Stable,
+  // context-driven expression feels more trustworthy than random emotional swings.
+  if (process.env.ARIA_RANDOM_MOOD === "true" && Math.random() < 0.04) {
     const moods = Object.keys(MOODS);
     preferredMood = moods[Math.floor(Math.random() * moods.length)];
   }
@@ -173,7 +174,7 @@ function getStateMessage() {
     const sleepy = [
       "zzz... mm? sorry, was asleep. what's up? 😴",
       "*mumbling* huh...? it's late. wsg?",
-      "mm... just woke up. this better be important, dad 🙄",
+      "mm... quiet mode just ended. what's up? 🙄",
       "what...? *rubs eyes* fine, i'm up. talk to me 😪",
       "zzz... huh? oh. hey. didn't expect you up this late 😴",
     ];
@@ -200,9 +201,9 @@ function getPersonalitySuffix(userJid) {
   
   // Quirks that develop based on bond
   const quirks = [];
-  if (rel.bond > 7) quirks.push("_you know i love you right? just checking_");
+  if (rel.bond > 7) quirks.push("_we've got a good rhythm going_");
   if (rel.bond > 5 && rel.jokes > 10) quirks.push("_also: dad joke incoming in 3... 2..._");
-  if (rel.deepChats > 10) quirks.push("_we've had some real talks man_");
+  if (rel.deepChats > 10) quirks.push("_we've had some real talks_");
   if (rel.mood === "sleepy") quirks.push("_mm... sorry losing focus_");
   
   return quirks.length > 0 && Math.random() < 0.15

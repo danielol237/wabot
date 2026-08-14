@@ -6,7 +6,7 @@ const https = require("https");
 const router = express.Router();
 const service = require("./tools/animeService");
 const { resolveEpisode } = require("./tools/sourceResolver");
-const { enqueueAnimeJob, retryJob, getJob } = require("./tools/animeJobManager");
+const { enqueueAnimeJob, retryJob, getJob, getOwnerStats, findActiveJob, snapshot: animeSnapshot } = require("./tools/animeJobManager");
 const { issueMediaToken, verifyMediaToken, issueFileToken, verifyFileToken, validateMediaTarget } = require("./utils/mediaAccess");
 const { error: logError } = require("./utils/logger");
 
@@ -31,7 +31,39 @@ function withTimeout(promise, ms, fallback) {
 }
 
 function detailsFast(entry) {
-  return withTimeout(service.getDetails(entry), 10000, { id: entry.id, provider: entry.provider, title: entry.title || "Anime" });
+  return withTimeout(service.getDetails(entry), 10000, { id: entry.id, provider: entry.provider, title: entry.title || "Anime", blocked: true });
+}
+
+const publicDownloadAttempts = new Map();
+const PUBLIC_DOWNLOAD_WINDOW_MS = 60 * 60 * 1000;
+const PUBLIC_DOWNLOAD_LIMIT = Math.max(1, Number(process.env.ANIME_PUBLIC_DOWNLOADS_PER_HOUR || 10));
+const PUBLIC_ACTIVE_LIMIT = Math.max(1, Number(process.env.ANIME_PUBLIC_ACTIVE_LIMIT || 3));
+const PUBLIC_QUEUE_LIMIT = Math.max(10, Number(process.env.ANIME_PUBLIC_QUEUE_LIMIT || 100));
+
+function publicOwnerId(req) {
+  return `ip:${String(req.ip || req.socket?.remoteAddress || "unknown")}`;
+}
+
+function publicDownloadQuota(req, ownerId) {
+  const now = Date.now();
+  const key = ownerId || publicOwnerId(req);
+  let record = publicDownloadAttempts.get(key);
+  if (!record || record.resetAt <= now) record = { count: 0, resetAt: now + PUBLIC_DOWNLOAD_WINDOW_MS };
+  const ownerStats = getOwnerStats(key);
+  const global = animeSnapshot().counts;
+  if (ownerStats.active >= PUBLIC_ACTIVE_LIMIT) return { ok: false, status: 429, message: "You already have the maximum number of active downloads. Wait for one to finish." };
+  if ((global.queued || 0) + (global.running || 0) >= PUBLIC_QUEUE_LIMIT) return { ok: false, status: 503, message: "The download queue is full. Please try again later." };
+  if (record.count >= PUBLIC_DOWNLOAD_LIMIT) return { ok: false, status: 429, message: "Download limit reached for this hour. Please try again later." };
+  record.count++;
+  publicDownloadAttempts.set(key, record);
+  if (publicDownloadAttempts.size > 5000) {
+    for (const [id, value] of publicDownloadAttempts) if (value.resetAt <= now) publicDownloadAttempts.delete(id);
+  }
+  return { ok: true, key };
+}
+
+function publicJobAllowed(job, ownerId) {
+  return !!job && !!job.ownerId && job.ownerId === ownerId;
 }
 
 function providerLabel(provider) {
@@ -123,6 +155,7 @@ async function watchPage(req) {
   const provider = String(req.query.prov || "anilist");
   const episode = Math.max(1, Number(req.query.ep) || 1);
   const details = await detailsFast({ id, provider, title: "" });
+  if (details.blocked || !service.isCatalogSafe(details)) return layout("Title unavailable", `<div class="empty"><h1>Title unavailable</h1><p>This title is not included in the public catalog.</p>${button("/anime", "Back to home", "primary")}</div>`);
   const report = await withTimeout(resolveEpisode(details.title || id, episode, { preference: provider === "anilist" ? null : provider }), 30000, null);
   const source = report?.selected;
   if (!source?.url) return layout("Watch unavailable", `<div class="empty"><h1>${esc(details.title || "Anime")} · episode ${episode}</h1><p>There is no validated playable source for this episode right now. Try again later or choose another title.</p>${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Back to episodes", "secondary")}</div>`);
@@ -139,13 +172,25 @@ async function downloadPage(req, res) {
   const provider = String(req.query.prov || "anilist");
   const episode = Math.max(1, Number(req.query.ep) || 1);
   const details = await detailsFast({ id, provider, title: "" });
+  if (details.blocked || !service.isCatalogSafe(details)) return layout("Title unavailable", `<div class="empty"><h1>Title unavailable</h1><p>This title is not included in the public catalog.</p>${button("/anime", "Back to home", "primary")}</div>`);
+  const ownerId = publicOwnerId(req);
   let job = req.query.job ? getJob(String(req.query.job)) : null;
+  if (job && job.ownerId && !publicJobAllowed(job, ownerId)) return res.status(403).send("This download job belongs to another session.");
   if (req.query.retry === "1" && job?.status === "failed") {
+    const quota = publicDownloadQuota(req, ownerId);
+    if (!quota.ok) return res.status(quota.status).send(quota.message);
     job = retryJob(job.id) || job;
     return res.redirect(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&job=${encodeURIComponent(job.id)}`);
   }
   if (!job) {
-    job = enqueueAnimeJob({ name: details.title || `Anime ${id}`, episode, preferred: provider === "anilist" ? null : provider, quality: "best", sock: null, chatId: null, quotedMsg: null });
+    const active = findActiveJob({ ownerId, name: details.title || `Anime ${id}`, episode, preferred: provider === "anilist" ? null : provider });
+    if (active) {
+      job = active;
+    } else {
+      const quota = publicDownloadQuota(req, ownerId);
+      if (!quota.ok) return res.status(quota.status).send(quota.message);
+      job = enqueueAnimeJob({ name: details.title || `Anime ${id}`, episode, preferred: provider === "anilist" ? null : provider, quality: "best", sock: null, chatId: null, quotedMsg: null, ownerId, sessionId: ownerId, createdBy: "public-anime" });
+    }
     return res.redirect(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&job=${encodeURIComponent(job.id)}`);
   }
   const isFailed = job.status === "failed";
@@ -156,7 +201,7 @@ async function downloadPage(req, res) {
   const percent = job.progress?.percent == null ? null : Math.max(0, Math.min(100, Math.round(job.progress.percent)));
   const progress = percent == null ? "" : `<div class="job-row"><span class="job-label">Progress</span><span>${percent}%</span></div><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div>`;
   const fileReady = isDone && job.result?.filePath && fs.existsSync(job.result.filePath);
-  const fileToken = fileReady ? issueFileToken(job.id) : null;
+  const fileToken = fileReady ? issueFileToken(job.id, undefined, ownerId) : null;
   const result = fileReady && fileToken ? `<div class="download-actions">${button(`/anime/file/${encodeURIComponent(job.id)}?t=${encodeURIComponent(fileToken)}`, "Download file", "primary")}${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Back to episodes", "secondary")}</div>` : "";
   const error = isFailed ? `<div class="empty"><p>${esc(job.error?.code || "DOWNLOAD_FAILED")}: ${esc(job.error?.message || "The source could not be downloaded.")}</p>${button(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&job=${encodeURIComponent(job.id)}&retry=1`, "Retry", "primary")}</div>` : "";
   const refresh = isPending ? `<script>setTimeout(()=>location.reload(),5000)</script>` : "";
@@ -194,8 +239,10 @@ router.get("/dl/:id", async (req, res) => { try { const page = await downloadPag
 router.get("/file/:id", (req, res) => {
   try {
     const jobId = String(req.params.id);
-    if (!verifyFileToken(req.query.t, jobId)) return res.status(401).send("This download link has expired. Return to the episode and try again.");
+    const ownerId = publicOwnerId(req);
+    if (!verifyFileToken(req.query.t, jobId, ownerId)) return res.status(401).send("This download link has expired or belongs to another session. Return to the episode and try again.");
     const job = getJob(jobId);
+    if (!publicJobAllowed(job, ownerId)) return res.status(403).send("This download job belongs to another session.");
     const filePath = job?.result?.filePath;
     if (!job || job.status !== "done" || !filePath || !fs.existsSync(filePath)) return res.status(404).send("File not found or no longer available.");
     const safe = `${job.name || "anime"}-ep${job.episode || ""}.mp4`.replace(/[^a-z0-9._-]+/gi, "_");

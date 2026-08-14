@@ -53,10 +53,11 @@ function fromAnilist(page) {
   })));
 }
 
-// ── Watchlist (persisted JSON) ────────────────────────────────────
-function loadWatchlist() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
-  catch (_) { return []; }
+// ── Watchlist and progress (persisted, per-user namespaces) ─────────
+const LEGACY_SCOPE = "legacy";
+function scopeFor(userId) { return String(userId || LEGACY_SCOPE).replace(/[^a-zA-Z0-9._:@-]/g, "_").slice(0, 160) || LEGACY_SCOPE; }
+function readJson(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (_) { return fallback; }
 }
 function atomicJsonWrite(file, value) {
   try {
@@ -67,31 +68,57 @@ function atomicJsonWrite(file, value) {
     try { fs.chmodSync(file, 0o600); } catch (_) {}
   } catch (_) {}
 }
-function saveWatchlist(list) { atomicJsonWrite(DATA_FILE, list); }
-function addToWatchlist(entry) {
-  const list = loadWatchlist();
+function scopedUsers(file, defaultValue) {
+  const raw = readJson(file, defaultValue);
+  if (raw && !Array.isArray(raw) && raw.users && typeof raw.users === "object") return raw.users;
+  if (Array.isArray(raw)) {
+    const migrated = { [LEGACY_SCOPE]: raw };
+    atomicJsonWrite(file, { version: 1, users: migrated });
+    return migrated;
+  }
+  if (raw && typeof raw === "object" && file === PROGRESS_FILE) {
+    const migrated = { [LEGACY_SCOPE]: raw };
+    atomicJsonWrite(file, { version: 1, users: migrated });
+    return migrated;
+  }
+  return {};
+}
+function loadWatchlist(userId) {
+  const users = scopedUsers(DATA_FILE, []);
+  const list = users[scopeFor(userId)] || [];
+  return Array.isArray(list) ? list : [];
+}
+function saveWatchlist(list, userId = LEGACY_SCOPE) {
+  const users = scopedUsers(DATA_FILE, []);
+  users[scopeFor(userId)] = Array.isArray(list) ? list : [];
+  atomicJsonWrite(DATA_FILE, { version: 1, users });
+}
+function addToWatchlist(entry, userId = LEGACY_SCOPE) {
+  const list = loadWatchlist(userId);
   if (!list.some((e) => e.id === entry.id && e.provider === entry.provider)) list.push(entry);
-  saveWatchlist(list);
+  saveWatchlist(list, userId);
   return list;
 }
-function removeFromWatchlist(id, provider) {
-  const list = loadWatchlist().filter((e) => !(e.id === id && (!provider || e.provider === provider)));
-  saveWatchlist(list);
+function removeFromWatchlist(id, provider, userId = LEGACY_SCOPE) {
+  const list = loadWatchlist(userId).filter((e) => !(e.id === id && (!provider || e.provider === provider)));
+  saveWatchlist(list, userId);
   return list;
 }
 
-// ── Continue Watching (persisted progress) ────────────────────────
-// Tracks the last episode each title was watched/downloaded at, plus the
-// chosen quality, so the browser can offer "Continue Watching" and the
-// bot can remember where you left off.
-function loadProgress() {
-  try { return JSON.parse(fs.readFileSync(PROGRESS_FILE, "utf8")); }
-  catch (_) { return {}; }
+// Tracks each user's last watched/downloaded episode and chosen quality.
+function loadProgress(userId) {
+  const users = scopedUsers(PROGRESS_FILE, {});
+  const progress = users[scopeFor(userId)] || {};
+  return progress && typeof progress === "object" && !Array.isArray(progress) ? progress : {};
 }
-function saveProgress(p) { atomicJsonWrite(PROGRESS_FILE, p); }
+function saveProgress(progress, userId = LEGACY_SCOPE) {
+  const users = scopedUsers(PROGRESS_FILE, {});
+  users[scopeFor(userId)] = progress && typeof progress === "object" ? progress : {};
+  atomicJsonWrite(PROGRESS_FILE, { version: 1, users });
+}
 
-function trackProgress({ id, provider, title, cover, episode, quality, status }) {
-  const p = loadProgress();
+function trackProgress({ id, provider, title, cover, episode, quality, status, userId }) {
+  const p = loadProgress(userId);
   const key = provider + ":" + id;
   const prev = p[key] || {};
   p[key] = {
@@ -101,19 +128,19 @@ function trackProgress({ id, provider, title, cover, episode, quality, status })
     status: status || "watching",
     updatedAt: Date.now(),
   };
-  saveProgress(p);
+  saveProgress(p, userId);
   return p[key];
 }
 
-function markCompleted({ id, provider }) {
-  const p = loadProgress();
+function markCompleted({ id, provider, userId }) {
+  const p = loadProgress(userId);
   const key = provider + ":" + id;
-  if (p[key]) { p[key].status = "completed"; p[key].updatedAt = Date.now(); saveProgress(p); }
+  if (p[key]) { p[key].status = "completed"; p[key].updatedAt = Date.now(); saveProgress(p, userId); }
   return p[key] || null;
 }
 
-function getContinueWatching(limit = 10) {
-  return Object.values(loadProgress())
+function getContinueWatching(limit = 10, userId) {
+  return Object.values(loadProgress(userId))
     .filter((e) => e.status !== "completed")
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
     .slice(0, limit);

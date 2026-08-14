@@ -2,6 +2,8 @@ const { execFile } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
+const { validateOutboundUrl } = require("../utils/outboundUrlPolicy");
+const { ytBaseFlags } = require("./mediaTools");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 
@@ -22,6 +24,10 @@ async function downloadFromUrl(rawUrl) {
   if (!url) {
     return { text: "❌ Invalid URL. Must be a public http(s) link." };
   }
+  const target = await validateOutboundUrl(url);
+  if (!target.ok) {
+    return { text: "❌ Download blocked: the URL is not a reachable public destination." };
+  }
 
   const id = uuidv4();
   const outputPath = path.join(TEMP_DIR, `${id}.%(ext)s`);
@@ -29,10 +35,11 @@ async function downloadFromUrl(rawUrl) {
   return new Promise((resolve) => {
     // yt-dlp via execFile — args passed as an array so nothing is shell-interpreted.
     const args = [
+      ...ytBaseFlags(),
       "-f", "best[filesize<50M]/best",
       "--max-filesize", "50M",
       "-o", outputPath,
-      url,
+      target.url.toString(),
     ];
 
     execFile("yt-dlp", args, { timeout: 60000 }, async (err, stdout, stderr) => {

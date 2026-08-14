@@ -37,8 +37,10 @@ try {
 
 function persist() {
   try {
-    fs.writeFileSync(TMP_FILE, JSON.stringify(db, null, 2));
+    fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(TMP_FILE, JSON.stringify(db, null, 2), { mode: 0o600 });
     fs.renameSync(TMP_FILE, FILE); // atomic replace
+    try { fs.chmodSync(FILE, 0o600); } catch (_) {}
   } catch (_) {}
 }
 

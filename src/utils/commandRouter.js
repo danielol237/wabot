@@ -21,6 +21,7 @@ const { trackInteraction } = require("../utils/userMemory");
 const { addPreference, getPreferences, clearPreferences } = require("../utils/userPreferences");
 const { learnFact, getFacts, forgetFact } = require("../utils/learnedFacts");
 const { getMemory, saveMemory } = require("../utils/memory");
+const { getUserStore, getProfile, memoryEnabled, setMemoryEnabled, deleteMemory, clearMemories, exportMemories } = require("../utils/semanticMemory");
 const { isOwner, isAdmin, addAdmin, removeAdmin, listAdmins, banUser, unbanUser, isBanned, muteChat, unmuteChat, isMuted } = require("../utils/permissions");
 const { findPluginCommand } = require("../utils/pluginLoader");
 const { createTask, getTasksForChat, deactivateTaskForChat } = require("../utils/backgroundTasks");
@@ -228,6 +229,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "clearprefs", aliases: ["resetprefs"], category: "dev", description: "Clear preferences", handler: handleClearPrefs, ownerOnly: false });
   registerCommand({ name: "voicemode", aliases: ["voice", "vm"], category: "dev", description: "Toggle voice replies", handler: handleVoiceMode, ownerOnly: false });
   registerCommand({ name: "memories", aliases: ["remembered", "mymemory"], category: "dev", description: "See what I remember about you", handler: handleMemories, ownerOnly: false });
+  registerCommand({ name: "memory", aliases: ["memorysettings", "privacy"], category: "dev", description: "Control ARIA memory: !memory on|off|export|clear|forget <id>", handler: handleMemoryControl, ownerOnly: false });
   registerCommand({ name: "mission", aliases: ["missions", "msn"], category: "dev", description: "Create/resume durable background missions", handler: handleMission, ownerOnly: true });
   registerCommand({ name: "world", aliases: ["worldmodel", "model"], category: "dev", description: "View ARIA's world model", handler: handleWorld, ownerOnly: true });
   registerCommand({ name: "delegate", aliases: ["orbit", "orchestrate"], category: "dev", description: "Run the agent-team mission orchestrator", handler: handleDelegate, ownerOnly: true });
@@ -237,7 +239,7 @@ function registerBuiltinCommands() {
   // 'teach' belongs to !explain (teach-it-back). Removing it here avoids the
   // ambiguous alias collision between explain.teach and learn.teach.
   registerCommand({ name: "learn", aliases: [], category: "dev", description: "Teach a fact: !learn <fact>", handler: handleLearn, ownerOnly: false });
-  registerCommand({ name: "facts", aliases: ["memory", "whatiknow"], category: "dev", description: "View learned facts", handler: handleFacts, ownerOnly: false });
+  registerCommand({ name: "facts", aliases: ["whatiknow"], category: "dev", description: "View learned facts", handler: handleFacts, ownerOnly: false });
   registerCommand({ name: "forget", aliases: [], category: "dev", description: "Forget a fact", handler: handleForget, ownerOnly: false });
   registerCommand({ name: "evolve", aliases: ["selfimprove"], category: "dev", description: "Run self-improvement", handler: handleSelfCheck, ownerOnly: true });
   registerCommand({ name: "selfcheck", aliases: ["health"], category: "dev", description: "Run self health check", handler: handleSelfCheck, ownerOnly: true });
@@ -1741,11 +1743,10 @@ async function handleMission(sock, msg, args, ctx) {
 
 async function handleMemories(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
-  const { getUserStore, getProfile } = require("../utils/semanticMemory");
   const store = getUserStore(ctx.senderJid);
   const p = getProfile(ctx.senderJid);
   const recent = store.memories.slice(-10).reverse();
-  let out = "🧠 *What I remember about you:*\n";
+  let out = `🧠 *What I remember about you:*\n\nMemory capture: ${memoryEnabled(ctx.senderJid) ? "ON" : "OFF"}`;
   if (p.nickname) out += `\nNickname: ${p.nickname}`;
   if (p.location) out += `\nBased in: ${p.location}`;
   if (p.communicationStyle) out += `\nStyle: ${p.communicationStyle}`;
@@ -1756,6 +1757,35 @@ async function handleMemories(sock, msg, args, ctx) {
     for (const m of recent) out += `\n• ${m.text}`;
   }
   await reply(sock, msg, out);
+}
+
+async function handleMemoryControl(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const input = String(args || "").trim();
+  const [command, ...rest] = input.split(/\s+/);
+  const op = (command || "status").toLowerCase();
+  if (op === "on" || op === "enable") {
+    setMemoryEnabled(ctx.senderJid, true);
+    return reply(sock, msg, "🧠 Memory capture is on. You can turn it off any time with !memory off.");
+  }
+  if (op === "off" || op === "disable") {
+    setMemoryEnabled(ctx.senderJid, false);
+    return reply(sock, msg, "🧠 Memory capture is off. Existing memories remain until you use !memory clear.");
+  }
+  if (op === "clear" || op === "delete-all") {
+    clearMemories(ctx.senderJid);
+    return reply(sock, msg, "🗑️ Your semantic memories and learned companion profile have been cleared from ARIA’s memory store.");
+  }
+  if (op === "forget" || op === "delete") {
+    const id = rest.join(" ").trim();
+    if (!id) return reply(sock, msg, "Usage: !memory forget <memory id>\nUse !memories to see stored memory IDs.");
+    return reply(sock, msg, deleteMemory(ctx.senderJid, id) ? "✅ Deleted that memory." : "I couldn't find that memory ID.");
+  }
+  if (op === "export") {
+    const payload = JSON.stringify(exportMemories(ctx.senderJid), null, 2);
+    return reply(sock, msg, "🧾 *Your ARIA memory export*\n\n```json\n" + payload.slice(0, 6000) + "\n```");
+  }
+  return reply(sock, msg, `Memory capture is currently ${memoryEnabled(ctx.senderJid) ? "ON" : "OFF"}.\n\nCommands:\n• !memory on\n• !memory off\n• !memory export\n• !memory forget <id>\n• !memory clear`);
 }
 
 async function handleLearn(sock, msg, args, ctx) {

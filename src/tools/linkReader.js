@@ -1,5 +1,6 @@
 const axios = require("axios");
 const path = require("path");
+const { requestWithPolicy } = require("../utils/outboundUrlPolicy");
 
 // Reads files/code from shared links — Gofile, Pastebin, GitHub raw, etc.
 async function readFromLink(url) {
@@ -30,18 +31,21 @@ async function readFromLink(url) {
     }
 
     // ── Generic raw fetch ───────────────────────────────────
-    const res = await axios.get(url, {
+    const result = await requestWithPolicy(url, {
+      method: "GET",
       headers: {
         "User-Agent": "Mozilla/5.0",
         Accept: "text/plain, application/json, */*",
       },
       timeout: 15000,
-      maxContentLength: 2 * 1024 * 1024, // 2MB max
+      maxContentLength: 2 * 1024 * 1024,
       responseType: "text",
+      policy: { maxRedirects: 5 },
     });
-
+    const res = result.response;
     const content = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2);
-    const filename = url.split("/").pop().split("?")[0] || "file.txt";
+    const sourceUrl = result.target.url.toString();
+    const filename = sourceUrl.split("/").pop().split("?")[0] || "file.txt";
     const ext = path.extname(filename).slice(1) || "txt";
 
     return {
@@ -49,7 +53,7 @@ async function readFromLink(url) {
       filename,
       ext,
       content: content.slice(0, 8000),
-      source: url,
+      source: sourceUrl,
     };
   } catch (err) {
     return { success: false, error: err.message };
@@ -63,15 +67,23 @@ async function readGofile(url) {
     if (!fileId) return { success: false, error: "Invalid Gofile URL" };
 
     // Get guest token
-    const tokenRes = await axios.post("https://api.gofile.io/accounts", {}, { timeout: 10000 });
-    const token = tokenRes.data?.data?.token;
+    const tokenResult = await requestWithPolicy("https://api.gofile.io/accounts", {
+      method: "POST",
+      data: {},
+      timeout: 10000,
+      policy: { allowHosts: ["api.gofile.io"] },
+    });
+    const token = tokenResult.response.data?.data?.token;
     if (!token) return { success: false, error: "Couldn't get Gofile token" };
 
     // Get file info
-    const infoRes = await axios.get(`https://api.gofile.io/contents/${fileId}?wt=4fd6sg89d7s6&cache=true`, {
+    const infoResult = await requestWithPolicy(`https://api.gofile.io/contents/${fileId}?wt=4fd6sg89d7s6&cache=true`, {
+      method: "GET",
       headers: { Authorization: `Bearer ${token}` },
       timeout: 10000,
+      policy: { allowHosts: ["api.gofile.io"] },
     });
+    const infoRes = infoResult.response;
 
     const contents = infoRes.data?.data?.contents;
     if (!contents) return { success: false, error: "No contents found in Gofile" };
@@ -80,12 +92,15 @@ async function readGofile(url) {
     const firstFile = Object.values(contents)[0];
     if (!firstFile) return { success: false, error: "Empty Gofile folder" };
 
-    const fileRes = await axios.get(firstFile.link, {
+    const fileResult = await requestWithPolicy(firstFile.link, {
+      method: "GET",
       headers: { Cookie: `accountToken=${token}` },
       timeout: 15000,
       responseType: "text",
       maxContentLength: 2 * 1024 * 1024,
+      policy: { maxRedirects: 5 },
     });
+    const fileRes = fileResult.response;
 
     return {
       success: true,

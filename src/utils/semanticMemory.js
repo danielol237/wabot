@@ -47,7 +47,18 @@ function extractKeywords(text, max = 8) {
     .slice(0, max);
 }
 
+function memoryEnabled(userId) {
+  return getUserStore(userId).profile.memoryEnabled !== false;
+}
+
+function setMemoryEnabled(userId, enabled) {
+  getUserStore(userId).profile.memoryEnabled = enabled !== false;
+  save();
+  return getUserStore(userId).profile.memoryEnabled;
+}
+
 function addMemory(userId, text, type = "fact", importance = 1) {
+  if (!memoryEnabled(userId)) return null;
   const store = getUserStore(userId);
   const keywords = extractKeywords(text);
   const mem = {
@@ -67,6 +78,7 @@ function addMemory(userId, text, type = "fact", importance = 1) {
 
 // ── Retrieve memories relevant to a query ─────────────────────
 function retrieveMemories(userId, query, limit = 5) {
+  if (!memoryEnabled(userId)) return [];
   const store = getUserStore(userId);
   if (store.memories.length === 0) return [];
 
@@ -93,6 +105,7 @@ function retrieveMemories(userId, query, limit = 5) {
 
 // Build context string of relevant memories for a given message
 function getRelevantContext(userId, message) {
+  if (!memoryEnabled(userId)) return "";
   const relevant = retrieveMemories(userId, message, 5);
   if (relevant.length === 0) return "";
   const lines = relevant.map((m) => `• ${m.text}`).join("\n");
@@ -111,7 +124,7 @@ const IMPORTANT_HINTS = [
 ];
 
 function autoExtractMemory(userId, userName, text) {
-  if (!text || text.length < 12) return;
+  if (!memoryEnabled(userId) || !text || text.length < 12) return;
 
   // Personalization: learn the name ARIA is called
   const nameMatch = text.match(/\b(call me|call her|call him|my name is|im called)\s+([a-z]+)/i);
@@ -143,6 +156,27 @@ function autoExtractMemory(userId, userName, text) {
 }
 
 // ── Profile / personalization ─────────────────────────────────
+function deleteMemory(userId, memoryId) {
+  const store = getUserStore(userId);
+  const before = store.memories.length;
+  store.memories = store.memories.filter((memory) => String(memory.id) !== String(memoryId));
+  if (store.memories.length !== before) save();
+  return before !== store.memories.length;
+}
+
+function clearMemories(userId) {
+  const store = getUserStore(userId);
+  const enabled = store.profile?.memoryEnabled;
+  store.memories = [];
+  store.profile = enabled === undefined ? {} : { memoryEnabled: enabled };
+  save();
+}
+
+function exportMemories(userId) {
+  const store = getUserStore(userId);
+  return JSON.parse(JSON.stringify({ profile: store.profile || {}, memories: store.memories || [] }));
+}
+
 function getProfile(userId) {
   const store = getUserStore(userId);
   if (!store.profile) store.profile = {};
@@ -195,6 +229,6 @@ function learnCommunicationStyle(userId, userName, text) {
 
 module.exports = {
   addMemory, retrieveMemories, getRelevantContext,
-  autoExtractMemory, getProfile, setProfileField,
-  getProfileContext, learnCommunicationStyle, getUserStore, getAllStores, save,
+  autoExtractMemory, memoryEnabled, setMemoryEnabled, deleteMemory, clearMemories, exportMemories,
+  getProfile, setProfileField, getProfileContext, learnCommunicationStyle, getUserStore, getAllStores, save,
 };

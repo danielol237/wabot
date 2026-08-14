@@ -4,9 +4,8 @@
 // That fragmentation meant context for the AI was hand-assembled inline in the
 // chat handler, one giant concatenation that was easy to grow and easy to miss a
 // store. This module is the ONE place that reads across all stores and returns a
-// coherent UserProfile + a context string. Persistence is untouched (each store
-// still owns its own file); this only consolidates the READ so the AI sees one
-// consistent picture and can't get contradictory context.
+// coherent UserProfile + a context string. The adapters now share the unified
+// profile store, so this consolidates the READ and prevents contradictory context.
 
 const { getUserContext } = require("./userMemory");
 const { getPreferences } = require("./userPreferences");

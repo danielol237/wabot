@@ -1,6 +1,5 @@
 const crypto = require("crypto");
-const dns = require("dns").promises;
-const net = require("net");
+const { validateOutboundUrl } = require("./outboundUrlPolicy");
 
 const TOKEN_TTL_MS = Math.min(30 * 60 * 1000, Math.max(60 * 1000, Number(process.env.MEDIA_TOKEN_TTL_MS || 10 * 60 * 1000)));
 
@@ -32,20 +31,20 @@ function issueMediaToken({ url, headers = {}, provider = "", jobId = "" } = {}, 
   return sig ? `${body}.${sig}` : null;
 }
 
-function issueFileToken(jobId, ttlMs = TOKEN_TTL_MS) {
+function issueFileToken(jobId, ttlMs = TOKEN_TTL_MS, ownerId = "") {
   if (!jobId || !secret()) return null;
-  const body = encode({ purpose: "aria-file", jobId: String(jobId), exp: Date.now() + ttlMs });
+  const body = encode({ purpose: "aria-file", jobId: String(jobId), ownerId: String(ownerId || ""), exp: Date.now() + ttlMs });
   const sig = sign(body);
   return sig ? `${body}.${sig}` : null;
 }
 
-function verifyFileToken(token, jobId) {
+function verifyFileToken(token, jobId, ownerId = "") {
   if (!token || !jobId || !secret()) return null;
   try {
     const [body, signature] = String(token).split(".");
     if (!body || !signature || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(sign(body)))) return null;
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-    if (payload.purpose !== "aria-file" || payload.jobId !== String(jobId) || !payload.exp || payload.exp < Date.now()) return null;
+    if (payload.purpose !== "aria-file" || payload.jobId !== String(jobId) || String(payload.ownerId || "") !== String(ownerId || "") || !payload.exp || payload.exp < Date.now()) return null;
     return payload;
   } catch (_) {
     return null;
@@ -65,35 +64,15 @@ function verifyMediaToken(token) {
   }
 }
 
-function isPrivateAddress(address) {
-  const normalized = String(address || "").toLowerCase();
-  if (net.isIPv4(normalized)) {
-    const [a, b] = normalized.split(".").map(Number);
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
-  }
-  if (net.isIPv6(normalized)) {
-    return normalized === "::1" || normalized === "::" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:");
-  }
-  return false;
-}
-
 async function validateMediaTarget(target) {
-  let parsed;
-  try { parsed = new URL(String(target || "")); } catch (_) { return { ok: false, reason: "invalid media URL" }; }
-  if (parsed.protocol !== "https:") return { ok: false, reason: "media source must use HTTPS" };
-  if (!parsed.hostname || parsed.username || parsed.password) return { ok: false, reason: "invalid media host" };
   const allowlist = String(process.env.MEDIA_ALLOWED_HOSTS || "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
-  if (allowlist.length && !allowlist.some((host) => parsed.hostname.toLowerCase() === host || parsed.hostname.toLowerCase().endsWith(`.${host}`))) {
-    return { ok: false, reason: "media host is not authorized" };
+  const result = await validateOutboundUrl(target, { protocols: ["https:"], allowHosts: allowlist });
+  if (!result.ok) {
+    const reason = result.reason === "host is not authorized" ? "media host is not authorized" :
+      result.reason.includes("private") || result.reason.includes("unresolved") ? "private media host rejected" : result.reason;
+    return { ok: false, reason };
   }
-  try {
-    const addresses = await dns.lookup(parsed.hostname, { all: true, verbatim: true });
-    if (!addresses.length || addresses.some((entry) => isPrivateAddress(entry.address))) return { ok: false, reason: "private media host rejected" };
-    const selected = addresses[0];
-    return { ok: true, url: parsed, address: selected.address, family: selected.family };
-  } catch (_) {
-    return { ok: false, reason: "media host could not be resolved" };
-  }
+  return { ok: true, url: result.url, address: result.address, family: result.family };
 }
 
 module.exports = { issueMediaToken, verifyMediaToken, issueFileToken, verifyFileToken, validateMediaTarget, TOKEN_TTL_MS };

@@ -5,51 +5,13 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 const { URL } = require("url");
-const net = require("net");
+const { validateOutboundUrl, requestWithPolicy } = require("../utils/outboundUrlPolicy");
 
-// Block SSRF: reject non-http(s) schemes and any host that resolves to a
-// private/internal/loopback/link-local address (AWS metadata, internal services).
+// DNS failures are denied, and the returned address is pinned by the request
+// helper so a later DNS answer cannot redirect the socket to an internal host.
 async function isSafeUrl(rawUrl) {
-  try {
-    const u = new URL(rawUrl);
-    if (!/^https?:$/.test(u.protocol)) return false;
-    // URL.hostname keeps IPv6 brackets ([::1]); strip them so net.isIP works.
-    const host = u.hostname.replace(/^\[|\]$/g, "");
-    if (host === "localhost") return false;
-    if (net.isIP(host)) {
-      return !(isPrivate(host));
-    }
-    // resolve DNS and check all resolved addresses
-    const addresses = await new Promise((resolve) => {
-      try { require("dns").lookup(host, { all: true }, (err, addrs) => resolve(err ? [] : (addrs || []).map((a) => a.address))); }
-      catch (_) { resolve([]); }
-    });
-    if (addresses.length === 0) return true; // allow if we can't resolve (browse will error anyway)
-    return addresses.every((a) => !isPrivate(a));
-  } catch (_) {
-    return false;
-  }
-}
-
-function isPrivate(ip) {
-  if (ip.includes(":")) {
-    // IPv6: block loopback and link-local/ULA private ranges; allow public.
-    const lower = ip.toLowerCase();
-    if (lower === "::1" || lower.startsWith("::ffff:127.") || lower.startsWith("0:0:0:0:0:0:0:1")) return true; // loopback
-    if (lower.startsWith("fe80:")) return true; // link-local
-    if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // ULA fc00::/7
-    if (lower.startsWith("::ffff:") && isPrivate(lower.split("::ffff:")[1])) return true; // IPv4-mapped
-    return false; // public IPv6
-  }
-  const p = ip.split(".").map(Number);
-  if (p.length !== 4) return true;
-  if (p[0] === 10) return true;                    // 10.0.0.0/8
-  if (p[0] === 127) return true;                   // loopback
-  if (p[0] === 169 && p[1] === 254) return true;   // link-local / AWS metadata
-  if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true; // 172.16/12
-  if (p[0] === 192 && p[1] === 168) return true;   // 192.168/16
-  if (p[0] === 0) return true;
-  return false;
+  const result = await validateOutboundUrl(rawUrl);
+  return !!result.ok;
 }
 
 // Browse a URL and extract readable content
@@ -57,27 +19,20 @@ async function browse(url) {
   if (!(await isSafeUrl(url))) {
     return { success: false, error: "Blocked: only public http(s) URLs are allowed." };
   }
-  // Block SSRF via redirects: re-validate each hop's target before following
-  // it. A safe public URL could 302 to an internal/private address.
-  const rejectOnRedirect = async (prev, next) => {
-    if (!(await isSafeUrl(next.url))) {
-      const err = new Error("Redirect blocked: destination is not a safe public URL.");
-      err.code = "ERR_REDIRECT_BLOCKED";
-      throw err;
-    }
-  };
   try {
-    const res = await axios.get(url, {
+    const result = await requestWithPolicy(url, {
+      method: "GET",
       timeout: 15000,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
       },
-      maxRedirects: 5,
-      onRedirect: rejectOnRedirect,
+      responseType: "text",
+      policy: { maxRedirects: 5 },
     });
-
+    const res = result.response;
+    const finalUrl = result.target.url.toString();
     const html = res.data;
     const $ = cheerio.load(html);
 
@@ -85,7 +40,7 @@ async function browse(url) {
     $("script, style, nav, footer, header, aside, .sidebar, .menu, iframe, noscript").remove();
 
     // Get title
-    const title = $("title").text().trim() || new URL(url).hostname;
+    const title = $("title").text().trim() || new URL(finalUrl).hostname;
 
     // Get meta description
     const metaDesc = $('meta[name="description"]').attr("content") || "";
@@ -118,7 +73,7 @@ async function browse(url) {
       const text = $(el).text().trim().slice(0, 60);
       if (href && !href.startsWith("#") && !href.startsWith("javascript:")) {
         try {
-          const fullUrl = new URL(href, url).href;
+          const fullUrl = new URL(href, finalUrl).href;
           if (fullUrl.startsWith("http") && !links.find(l => l.url === fullUrl)) {
             links.push({ url: fullUrl, text: text || fullUrl });
           }
@@ -142,23 +97,25 @@ async function browse(url) {
       content: content.slice(0, 4000),
       links: links.slice(0, 10),
       images: images.slice(0, 5),
-      url,
+      url: finalUrl,
     };
   } catch (err) {
-    // Try with text mode
+    // Try with text mode using the same pinned redirect policy.
     try {
-      const res = await axios.get(url, {
+      const result = await requestWithPolicy(url, {
+        method: "GET",
         timeout: 10000,
         headers: { "User-Agent": "Mozilla/5.0", "Accept": "text/plain" },
         responseType: "text",
-        maxRedirects: 5,
-        onRedirect: rejectOnRedirect,
+        policy: { maxRedirects: 5 },
       });
+      const res = result.response;
+      const finalUrl = result.target.url.toString();
       return {
         success: true,
         title: url,
         content: (res.data || "").slice(0, 3000),
-        url,
+        url: finalUrl,
       };
     } catch (e2) {
       return { success: false, error: `Failed to load page: ${err.message}` };

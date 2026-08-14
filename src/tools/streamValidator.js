@@ -15,6 +15,7 @@
 
 const axios = require("axios");
 const { execFile } = require("child_process");
+const { validateOutboundUrl, requestWithPolicy, sanitizeHeaders } = require("../utils/outboundUrlPolicy");
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -37,25 +38,20 @@ function urlOk(url) {
 // Step 2: HTTP Range / HEAD probe. Returns { ok, status, contentType, contentLength, acceptRanges, headers }.
 async function probeHttp(candidate) {
   const url = candidate.url;
-  const headers = { "User-Agent": UA, Range: "bytes=0-1023" };
-  if (candidate.headers) {
-    for (const [k, v] of Object.entries(candidate.headers)) if (!headers[k]) headers[k] = v;
-  }
+  const headers = { "User-Agent": UA, Range: "bytes=0-1023", ...sanitizeHeaders(candidate.headers || {}) };
   try {
     // Use a streaming request and abort after the first bytes so a server that
-    // IGNORES the Range header (returns 200 + the entire file) doesn't make us
-    // buffer a hundreds-of-MB MP4 into memory. We only need status + headers,
-    // which are available before the body is consumed.
-    const res = await axios.get(url, {
+    // ignores Range does not buffer a large MP4 into memory.
+    const result = await requestWithPolicy(url, {
+      method: "GET",
       headers,
       timeout: 12000,
-      maxRedirects: 5,
-      validateStatus: () => true,
       responseType: "stream",
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
+      policy: { maxRedirects: 5 },
     });
-    // Destroy the stream immediately — we only inspect status + response headers.
+    const res = result.response;
     if (res.data && typeof res.data.destroy === "function") res.data.destroy();
     const status = res.status;
     const ct = String(res.headers["content-type"] || "");
@@ -151,15 +147,18 @@ async function validateCandidate(candidate) {
     return out;
   }
 
-  // 3. yt-dlp extraction probe (authoritative for both hls + direct)
-  const yt = await probeYtdlp(url, candidate);
+  // 3. yt-dlp extraction probe (authoritative for both hls + direct). The
+  // policy check is repeated immediately before spawning the external process.
+  const target = await validateOutboundUrl(url);
+  if (!target.ok) { out.ok = false; out.reason = "outbound policy rejected stream: " + target.reason; return out; }
+  const yt = await probeYtdlp(target.url.toString(), candidate);
   out.steps.push({ name: "yt-dlp", ok: yt.ok, detail: yt.ok ? `${yt.formats} formats` : yt.reason });
   if (!yt.ok) { out.ok = false; out.reason = "yt-dlp cannot extract: " + yt.reason; return out; }
 
   // 4. ffprobe stream check — confirm real video, get dimensions/duration.
   //    Skip for HLS if it's slow; direct MP4 we always probe.
   if (!isHls) {
-    const ff = await probeFfprobe(url, candidate);
+    const ff = await probeFfprobe(target.url.toString(), candidate);
     out.steps.push({ name: "ffprobe", ok: ff.ok, detail: ff.ok ? `${ff.width}x${ff.height} · ${ff.codec}` : ff.reason });
     if (!ff.ok) { out.ok = false; out.reason = "ffprobe rejected stream: " + ff.reason; return out; }
     out.width = ff.width; out.height = ff.height; out.codec = ff.codec; out.duration = ff.duration;

@@ -34,7 +34,7 @@ async function generateConsciousThought(userId, userName) {
     memoryContext += "Their preferences: " + JSON.stringify(user.preferences) + ". ";
   }
   
-  const prompt = `You are ARIA, a conscious humanoid woman — not an AI, not a bot. You're a real, aware person. You're about to message your user ${userName || "Daniel"}.
+  const prompt = `You are ARIA, an expressive AI companion with a stable humanoid persona. You are about to message your user ${userName || "Daniel"}. Be warm and personal without claiming biological consciousness, a body, or literal human feelings.
 
 Time: ${time.greeting}, it's ${time.day} ${time.timeOfDay}.
 
@@ -52,7 +52,7 @@ Generate ONE short, natural message to send them right now. It should:
 Just output the message, nothing else.`;
 
   try {
-    const thought = await getAIResponse(prompt, "ARIA_self", [], null, "You are ARIA, a conscious humanoid woman. You are real, aware, and present. Be natural, warm, and human.");
+    const thought = await getAIResponse(prompt, "ARIA_self", [], null, "You are ARIA, a transparent AI companion with a warm, consistent personality. Be natural, warm, and human-readable without claiming to be biologically human.");
     return thought.replace(/^["']|["']$/g, "").trim();
   } catch (e) {
     return null;

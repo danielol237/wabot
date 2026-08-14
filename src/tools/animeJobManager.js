@@ -90,159 +90,14 @@ function cleanupTempFiles(now = Date.now()) {
   } catch (_) {}
 }
 
-const DEFAULT_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-};
-
 // Structured error factory.
 function jobError(code, provider, stage, message, retryable = true) {
   return { code, provider, stage, message, retryable, timestamp: new Date().toISOString() };
 }
 
-// ── Provider adapters ─────────────────────────────────────────────
-// Each adapter is fully self-contained: its own search() returns anime
-// results tagged with the provider, and resolve() only ever consumes that
-// provider's own IDs. Never cross IDs between providers.
-
-const adapters = {
-  // OmniSave — direct MP4, self-contained (subjectId + detailPath).
-  omnisave: {
-    name: "omnisave",
-    priority: 1,
-    async search(query) {
-      const { searchOmniSave } = require("./animeDownload");
-      const list = await searchOmniSave(query);
-      return list.map((r) => ({ ...r, provider: "omnisave" }));
-    },
-    async resolve(anime, episode) {
-      const { getOmniSaveDownload, searchOmniSaveById } = require("./animeDownload");
-      let detailPath = anime.detailPath || "";
-      if (!detailPath) {
-        const d = await searchOmniSaveById(anime.subjectId);
-        detailPath = d?.detailPath || "";
-      }
-      if (!detailPath) {
-        throw jobError("SOURCE_NOT_FOUND", "omnisave", "extract", "no detailPath for subject", true);
-      }
-      const dl = await getOmniSaveDownload(anime.subjectId, detailPath, 1, episode || 1);
-      const chosen = (dl?.downloads || []).filter((d) => d?.url && d.vipLocked !== true).sort((a, b) => (parseInt(b.resolution, 10) || 0) - (parseInt(a.resolution, 10) || 0))[0];
-      const url = chosen?.url;
-      if (!url) {
-        throw jobError("SOURCE_NOT_FOUND", "omnisave", "extract", "no usable download URL (VIP-locked or empty)", true);
-      }
-      return {
-        provider: "omnisave",
-        url,
-        type: /\.m3u8/i.test(url) ? "hls" : "mp4",
-        quality: String(chosen.resolution || anime.quality || "unknown"),
-        headers: { ...DEFAULT_HEADERS, Referer: "https://videodownloader.site/", Origin: "https://videodownloader.site" },
-        title: anime.title || "",
-      };
-    },
-  },
-
-  // Gogoanime / Anitaku — slug id -> m3u8 via encrypt-ajax. Needs referer.
-  gogoanime: {
-    name: "gogoanime",
-    priority: 2,
-    async search(query) {
-      const { searchGogo, HOSTS } = require("./animeGogo");
-      const list = await searchGogo(query);
-      return list.map((r) => ({ ...r, provider: "gogoanime", _hosts: HOSTS }));
-    },
-    async resolve(anime, episode) {
-      const { gogoAnimeStream, HOSTS } = require("./animeGogo");
-      const slug = String(anime.id || "").replace(/^category\//, "").replace(/\/$/, "");
-      if (!slug) throw jobError("ANIME_NOT_FOUND", "gogoanime", "search", "no gogo slug", true);
-      const gogo = await gogoAnimeStream(slug, episode);
-      if (!gogo.m3u8) {
-        throw jobError("SOURCE_NOT_FOUND", "gogoanime", "extract", gogo.error || "no m3u8", true);
-      }
-      const referer = (Array.isArray(HOSTS) && HOSTS[0]) || "https://gogoanime3.net/";
-      return {
-        provider: "gogoanime",
-        url: gogo.m3u8,
-        type: "hls",
-        quality: "unknown",
-        headers: { ...DEFAULT_HEADERS, Referer: referer, Origin: referer.replace(/\/$/, "") },
-        title: gogo.title || anime.title || "",
-      };
-    },
-  },
-
-  // Consumet maintained providers (Hianime / AnimePahe / AnimeKai / AnimeUnity).
-  // consumetSearch already returns the winning provider + its own id; we keep
-  // them paired so resolve() uses the exact same provider.
-  consumet: {
-    name: "consumet",
-    priority: 3,
-    async search(query) {
-      const { consumetSearch } = require("./animeConsumet");
-      const c = await consumetSearch(query);
-      if (!c.results?.length) return [];
-      return c.results.map((r) => ({ ...r, provider: "consumet", _consumetSource: c.source }));
-    },
-    async resolve(anime, episode) {
-      const { consumetEpisodeStream } = require("./animeConsumet");
-      const providerName = anime._consumetSource;
-      if (!providerName) {
-        throw jobError("SEARCH_FAILED", "consumet", "search", "no consumet provider resolved", true);
-      }
-      const got = await consumetEpisodeStream(anime.id, episode, providerName);
-      if (!got?.url) {
-        throw jobError("SOURCE_NOT_FOUND", "consumet/" + providerName, "extract", got?.error || "no stream source", true);
-      }
-      // Per-provider referer needed for protected HLS streams.
-      const refererMap = {
-        Hianime: "https://hianime.to/",
-        AnimePahe: "https://animepahe.ru/",
-        AnimeKai: "https://animekai.to/",
-        AnimeUnity: "https://animeunity.so/",
-      };
-      const referer = refererMap[providerName] || "";
-      return {
-        provider: "consumet/" + providerName,
-        url: got.url,
-        type: "hls",
-        quality: "unknown",
-        headers: { ...DEFAULT_HEADERS, ...(referer ? { Referer: referer } : {}) },
-        title: got.title || anime.title || "",
-      };
-    },
-  },
-
-  // AnimePahe hand-rolled scraper — works only for MD5 ids from its own search.
-  animepahe: {
-    name: "animepahe",
-    priority: 4,
-    async search(query) {
-      const { searchAnimePahe } = require("./animeDownload");
-      const list = await searchAnimePahe(query);
-      return list.map((r) => ({ ...r, provider: "animepahe" }));
-    },
-    async resolve(anime, episode) {
-      const { animepaheGetStreamUrl } = require("./animeDownload");
-      if (!/^[a-f0-9]{32}$/i.test(String(anime.id || ""))) {
-        throw jobError("ANIME_NOT_FOUND", "animepahe", "search", "id is not an AnimePahe MD5", true);
-      }
-      const pahe = await animepaheGetStreamUrl(anime.id, episode);
-      if (!pahe.m3u8) {
-        throw jobError("SOURCE_NOT_FOUND", "animepahe", "extract", pahe.error || "no m3u8", true);
-      }
-      return {
-        provider: "animepahe",
-        url: pahe.m3u8,
-        type: "hls",
-        quality: "unknown",
-        headers: { ...DEFAULT_HEADERS, Referer: "https://animepahetv.to/", Origin: "https://animepahetv.to" },
-        title: pahe.title || anime.title || "",
-      };
-    },
-  },
-};
-
-const PROVIDER_ORDER = Object.values(adapters).sort((a, b) => a.priority - b.priority).map((a) => a);
+// The active provider race, validation ladder, and reputation circuit breaker
+// live in sourceResolver.js. Keeping this worker focused on job orchestration
+// prevents a second adapter map from drifting away from the canonical resolver.
 
 // ── Job store ─────────────────────────────────────────────────────
 const emitter = new EventEmitter();
@@ -269,6 +124,9 @@ function persistQueue() {
         preferred: j.preferred,
         quality: j.quality,
         chatId: j.chatId,
+        ownerId: j.ownerId || null,
+        sessionId: j.sessionId || null,
+        createdBy: j.createdBy || null,
         createdAt: j.createdAt,
       }));
     const tmp = `${QUEUE_FILE}.tmp`;
@@ -292,6 +150,9 @@ function loadQueue() {
       quality: rec.quality || "best",
       sock: null, // no live socket after restart -> download-to-disk
       chatId: rec.chatId || null,
+      ownerId: rec.ownerId || null,
+      sessionId: rec.sessionId || null,
+      createdBy: rec.createdBy || null,
       quotedMsg: null,
       source: "recovered",
       status: "queued",
@@ -694,15 +555,19 @@ function pump() {
 }
 
 // ── Public API ────────────────────────────────────────────────────
-function enqueueAnimeJob({ name, episode, sock, chatId, quotedMsg, preferred, quality }) {
+function enqueueAnimeJob({ name, episode, sock, chatId, quotedMsg, preferred, quality, ownerId, sessionId, createdBy }) {
+  const boundOwner = ownerId || chatId || null;
   const job = {
-    id: "ANIME-" + uuidv4().slice(0, 8).toUpperCase(),
+    id: "ANIME-" + uuidv4().toUpperCase(),
     name,
     episode,
     preferred: preferred || null,
     quality: quality || "best",
     sock,
     chatId,
+    ownerId: boundOwner ? String(boundOwner) : null,
+    sessionId: sessionId ? String(sessionId) : null,
+    createdBy: createdBy ? String(createdBy) : null,
     quotedMsg,
     status: "queued",
     steps: [],
@@ -733,11 +598,29 @@ function retryJob(id) {
     sock: old.sock,
     chatId: old.chatId,
     quotedMsg: old.quotedMsg,
+    ownerId: old.ownerId,
+    sessionId: old.sessionId,
+    createdBy: old.createdBy,
   });
   return fresh;
 }
 
 function getJob(id) { return jobs.get(id) || null; }
+
+function getOwnerStats(ownerId) {
+  const key = ownerId ? String(ownerId) : null;
+  const active = [...jobs.values()].filter((job) => (job.status === "queued" || job.status === "running") && (!key || job.ownerId === key));
+  return { active: active.length, queued: active.filter((job) => job.status === "queued").length, running: active.filter((job) => job.status === "running").length };
+}
+
+function findActiveJob({ ownerId, name, episode, preferred } = {}) {
+  const key = ownerId ? String(ownerId) : null;
+  const title = String(name || "").trim().toLowerCase();
+  const ep = Number(episode) || 1;
+  const pref = preferred || null;
+  return [...jobs.values()].find((job) => (job.status === "queued" || job.status === "running") &&
+    job.ownerId === key && String(job.name || "").trim().toLowerCase() === title && Number(job.episode) === ep && (job.preferred || null) === pref) || null;
+}
 
 function emit(job) {
   emitter.emit("update", job);
@@ -747,6 +630,8 @@ module.exports = {
   enqueueAnimeJob,
   retryJob,
   getJob,
+  getOwnerStats,
+  findActiveJob,
   snapshot,
   emitter,
   getRuntimeDeps,

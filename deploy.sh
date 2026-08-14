@@ -29,10 +29,10 @@ echo -e "${YELLOW}📦 Installing dependencies...${NC}"
 apt update -qq
 apt install -y -qq curl wget git nano 2>/dev/null || true
 
-# Install Node 20 (current LTS) — Node 18 is EOL
-if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 20 ]; then
-  echo -e "${YELLOW}📦 Installing Node 20 LTS...${NC}"
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+# Install Node 22 (required by the current yt-dlp JavaScript challenge solver).
+if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 22 ]; then
+  echo -e "${YELLOW}📦 Installing Node 22 LTS...${NC}"
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt install -y -qq nodejs
 fi
 
@@ -40,19 +40,14 @@ fi
 # yt-dlp (anime/video downloads), ffmpeg (HLS merge + media), python3
 # (code sandbox fallback) and docker (isolated code execution). Without
 # these, anime/code/video features silently fail even though AI+WhatsApp work.
-echo -e "${YELLOW}🎬 Installing yt-dlp, ffmpeg, python3, docker, nginx...${NC}"
+echo -e "${YELLOW}🎬 Installing Node 22 media tools, python3, docker, nginx...${NC}"
 apt install -y -qq ffmpeg python3 python3-pip nginx 2>/dev/null || true
-if ! command -v yt-dlp >/dev/null 2>&1; then
-  pip3 install --break-system-packages -q yt-dlp 2>/dev/null || pip3 install -q yt-dlp 2>/dev/null || true
-fi
-# YouTube "n challenge" solver — required since 2025.11.12. Without yt-dlp-ejs,
-# YouTube format extraction fails with "No video formats found" / n challenge
-# solving failed, which breaks !play/!yt. Install it alongside yt-dlp so the
-# solver scripts are bundled locally instead of downloaded at runtime (which is
-# unreliable behind proxies / on Render).
-if ! python3 -c "import yt_dlp_ejs" >/dev/null 2>&1; then
-  pip3 install --break-system-packages -q yt-dlp-ejs 2>/dev/null || pip3 install -q yt-dlp-ejs 2>/dev/null || true
-fi
+YTDLP_VERSION="${YTDLP_VERSION:-2026.7.4}"
+YTDLP_EJS_VERSION="${YTDLP_EJS_VERSION:-0.8.0}"
+pip3 install --break-system-packages --no-cache-dir -q \
+  "yt-dlp==${YTDLP_VERSION}" "yt-dlp-ejs==${YTDLP_EJS_VERSION}" \
+  || pip3 install --no-cache-dir -q \
+  "yt-dlp==${YTDLP_VERSION}" "yt-dlp-ejs==${YTDLP_EJS_VERSION}"
 if ! command -v docker >/dev/null 2>&1; then
   apt install -y -qq docker.io 2>/dev/null || true
 fi
@@ -138,11 +133,9 @@ echo -e "${YELLOW}🔒 Configuring firewall...${NC}"
 SSH_PORT=$(grep -E '^Port ' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
 SSH_PORT=${SSH_PORT:-22}
 ufw allow "${SSH_PORT}/tcp" 2>/dev/null || true
-# Only expose 80/443 to the Internet; 3001 stays bound to the host so it's
-# reachable via Nginx, not directly.
+# Only expose 80/443 to the Internet; port 3001 stays private behind Nginx.
 ufw allow 80/tcp 2>/dev/null || true
 ufw allow 443/tcp 2>/dev/null || true
-ufw allow 3001/tcp 2>/dev/null || true
 ufw --force enable 2>/dev/null || true
 
 # ── Final message ──────────────────────────────────────────
@@ -168,5 +161,7 @@ echo "  OWNER_NUMBER    — Your WhatsApp (no +)"
 echo "  DASHBOARD_PASSWORD — Web panel access"
 echo "  ELEVENLABS_API_KEY — Voice responses"
 echo "  TAVILY_API_KEY  — Web search"
+echo "  MEDIA_PROXY_SECRET — Signed browser playback/download links"
+echo "  SESSION_ENCRYPT_KEY — Encrypted Git-backed WhatsApp session backup"
 echo ""
 echo -e "${GREEN}ARIA is running. Configure .env and restart. 🔥${NC}"

@@ -89,7 +89,7 @@ function csrfOk(req) {
 // throttle already mitigates abuse.
 router.post("*", (req, res, next) => {
   if (req.path === "/login") return next();
-  if (!csrfOk(req)) return res.status(403).json({ error: "Invalid or missing CSRF token." });
+  if (!csrfOk(req)) return res.status(403).json({ error: "Dashboard session expired or this tab is stale. Reload and log in again.", code: "csrf_invalid" });
   next();
 });
 
@@ -156,6 +156,9 @@ function checkAuth(req, res, next) {
         return next();
       }
     } catch (_) {}
+  }
+  if (req.path.startsWith("/api/") || String(req.headers.accept || "").includes("application/json")) {
+    return res.status(401).json({ error: "Dashboard session expired. Log in again.", code: "auth_required" });
   }
   return res.status(401).send(renderPage("Login", loginForm(), false, true));
 }
@@ -737,9 +740,10 @@ function renderAtlasPane(workspaces, brief, csrf) {
     </div>
     <script>
     const ATLAS_CSRF=${JSON.stringify(csrf)};
-    async function sentinelAction(action,id){const result=document.getElementById('sentinel-result');const body={_csrf:ATLAS_CSRF,action};if(id)body.id=id;if(action==='enable'){body.githubRepository=document.getElementById('sentinel-github-repo')?.value||'';body.renderServiceId=document.getElementById('sentinel-render-service')?.value||'';}try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/sentinel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Sentinel action failed');if(result)result.textContent='Saved. Refreshing…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
-    async function atlasPlan(action){const result=document.getElementById('atlas-plan-result');try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:ATLAS_CSRF,action})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Atlas plan action failed');if(result)result.textContent=action==='apply'?'Roadmap applied. Refreshing…':'Roadmap drafted. Refreshing for review…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
-    document.getElementById('atlas-create-form')?.addEventListener('submit',async(event)=>{event.preventDefault();const form=event.currentTarget;const result=document.getElementById('atlas-create-result');const body=Object.fromEntries(new FormData(form).entries());body._csrf=ATLAS_CSRF;try{const response=await fetch('/dashboard/api/atlas/workspaces',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not create workspace');window.location.href='/dashboard/atlas?workspace='+encodeURIComponent(data.id);}catch(error){if(result)result.textContent=error.message;}});
+    async function dashboardJson(response){const raw=await response.text();let data=null;try{data=JSON.parse(raw);}catch(_){throw new Error('Dashboard session expired. Reload the page and log in again.');}if(response.status===401||data?.code==='auth_required'||data?.code==='csrf_invalid')throw new Error(data?.error||'Dashboard session expired. Reload the page and log in again.');if(!response.ok)throw new Error(data?.error||'Dashboard action failed.');return data;}
+    async function sentinelAction(action,id){const result=document.getElementById('sentinel-result');const body={_csrf:ATLAS_CSRF,action};if(id)body.id=id;if(action==='enable'){body.githubRepository=document.getElementById('sentinel-github-repo')?.value||'';body.renderServiceId=document.getElementById('sentinel-render-service')?.value||'';}try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/sentinel',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});await dashboardJson(response);if(result)result.textContent='Saved. Refreshing…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
+    async function atlasPlan(action){const result=document.getElementById('atlas-plan-result');try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/plan',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:ATLAS_CSRF,action})});const data=await dashboardJson(response);if(result)result.textContent=action==='apply'?'Roadmap applied. Refreshing…':'Roadmap drafted. Refreshing for review…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
+    document.getElementById('atlas-create-form')?.addEventListener('submit',async(event)=>{event.preventDefault();const form=event.currentTarget;const result=document.getElementById('atlas-create-result');const body=Object.fromEntries(new FormData(form).entries());body._csrf=ATLAS_CSRF;try{const response=await fetch('/dashboard/api/atlas/workspaces',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await dashboardJson(response);window.location.href='/dashboard/atlas?workspace='+encodeURIComponent(data.id);}catch(error){if(result)result.textContent=error.message;}});
     </script>
   </div>`;
 }

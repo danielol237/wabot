@@ -156,3 +156,25 @@ test("Atlas reconciler maps a terminal durable mission into its workspace", () =
     cleanup(workspace.id);
   }
 });
+
+
+test("Atlas v5 creates approval-gated lanes and evidence-backed checkpoints", () => {
+  const execution = require("../src/tools/atlasExecution");
+  const owner = "atlas-test-owner-" + Date.now() + "-v5";
+  const workspace = atlas.createWorkspace(owner, { title: "V5 execution", outcome: "Execute with evidence" });
+  try {
+    const run = execution.createExecution(owner, workspace.id, { lane: "release", objective: "Release with evidence" });
+    const waiting = execution.beginExecution(owner, workspace.id, run.id);
+    assert.equal(waiting.requiresApproval, true);
+    assert.equal(waiting.run.state, "awaiting_approval");
+    const approved = execution.approveExecution(owner, workspace.id, run.id, "approve");
+    assert.equal(approved.run.state, "running");
+    const evidence = atlas.addEvidence(owner, workspace.id, { title: "Release check", summary: "Release check passed", kind: "verification", source: "atlas.test" });
+    const checkpoint = approved.run.checkpoints[0];
+    const completed = execution.completeCheckpoint(owner, workspace.id, run.id, checkpoint.id, { evidenceIds: [evidence.id], note: "Evidence attached." });
+    assert.equal(completed.run.checkpoints[0].status, "done");
+    assert.deepEqual(completed.run.checkpoints[0].evidenceIds, [evidence.id]);
+  } finally {
+    cleanup(workspace.id);
+  }
+});

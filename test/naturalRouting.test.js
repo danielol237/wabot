@@ -67,3 +67,19 @@ test("natural routing resolves V4 integration diagnostics without a prefix", () 
   assert.equal(router.resolveNaturalAction("check the webhook connection").intent, "atlas");
   assert.equal(router.resolveNaturalAction("show delivery diagnostics").intent, "atlas");
 });
+
+
+test("natural routing resolves V5 execution controls without a prefix", () => {
+  const phrases = [
+    "start a research execution",
+    "start a build run",
+    "execute the next safe step",
+    "show execution status",
+    "approve execution",
+    "pause execution",
+    "what evidence is missing",
+    "propose recovery",
+    "retrospect this run",
+  ];
+  for (const phrase of phrases) assert.equal(router.resolveNaturalAction(phrase).intent, "atlas", phrase);
+});

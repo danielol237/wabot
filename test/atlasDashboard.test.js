@@ -134,3 +134,54 @@ test("Atlas dashboard exposes Sentinel state and keeps signal resolution owner-c
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+
+test("Atlas dashboard execution cockpit is owner-authenticated and CSRF-protected", async () => {
+  const app = express();
+  app.use(express.json({ limit: "256kb" }));
+  app.use(express.urlencoded({ extended: true }));
+  app.use("/dashboard", dashboard);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  let workspaceId = null;
+  try {
+    const csrf = (await request(server, "/dashboard/api/csrf")).json().csrf;
+    const created = await request(server, "/dashboard/api/atlas/workspaces", { method: "POST", body: { title: "Execution cockpit project", outcome: "Operate safely", _csrf: csrf } });
+    assert.equal(created.status, 201);
+    workspaceId = created.json().id;
+    const owner = process.env.OWNER_NUMBER.includes("@") ? process.env.OWNER_NUMBER : process.env.OWNER_NUMBER + "@s.whatsapp.net";
+    const execution = require("../src/tools/atlasExecution");
+    const run = execution.createExecution(owner, workspaceId, { lane: "build", objective: "Build safely" });
+    const waiting = execution.beginExecution(owner, workspaceId, run.id);
+    assert.equal(waiting.requiresApproval, true);
+
+    const page = await request(server, `/dashboard/atlas?workspace=${workspaceId}`);
+    assert.equal(page.status, 200);
+    assert.match(page.body, /Execution lanes/);
+    assert.match(page.body, /Retrospectives/);
+    assert.match(page.body, /executionAction/);
+
+    const unauthenticated = await request(server, `/dashboard/api/atlas/${workspaceId}/execution`, { auth: false, headers: { Accept: "application/json" } });
+    assert.equal(unauthenticated.status, 401);
+    const state = await request(server, `/dashboard/api/atlas/${workspaceId}/execution`);
+    assert.equal(state.status, 200);
+    assert.equal(state.json().executions[0].id, run.id);
+
+    const noCsrf = await request(server, `/dashboard/api/atlas/${workspaceId}/execution`, { method: "POST", body: { action: "approve", id: run.id, _csrf: "wrong" } });
+    assert.equal(noCsrf.status, 403);
+    assert.equal(noCsrf.json().code, "csrf_invalid");
+
+    const approved = await request(server, `/dashboard/api/atlas/${workspaceId}/execution`, { method: "POST", body: { action: "approve", id: run.id, _csrf: csrf } });
+    assert.equal(approved.status, 200);
+    assert.equal(approved.json().run.state, "running");
+
+    const retro = await request(server, `/dashboard/api/atlas/${workspaceId}/execution`, { method: "POST", body: { action: "retrospect", id: run.id, outcome: "Safe approval path verified.", _csrf: csrf } });
+    assert.equal(retro.status, 200);
+    assert.equal(retro.json().retrospective.executionId, run.id);
+  } finally {
+    if (workspaceId) {
+      try { require("fs").rmSync(require("path").join(atlas.ATLAS_DIR, workspaceId + ".json"), { force: true }); } catch (_) {}
+    }
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

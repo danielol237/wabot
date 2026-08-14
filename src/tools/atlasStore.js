@@ -15,6 +15,8 @@ const MAX_RISKS = 100;
 const MAX_SIGNALS = 200;
 const MAX_BRIEFS = 100;
 const MAX_DELIVERIES = 120;
+const MAX_EXECUTIONS = 60;
+const MAX_RETROSPECTIVES = 60;
 
 function ensureDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -67,6 +69,8 @@ function normalizeWorkspace(workspace) {
   if (!workspace || typeof workspace !== "object") return workspace;
   workspace.signals = Array.isArray(workspace.signals) ? workspace.signals : [];
   workspace.briefs = Array.isArray(workspace.briefs) ? workspace.briefs : [];
+  workspace.executions = Array.isArray(workspace.executions) ? workspace.executions.slice(-MAX_EXECUTIONS) : [];
+  workspace.retrospectives = Array.isArray(workspace.retrospectives) ? workspace.retrospectives.slice(-MAX_RETROSPECTIVES) : [];
   const defaults = defaultSentinel();
   workspace.sentinel = {
     ...defaults,
@@ -165,6 +169,8 @@ function createWorkspace(ownerId, input = {}) {
     evidence: [],
     signals: [],
     briefs: [],
+    executions: [],
+    retrospectives: [],
     sentinel: defaultSentinel(),
     missionIds: [],
     missionOutcomes: {},
@@ -394,6 +400,106 @@ function addRisk(ownerId, id, risk = {}) {
     created = { id: "risk_" + crypto.randomUUID(), title: cleanText(risk.title || "Unspecified risk", 240), likelihood: Math.max(1, Math.min(5, Number(risk.likelihood) || 3)), impact: Math.max(1, Math.min(5, Number(risk.impact) || 3)), score: Math.max(1, Math.min(25, (Number(risk.likelihood) || 3) * (Number(risk.impact) || 3))), mitigation: cleanText(risk.mitigation, 600), status: "open", createdAt: Date.now(), updatedAt: Date.now() };
     value.risks = [...(value.risks || []), created].slice(-MAX_RISKS);
     addEventToWorkspace(value, "risk_added", `Risk added: ${created.title}`);
+  });
+  return workspace ? created : null;
+}
+
+function executionCheckpointValue(checkpoint = {}) {
+  const statuses = ["pending", "running", "blocked", "done", "rejected", "cancelled"];
+  return {
+    id: cleanText(checkpoint.id || "checkpoint_" + crypto.randomUUID(), 120),
+    title: cleanText(checkpoint.title || checkpoint.criterion || "Untitled checkpoint", 240),
+    criterion: cleanText(checkpoint.criterion || checkpoint.title || "Acceptance criterion not defined.", 600),
+    status: statuses.includes(checkpoint.status) ? checkpoint.status : "pending",
+    evidenceIds: Array.isArray(checkpoint.evidenceIds) ? checkpoint.evidenceIds.map(String).slice(0, 30) : [],
+    missionId: cleanText(checkpoint.missionId, 120) || null,
+    note: cleanText(checkpoint.note, 800),
+    startedAt: Number(checkpoint.startedAt) || 0,
+    completedAt: Number(checkpoint.completedAt) || 0,
+    updatedAt: Date.now(),
+  };
+}
+
+function executionValue(execution = {}) {
+  const lanes = ["research", "design", "build", "verify", "release"];
+  const states = ["draft", "awaiting_approval", "running", "checkpoint", "blocked", "completed", "failed", "cancelled"];
+  const checkpoints = Array.isArray(execution.checkpoints) ? execution.checkpoints.slice(0, 16).map(executionCheckpointValue) : [];
+  return {
+    id: cleanText(execution.id || "exec_" + crypto.randomUUID(), 120),
+    taskId: cleanText(execution.taskId, 120) || null,
+    missionId: cleanText(execution.missionId, 120) || null,
+    lane: lanes.includes(execution.lane) ? execution.lane : "research",
+    objective: cleanText(execution.objective || "Untitled execution", 800),
+    state: states.includes(execution.state) ? execution.state : "draft",
+    currentCheckpointIndex: Math.max(0, Number(execution.currentCheckpointIndex) || 0),
+    checkpoints,
+    proposedAction: cleanText(execution.proposedAction, 800),
+    approval: execution.approval && typeof execution.approval === "object" ? {
+      id: cleanText(execution.approval.id, 120) || null,
+      prompt: cleanText(execution.approval.prompt, 800),
+      expiresAt: Number(execution.approval.expiresAt) || 0,
+      resolvedAt: Number(execution.approval.resolvedAt) || 0,
+      decision: cleanText(execution.approval.decision, 40) || null,
+    } : null,
+    result: cleanText(execution.result, 1600),
+    error: cleanText(execution.error, 800),
+    recoveryProposal: cleanText(execution.recoveryProposal, 1000),
+    retrospectiveId: cleanText(execution.retrospectiveId, 120) || null,
+    lastReconciledStatus: cleanText(execution.lastReconciledStatus, 40) || null,
+    lastReconciledAt: Number(execution.lastReconciledAt) || 0,
+    createdAt: Number(execution.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function addExecution(ownerId, id, execution = {}) {
+  let created = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    created = executionValue({ ...execution, workspaceId: id });
+    value.executions.push(created);
+    addEventToWorkspace(value, "execution_created", `Execution started in ${created.lane} lane: ${created.objective}`);
+  });
+  return workspace ? created : null;
+}
+
+function getExecution(ownerId, id, executionId) {
+  const workspace = getWorkspace(ownerId, id);
+  return workspace?.executions?.find((execution) => execution.id === executionId) || null;
+}
+
+function listExecutions(ownerId, id, options = {}) {
+  const workspace = getWorkspace(ownerId, id);
+  if (!workspace) return [];
+  return workspace.executions.filter((execution) => !options.state || execution.state === options.state).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+function updateExecution(ownerId, id, executionId, patch = {}) {
+  let updated = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const current = value.executions.find((execution) => execution.id === executionId);
+    if (!current) return;
+    updated = executionValue({ ...current, ...patch, id: current.id, createdAt: current.createdAt });
+    value.executions = value.executions.map((execution) => execution.id === executionId ? updated : execution);
+    addEventToWorkspace(value, "execution_updated", `${updated.id} → ${updated.state}`);
+  });
+  return workspace ? updated : null;
+}
+
+function addRetrospective(ownerId, id, retrospective = {}) {
+  let created = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    created = {
+      id: cleanText(retrospective.id || "retro_" + crypto.randomUUID(), 120),
+      executionId: cleanText(retrospective.executionId, 120) || null,
+      outcome: cleanText(retrospective.outcome || "Execution retrospective", 800),
+      highlights: Array.isArray(retrospective.highlights) ? retrospective.highlights.map((item) => cleanText(item, 300)).filter(Boolean).slice(0, 12) : [],
+      failures: Array.isArray(retrospective.failures) ? retrospective.failures.map((item) => cleanText(item, 300)).filter(Boolean).slice(0, 12) : [],
+      nextImprovement: cleanText(retrospective.nextImprovement, 800),
+      createdAt: Date.now(),
+    };
+    value.retrospectives.push(created);
+    value.retrospectives = value.retrospectives.slice(-MAX_RETROSPECTIVES);
+    addEventToWorkspace(value, "retrospective_added", `Retrospective recorded for ${created.executionId || "execution"}.`);
   });
   return workspace ? created : null;
 }
@@ -802,7 +908,11 @@ module.exports = {
   applyPlan,
   addRisk,
   configureSentinel,
-  findSentinelWorkspace,
+  addExecution,
+  getExecution,
+  listExecutions,
+  updateExecution,
+  addRetrospective,
   recordSentinelDelivery,
   recordSentinelDeliveryForSource,
   getSentinelHealth,

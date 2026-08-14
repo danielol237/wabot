@@ -6,6 +6,7 @@ const { createWorkspace, findWorkspace, getBrief, addEvent, addEvidence, addTask
 const { createMission, executeMission } = require("./durableMissions");
 const { decisionCard, LEVELS } = require("./atlasPolicy");
 const { handlePlanner } = require("./atlasPlanner");
+const { handleSentinel } = require("./atlasSentinel");
 
 function clean(value, max = 1000) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -93,6 +94,10 @@ async function handleAtlas(ownerId, text, options = {}) {
 
   if (/\b(?:plan this|plan it|make a plan|break this down|break the project down|plan the project|make a roadmap|build a roadmap|show the roadmap|show the plan|view the dependencies|show the risks|apply the plan|approve the plan)\b/i.test(lower)) {
     return handlePlanner(ownerId, input);
+  }
+
+  if (/\b(?:show sentinel|sentinel status|enable sentinel|disable sentinel|show project signals|project signals|what changed in the project|what changed on the project|show decision briefs|acknowledge signal|resolve signal|approve brief)\b/i.test(lower)) {
+    return handleSentinel(ownerId, input);
   }
 
   if (/\b(?:why did you choose|what decisions|recent decisions|why this)\b/i.test(lower)) {

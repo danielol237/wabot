@@ -42,9 +42,16 @@ async function runMissionPass() {
   if (!sockRef) return;
   const durable = require("./durableMissions");
   const reconciler = require("./atlasReconciler");
+  const sentinel = require("./atlasSentinel");
+  const configuredOwner = String(process.env.OWNER_NUMBER || "").trim();
+  const ownerId = configuredOwner ? (configuredOwner.includes("@") ? configuredOwner : configuredOwner + "@s.whatsapp.net") : "";
   const missions = durable.getAllMissions ? durable.getAllMissions() : [];
   const reconciliation = reconciler.runReconciliationPass();
   if (reconciliation.reconciled > 0) log(`🧭 Atlas reconciled ${reconciliation.reconciled} mission outcome(s).`);
+  if (ownerId) {
+    const sentinelPass = await sentinel.runSentinelPass(ownerId, { notify: true });
+    if (sentinelPass.signals?.filter((item) => item.status === "accepted").length > 0) log("🛰️ Atlas Sentinel recorded local mission signal(s).");
+  }
   if (!missions.length) return;
 
   for (const m of missions) {

@@ -679,6 +679,9 @@ function renderAtlasPane(workspaces, brief, csrf) {
   const milestones = workspace?.milestones || [];
   const risks = (workspace?.risks || []).filter((risk) => risk.status === "open").sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 6);
   const planning = workspace?.planning || {};
+  const sentinel = workspace?.sentinel || {};
+  const signals = (workspace?.signals || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 6);
+  const briefs = (workspace?.briefs || []).filter((brief) => !["resolved", "rejected"].includes(brief.status)).slice(-5).reverse();
   const workspaceRows = workspaces.length
     ? workspaces.map((item) => `<a class="atlas-workspace ${item.id === workspace?.id ? "active" : ""}" href="/dashboard/atlas?workspace=${encodeURIComponent(item.id)}"><span>${esc(item.title)}</span><small>${item.state}</small></a>`).join("")
     : `<div class="empty">No Atlas workspaces yet.</div>`;
@@ -703,6 +706,12 @@ function renderAtlasPane(workspaces, brief, csrf) {
   const riskRows = risks.length
     ? risks.map((risk) => `<div class="atlas-row"><span><b>${esc(risk.title)}</b><small>mitigation: ${esc(risk.mitigation || "Review with ARIA")}</small></span><span class="badge ${risk.score >= 15 ? "b-red" : risk.score >= 9 ? "b-amber" : "b-muted"}">${Number(risk.score) || 0}/25</span></div>`).join("")
     : `<div class="empty">No open risks recorded.</div>`;
+  const signalRows = signals.length
+    ? signals.map((signal) => `<div class="atlas-row"><span><b>${esc(signal.title)}</b><small>${esc(signal.id)} · ${esc(signal.source)} · ${esc(signal.severity)} · ${esc(signal.status)}</small></span><span class="actions"><button class="qbtn" onclick='sentinelAction("${signal.status === "resolved" ? "ack" : "resolve"}",${JSON.stringify(signal.id)})'>${signal.status === "resolved" ? "Acknowledge" : "Resolve"}</button></span></div>`).join("")
+    : `<div class="empty">No Sentinel signals recorded.</div>`;
+  const briefRows = briefs.length
+    ? briefs.map((brief) => `<div class="atlas-note"><b>${esc(brief.title)}</b><small>${esc(brief.id)} · ${esc(brief.actionLevel)} · ${esc(brief.status)}<br>${esc(brief.recommendation)}</small><button class="qbtn" onclick='sentinelAction("approve",${JSON.stringify(brief.id)})'>Approve brief</button></div>`).join("")
+    : `<div class="empty">No open Sentinel decision briefs.</div>`;
   return `<style>
     .atlas-shell{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;align-items:start}
     .atlas-side{position:sticky;top:16px}.atlas-main{min-width:0}.atlas-contract{border:1px solid rgba(139,124,246,.32);background:linear-gradient(135deg,rgba(99,102,241,.12),var(--panel))}
@@ -731,12 +740,26 @@ function renderAtlasPane(workspaces, brief, csrf) {
         <div class="stats atlas-stats"><div class="stat"><div class="n">${brief?.progress || 0}%</div><div class="l">progress</div></div><div class="stat"><div class="n">${openTasks}</div><div class="l">open tasks</div></div><div class="stat"><div class="n" style="color:${blocked ? "var(--red)" : "var(--green)"}">${blocked}</div><div class="l">blocked</div></div><div class="stat"><div class="n">${decisions}</div><div class="l">decisions</div></div></div>
         <div class="grid2"><div class="card"><div class="h">Now / Next</div>${taskRows}</div><div class="card"><div class="h">Blocked</div>${blockedRows}</div></div>
         <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Roadmap</div>${roadmapRows}</div><div class="card"><div class="h">Risk register</div>${riskRows}</div></div>
+        <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Sentinel <span class="badge ${sentinel.enabled ? "b-green" : "b-muted"}">${sentinel.enabled ? "enabled" : "disabled"}</span></div><p class="hint">Signed GitHub and Render events become evidence, risks, and reviewable decision briefs.</p><div class="atlas-form"><input id="sentinel-github-repo" placeholder="GitHub repository (owner/name)" value="${esc(sentinel.sources?.github?.repository || "")}" maxlength="160" /><input id="sentinel-render-service" placeholder="Render service ID" value="${esc(sentinel.sources?.render?.serviceId || "")}" maxlength="120" /><div class="actions"><button class="qbtn purple" onclick="sentinelAction('enable')">Enable / save</button><button class="qbtn" onclick="sentinelAction('disable')">Disable</button><button class="qbtn" onclick="sentinelAction('run')">Run local pass</button></div><div id="sentinel-result" class="hint"></div></div><div style="margin-top:12px">${signalRows}</div></div><div class="card"><div class="h">Decision briefs</div>${briefRows}</div></div>
         <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Decision ledger</div>${decisionRows}</div><div class="card"><div class="h">Evidence vault</div>${evidenceRows}</div></div>
         <div class="card" style="margin-top:16px"><div class="h">Living timeline</div>${activityRows}</div>
       </section>
     </div>
     <script>
     const ATLAS_CSRF=${JSON.stringify(csrf)};
+    async function sentinelAction(action,id){
+      const result=document.getElementById('sentinel-result');
+      const body={_csrf:ATLAS_CSRF,action};
+      if(id) body.id=id;
+      if(action==='enable'){body.enabled=true;body.githubRepository=document.getElementById('sentinel-github-repo')?.value||'';body.renderServiceId=document.getElementById('sentinel-render-service')?.value||'';}
+      try{
+        const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/sentinel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const data=await response.json();
+        if(!response.ok) throw new Error(data.error||'Sentinel action failed');
+        result.textContent=action==='run'?'Sentinel pass complete. Reloading…':'Sentinel updated. Reloading…';
+        setTimeout(()=>window.location.reload(),350);
+      }catch(error){if(result) result.textContent=error.message;}
+    }
     async function atlasPlan(action){
       const result = document.getElementById('atlas-plan-result');
       try{
@@ -1276,6 +1299,59 @@ router.post("/api/atlas/:id/plan", checkAuth, (req, res) => {
   } catch (e) {
     console.error("[dashboard-atlas-plan]", e);
     return res.status(500).json({ error: "Could not update Atlas roadmap" });
+  }
+});
+
+router.get("/api/atlas/:id/sentinel", checkAuth, (req, res) => {
+  try {
+    const atlas = require("./tools/atlasStore");
+    const workspace = atlas.getWorkspace(atlasOwnerId(), String(req.params.id));
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    return res.json({ sentinel: workspace.sentinel, signals: workspace.signals || [], briefs: workspace.briefs || [] });
+  } catch (e) {
+    console.error("[dashboard-atlas-sentinel]", e);
+    return res.status(500).json({ error: "Could not read Sentinel state" });
+  }
+});
+
+router.post("/api/atlas/:id/sentinel", checkAuth, async (req, res) => {
+  try {
+    const action = String(req.body?.action || "").toLowerCase();
+    const owner = atlasOwnerId();
+    const workspaceId = String(req.params.id);
+    const atlas = require("./tools/atlasStore");
+    const workspace = atlas.getWorkspace(owner, workspaceId);
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    if (["enable", "disable"].includes(action)) {
+      const patch = { enabled: action === "enable" };
+      if (action === "enable") patch.sources = { github: { repository: String(req.body?.githubRepository || "").trim() }, render: { serviceId: String(req.body?.renderServiceId || "").trim() } };
+      const configured = atlas.configureSentinel(owner, workspaceId, patch);
+      return res.json({ ok: true, action, sentinel: configured });
+    }
+    if (action === "acknowledge" || action === "ack") {
+      const signal = atlas.updateSignal(owner, workspaceId, String(req.body?.id || ""), { status: "acknowledged" });
+      return signal ? res.json({ ok: true, action, signal }) : res.status(404).json({ error: "signal not found" });
+    }
+    if (action === "resolve") {
+      const signal = atlas.updateSignal(owner, workspaceId, String(req.body?.id || ""), { status: "resolved" });
+      if (!signal) return res.status(404).json({ error: "signal not found" });
+      if (signal.riskId) atlas.updateRisk(owner, workspaceId, signal.riskId, { status: "closed" });
+      if (signal.briefId) atlas.updateBrief(owner, workspaceId, signal.briefId, { status: "resolved" });
+      return res.json({ ok: true, action, signal });
+    }
+    if (action === "approve") {
+      const brief = atlas.updateBrief(owner, workspaceId, String(req.body?.id || ""), { status: "approved" });
+      return brief ? res.json({ ok: true, action, brief }) : res.status(404).json({ error: "decision brief not found" });
+    }
+    if (action === "run") {
+      const sentinel = require("./tools/atlasSentinel");
+      const pass = await sentinel.runSentinelPass(owner, { notify: false });
+      return res.json({ ok: true, action, pass });
+    }
+    return res.status(400).json({ error: "action must be enable, disable, acknowledge, resolve, approve, or run" });
+  } catch (e) {
+    console.error("[dashboard-atlas-sentinel-action]", e);
+    return res.status(500).json({ error: "Could not update Sentinel" });
   }
 });
 

@@ -12,6 +12,8 @@ const MAX_EVENTS = 500;
 const MAX_EVIDENCE = 300;
 const MAX_DECISIONS = 200;
 const MAX_RISKS = 100;
+const MAX_SIGNALS = 200;
+const MAX_BRIEFS = 100;
 
 function ensureDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -29,13 +31,41 @@ function fileFor(id) {
   return path.join(ATLAS_DIR, safe + ".json");
 }
 
+function defaultSentinel() {
+  return {
+    version: 1,
+    enabled: false,
+    sources: { github: { repository: null }, render: { serviceId: null } },
+    lastPassAt: 0,
+    lastSignalAt: 0,
+    lastNotifiedAt: 0,
+  };
+}
+
+function normalizeWorkspace(workspace) {
+  if (!workspace || typeof workspace !== "object") return workspace;
+  workspace.signals = Array.isArray(workspace.signals) ? workspace.signals : [];
+  workspace.briefs = Array.isArray(workspace.briefs) ? workspace.briefs : [];
+  workspace.sentinel = {
+    ...defaultSentinel(),
+    ...(workspace.sentinel || {}),
+    sources: {
+      ...defaultSentinel().sources,
+      ...(workspace.sentinel?.sources || {}),
+      github: { ...defaultSentinel().sources.github, ...(workspace.sentinel?.sources?.github || {}) },
+      render: { ...defaultSentinel().sources.render, ...(workspace.sentinel?.sources?.render || {}) },
+    },
+  };
+  return workspace;
+}
+
 function readWorkspace(id) {
   ensureDir();
   const file = fileFor(id);
   if (!fs.existsSync(file)) return null;
   try {
     const value = JSON.parse(fs.readFileSync(file, "utf8"));
-    return value && typeof value === "object" ? value : null;
+    return value && typeof value === "object" ? normalizeWorkspace(value) : null;
   } catch (_) {
     return null;
   }
@@ -104,6 +134,8 @@ function createWorkspace(ownerId, input = {}) {
     decisions: [],
     evidence: [],
     signals: [],
+    briefs: [],
+    sentinel: defaultSentinel(),
     missionIds: [],
     missionOutcomes: {},
     risks: [],
@@ -144,6 +176,7 @@ function findWorkspace(ownerId, query = "") {
 function mutate(ownerId, id, fn) {
   const workspace = getWorkspace(ownerId, id);
   if (!workspace) return null;
+  normalizeWorkspace(workspace);
   fn(workspace);
   return persist(workspace);
 }
@@ -335,6 +368,166 @@ function addRisk(ownerId, id, risk = {}) {
   return workspace ? created : null;
 }
 
+function sentinelConfigValue(sentinel = {}) {
+  const repoCandidate = cleanText(sentinel.sources?.github?.repository || sentinel.githubRepository, 160);
+  const repo = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(repoCandidate) ? repoCandidate : "";
+  const serviceId = cleanText(sentinel.sources?.render?.serviceId || sentinel.renderServiceId, 120);
+  return {
+    version: 1,
+    enabled: sentinel.enabled === true,
+    sources: { github: { repository: repo || null }, render: { serviceId: serviceId || null } },
+    lastPassAt: Number(sentinel.lastPassAt) || 0,
+    lastSignalAt: Number(sentinel.lastSignalAt) || 0,
+    lastNotifiedAt: Number(sentinel.lastNotifiedAt) || 0,
+  };
+}
+
+function configureSentinel(ownerId, id, patch = {}) {
+  let configured = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    value.sentinel = sentinelConfigValue({ ...(value.sentinel || {}), ...patch, sources: { ...(value.sentinel?.sources || {}), ...(patch.sources || {}) } });
+    addEventToWorkspace(value, "sentinel_configured", `Sentinel ${value.sentinel.enabled ? "enabled" : "disabled"} for ${value.title}.`);
+    configured = value.sentinel;
+  });
+  return workspace ? configured : null;
+}
+
+function signalValue(signal = {}) {
+  const severity = ["info", "low", "medium", "high", "critical"].includes(signal.severity) ? signal.severity : "info";
+  const status = ["new", "acknowledged", "resolved", "ignored"].includes(signal.status) ? signal.status : "new";
+  return {
+    id: cleanText(signal.id || "signal_" + crypto.randomUUID(), 120),
+    source: cleanText(signal.source || "local", 40),
+    kind: cleanText(signal.kind || "generic", 60),
+    action: cleanText(signal.action, 60),
+    sourceId: cleanText(signal.sourceId, 160),
+    dedupeKey: cleanText(signal.dedupeKey || signal.sourceId || signal.id, 240),
+    title: cleanText(signal.title || "Sentinel signal", 240),
+    summary: cleanText(signal.summary || signal.detail, 1200),
+    severity,
+    status,
+    at: Number(signal.at) || Date.now(),
+    receivedAt: Number(signal.receivedAt) || Date.now(),
+    evidenceId: cleanText(signal.evidenceId, 120) || null,
+    riskId: cleanText(signal.riskId, 120) || null,
+    briefId: cleanText(signal.briefId, 120) || null,
+    notifiedAt: Number(signal.notifiedAt) || 0,
+    acknowledgedAt: Number(signal.acknowledgedAt) || 0,
+    resolvedAt: Number(signal.resolvedAt) || 0,
+  };
+}
+
+function recordSignal(ownerId, id, signal = {}) {
+  let result = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const incoming = signalValue(signal);
+    const duplicate = value.signals.find((item) => incoming.dedupeKey && item.dedupeKey === incoming.dedupeKey);
+    if (duplicate) {
+      result = { signal: duplicate, duplicate: true };
+      return;
+    }
+    value.signals.push(incoming);
+    if (value.signals.length > MAX_SIGNALS) value.signals = value.signals.slice(-MAX_SIGNALS);
+    value.sentinel.lastSignalAt = incoming.receivedAt;
+    addEventToWorkspace(value, "sentinel_signal", `${incoming.source}/${incoming.kind}: ${incoming.title}`);
+    result = { signal: incoming, duplicate: false };
+  });
+  return workspace ? result : null;
+}
+
+function addBrief(ownerId, id, brief = {}) {
+  let created = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const sourceSignalId = cleanText(brief.sourceSignalId, 120) || null;
+    const duplicate = sourceSignalId && value.briefs.find((item) => item.sourceSignalId === sourceSignalId);
+    if (duplicate) {
+      created = duplicate;
+      return;
+    }
+    created = {
+      id: cleanText(brief.id || "brief_" + crypto.randomUUID(), 120),
+      sourceSignalId,
+      title: cleanText(brief.title || "Sentinel decision brief", 240),
+      impact: cleanText(brief.impact, 800),
+      recommendation: cleanText(brief.recommendation, 1000),
+      actionLevel: ["observe", "prepare", "propose", "commit"].includes(brief.actionLevel) ? brief.actionLevel : "observe",
+      status: ["proposed", "acknowledged", "approved", "rejected", "resolved"].includes(brief.status) ? brief.status : "proposed",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      acknowledgedAt: 0,
+      approvedAt: 0,
+      resolvedAt: 0,
+    };
+    value.briefs.push(created);
+    if (value.briefs.length > MAX_BRIEFS) value.briefs = value.briefs.slice(-MAX_BRIEFS);
+    if (sourceSignalId) {
+      const signal = value.signals.find((item) => item.id === sourceSignalId);
+      if (signal) signal.briefId = created.id;
+    }
+    addEventToWorkspace(value, "sentinel_brief", `Decision brief: ${created.title}`);
+  });
+  return workspace ? created : null;
+}
+
+function updateSignal(ownerId, id, signalId, patch = {}) {
+  let updated = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const signal = value.signals.find((item) => item.id === signalId);
+    if (!signal) return;
+    const next = patch.status;
+    if (next && ["new", "acknowledged", "resolved", "ignored"].includes(next)) {
+      signal.status = next;
+      if (next === "acknowledged") signal.acknowledgedAt = Date.now();
+      if (next === "resolved") signal.resolvedAt = Date.now();
+    }
+    if (patch.notifiedAt !== undefined) signal.notifiedAt = Number(patch.notifiedAt) || 0;
+    for (const key of ["evidenceId", "riskId", "briefId"]) {
+      if (patch[key] !== undefined) signal[key] = cleanText(patch[key], 120) || null;
+    }
+    updated = signal;
+    addEventToWorkspace(value, "sentinel_signal_updated", `${signal.title} → ${signal.status}`);
+  });
+  return workspace ? updated : null;
+}
+
+function updateBrief(ownerId, id, briefId, patch = {}) {
+  let updated = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const brief = value.briefs.find((item) => item.id === briefId);
+    if (!brief) return;
+    const next = patch.status;
+    if (next && ["proposed", "acknowledged", "approved", "rejected", "resolved"].includes(next)) {
+      brief.status = next;
+      brief.updatedAt = Date.now();
+      if (next === "acknowledged") brief.acknowledgedAt = Date.now();
+      if (next === "approved") brief.approvedAt = Date.now();
+      if (next === "resolved") brief.resolvedAt = Date.now();
+    }
+    updated = brief;
+    addEventToWorkspace(value, "sentinel_brief_updated", `${brief.title} → ${brief.status}`);
+  });
+  return workspace ? updated : null;
+}
+
+function updateRisk(ownerId, id, riskId, patch = {}) {
+  let updated = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const risk = value.risks.find((item) => item.id === riskId);
+    if (!risk) return;
+    if (patch.status && ["open", "mitigated", "accepted", "closed"].includes(patch.status)) risk.status = patch.status;
+    risk.updatedAt = Date.now();
+    updated = risk;
+    addEventToWorkspace(value, "risk_updated", `${risk.title} → ${risk.status}`);
+  });
+  return workspace ? updated : null;
+}
+
+function markSentinelPass(ownerId, id, at = Date.now()) {
+  return mutate(ownerId, id, (value) => {
+    value.sentinel.lastPassAt = Number(at) || Date.now();
+  });
+}
+
 function addDecision(ownerId, id, decision = {}) {
   let created = null;
   const workspace = mutate(ownerId, id, (value) => {
@@ -463,6 +656,13 @@ module.exports = {
   addPlanDraft,
   applyPlan,
   addRisk,
+  configureSentinel,
+  recordSignal,
+  addBrief,
+  updateSignal,
+  updateBrief,
+  updateRisk,
+  markSentinelPass,
   reconcileMission,
   markDigestSent,
   linkMission,

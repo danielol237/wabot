@@ -14,8 +14,9 @@ function request(server, pathname, options = {}) {
   return new Promise((resolve, reject) => {
     const body = options.body === undefined ? null : JSON.stringify(options.body);
     const headers = {
-      Authorization: "Basic " + Buffer.from("owner:" + process.env.DASHBOARD_PASSWORD).toString("base64"),
+      ...(options.auth === false ? {} : { Authorization: "Basic " + Buffer.from("owner:" + process.env.DASHBOARD_PASSWORD).toString("base64") }),
       ...(body ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) } : {}),
+      ...(options.headers || {}),
     };
     const request = http.request({ host: "127.0.0.1", port: server.address().port, path: pathname, method: options.method || "GET", headers }, (response) => {
       let text = "";
@@ -44,6 +45,11 @@ test("Atlas dashboard page and API are owner-authenticated and render", async ()
     assert.match(page.body, /Private operator workspace/);
     assert.match(page.body, /mobile-nav/);
     assert.match(page.body, /atlas-layout/);
+    assert.match(page.body, /dashboardJson/);
+    assert.match(page.body, /Dashboard session expired/);
+    const unauthenticatedApi = await request(server, "/dashboard/api/atlas", { auth: false, headers: { Accept: "application/json" } });
+    assert.equal(unauthenticatedApi.status, 401);
+    assert.equal(unauthenticatedApi.json().code, "auth_required");
     const api = await request(server, "/dashboard/api/atlas");
     assert.equal(api.status, 200);
     assert.match(api.body, /workspaces/);
@@ -69,6 +75,7 @@ test("Atlas dashboard plan API requires CSRF and applies an explicit reviewed ro
     const csrf = csrfResponse.json().csrf;
     const unauthorized = await request(server, "/dashboard/api/atlas/workspaces", { method: "POST", body: { title: "blocked", _csrf: "wrong" } });
     assert.equal(unauthorized.status, 403);
+    assert.equal(unauthorized.json().code, "csrf_invalid");
     const created = await request(server, "/dashboard/api/atlas/workspaces", { method: "POST", body: { title: "Dashboard plan project", outcome: "Ship the next Atlas slice", _csrf: csrf } });
     assert.equal(created.status, 201);
     workspaceId = created.json().id;

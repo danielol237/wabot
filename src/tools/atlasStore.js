@@ -17,6 +17,9 @@ const MAX_BRIEFS = 100;
 const MAX_DELIVERIES = 120;
 const MAX_EXECUTIONS = 60;
 const MAX_RETROSPECTIVES = 60;
+const MAX_OPERATOR_TEAMS = 20;
+const MAX_TEAM_PACKETS = 5;
+const MAX_TEAM_HANDOFFS = 30;
 
 function ensureDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -71,6 +74,7 @@ function normalizeWorkspace(workspace) {
   workspace.briefs = Array.isArray(workspace.briefs) ? workspace.briefs : [];
   workspace.executions = Array.isArray(workspace.executions) ? workspace.executions.slice(-MAX_EXECUTIONS) : [];
   workspace.retrospectives = Array.isArray(workspace.retrospectives) ? workspace.retrospectives.slice(-MAX_RETROSPECTIVES) : [];
+  workspace.operatorTeams = Array.isArray(workspace.operatorTeams) ? workspace.operatorTeams.slice(-MAX_OPERATOR_TEAMS).map(operatorTeamValue) : [];
   const defaults = defaultSentinel();
   workspace.sentinel = {
     ...defaults,
@@ -171,6 +175,7 @@ function createWorkspace(ownerId, input = {}) {
     briefs: [],
     executions: [],
     retrospectives: [],
+    operatorTeams: [],
     sentinel: defaultSentinel(),
     missionIds: [],
     missionOutcomes: {},
@@ -500,6 +505,125 @@ function addRetrospective(ownerId, id, retrospective = {}) {
     value.retrospectives.push(created);
     value.retrospectives = value.retrospectives.slice(-MAX_RETROSPECTIVES);
     addEventToWorkspace(value, "retrospective_added", `Retrospective recorded for ${created.executionId || "execution"}.`);
+  });
+  return workspace ? created : null;
+}
+
+function operatorPacketValue(packet = {}) {
+  const statuses = ["pending", "awaiting_approval", "running", "completed", "blocked", "needs_review", "skipped"];
+  return {
+    id: cleanText(packet.id || "packet_" + crypto.randomUUID(), 120),
+    role: cleanText(packet.role || "researcher", 60),
+    status: statuses.includes(packet.status) ? packet.status : "pending",
+    objective: cleanText(packet.objective, 800),
+    criterion: cleanText(packet.criterion, 800),
+    inputHandoffIds: Array.isArray(packet.inputHandoffIds) ? packet.inputHandoffIds.map(String).slice(0, 12) : [],
+    missionId: cleanText(packet.missionId, 120) || null,
+    outputHandoffId: cleanText(packet.outputHandoffId, 120) || null,
+    evidenceIds: Array.isArray(packet.evidenceIds) ? packet.evidenceIds.map(String).slice(0, 30) : [],
+    attempts: Math.max(0, Number(packet.attempts) || 0),
+    maxAttempts: Math.max(1, Math.min(3, Number(packet.maxAttempts) || 2)),
+    timeoutMs: Math.max(1000, Math.min(15 * 60 * 1000, Number(packet.timeoutMs) || 15 * 60 * 1000)),
+    startedAt: Number(packet.startedAt) || 0,
+    completedAt: Number(packet.completedAt) || 0,
+    blockedReason: cleanText(packet.blockedReason, 800),
+    recoveryProposal: cleanText(packet.recoveryProposal, 1000),
+    result: cleanText(packet.result, 4000),
+    lastReconciledStatus: cleanText(packet.lastReconciledStatus, 40) || null,
+    lastReconciledAt: Number(packet.lastReconciledAt) || 0,
+    updatedAt: Date.now(),
+  };
+}
+
+function operatorHandoffValue(handoff = {}) {
+  return {
+    id: cleanText(handoff.id || "handoff_" + crypto.randomUUID(), 120),
+    fromRole: cleanText(handoff.fromRole, 60),
+    toRole: cleanText(handoff.toRole, 60),
+    summary: cleanText(handoff.summary, 4000),
+    evidenceIds: Array.isArray(handoff.evidenceIds) ? handoff.evidenceIds.map(String).slice(0, 30) : [],
+    decisions: Array.isArray(handoff.decisions) ? handoff.decisions.map((item) => cleanText(item, 400)).filter(Boolean).slice(0, 12) : [],
+    unresolvedQuestions: Array.isArray(handoff.unresolvedQuestions) ? handoff.unresolvedQuestions.map((item) => cleanText(item, 400)).filter(Boolean).slice(0, 12) : [],
+    status: ["accepted", "needs_review", "blocked"].includes(handoff.status) ? handoff.status : "accepted",
+    createdAt: Number(handoff.createdAt) || Date.now(),
+  };
+}
+
+function operatorTeamValue(team = {}) {
+  const states = ["draft", "awaiting_approval", "running", "paused", "blocked", "completed", "cancelled"];
+  const packets = Array.isArray(team.packets || team.rolePackets) ? (team.packets || team.rolePackets).slice(0, MAX_TEAM_PACKETS).map(operatorPacketValue) : [];
+  const handoffs = Array.isArray(team.handoffs) ? team.handoffs.slice(-MAX_TEAM_HANDOFFS).map(operatorHandoffValue) : [];
+  return {
+    id: cleanText(team.id || "team_" + crypto.randomUUID(), 120),
+    objective: cleanText(team.objective || "Untitled operator team", 800),
+    state: states.includes(team.state) ? team.state : "draft",
+    currentPacketIndex: Math.max(0, Math.min(Math.max(0, packets.length - 1), Number(team.currentPacketIndex) || 0)),
+    packets,
+    handoffs,
+    budgets: {
+      maxPackets: Math.max(1, Math.min(MAX_TEAM_PACKETS, Number(team.budgets?.maxPackets) || MAX_TEAM_PACKETS)),
+      maxAttemptsPerPacket: Math.max(1, Math.min(3, Number(team.budgets?.maxAttemptsPerPacket) || 2)),
+      maxDurationMs: Math.max(60 * 1000, Math.min(60 * 60 * 1000, Number(team.budgets?.maxDurationMs) || 15 * 60 * 1000)),
+      maxOutputChars: Math.max(500, Math.min(8000, Number(team.budgets?.maxOutputChars) || 4000)),
+    },
+    approval: team.approval && typeof team.approval === "object" ? {
+      id: cleanText(team.approval.id, 120) || null,
+      prompt: cleanText(team.approval.prompt, 1000),
+      decision: cleanText(team.approval.decision, 40) || null,
+      expiresAt: Number(team.approval.expiresAt) || 0,
+      resolvedAt: Number(team.approval.resolvedAt) || 0,
+    } : null,
+    blockedReason: cleanText(team.blockedReason, 1000),
+    recoveryProposal: cleanText(team.recoveryProposal, 1200),
+    retrospectiveId: cleanText(team.retrospectiveId, 120) || null,
+    createdAt: Number(team.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function addOperatorTeam(ownerId, id, team = {}) {
+  let created = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    created = operatorTeamValue({ ...team, id: team.id || "team_" + crypto.randomUUID() });
+    value.operatorTeams.push(created);
+    value.operatorTeams = value.operatorTeams.slice(-MAX_OPERATOR_TEAMS);
+    addEventToWorkspace(value, "operator_team_created", `Operator team created: ${created.objective}`);
+  });
+  return workspace ? created : null;
+}
+
+function getOperatorTeam(ownerId, id, teamId) {
+  const workspace = getWorkspace(ownerId, id);
+  return workspace?.operatorTeams?.find((team) => team.id === teamId) || null;
+}
+
+function listOperatorTeams(ownerId, id, options = {}) {
+  const workspace = getWorkspace(ownerId, id);
+  if (!workspace) return [];
+  return workspace.operatorTeams.filter((team) => !options.state || team.state === options.state).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+function updateOperatorTeam(ownerId, id, teamId, patch = {}) {
+  let updated = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const current = value.operatorTeams.find((team) => team.id === teamId);
+    if (!current) return;
+    updated = operatorTeamValue({ ...current, ...patch, id: current.id, createdAt: current.createdAt });
+    value.operatorTeams = value.operatorTeams.map((team) => team.id === teamId ? updated : team);
+    addEventToWorkspace(value, "operator_team_updated", `${updated.id} → ${updated.state}`);
+  });
+  return workspace ? updated : null;
+}
+
+function addOperatorHandoff(ownerId, id, teamId, handoff = {}) {
+  let created = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const team = value.operatorTeams.find((item) => item.id === teamId);
+    if (!team) return;
+    created = operatorHandoffValue(handoff);
+    team.handoffs = [...(team.handoffs || []), created].slice(-MAX_TEAM_HANDOFFS);
+    team.updatedAt = Date.now();
+    addEventToWorkspace(value, "operator_handoff_created", `${created.fromRole} handed work to ${created.toRole}.`);
   });
   return workspace ? created : null;
 }
@@ -913,6 +1037,11 @@ module.exports = {
   listExecutions,
   updateExecution,
   addRetrospective,
+  addOperatorTeam,
+  getOperatorTeam,
+  listOperatorTeams,
+  updateOperatorTeam,
+  addOperatorHandoff,
   recordSentinelDelivery,
   recordSentinelDeliveryForSource,
   getSentinelHealth,

@@ -43,6 +43,7 @@ async function runMissionPass() {
   const durable = require("./durableMissions");
   const reconciler = require("./atlasReconciler");
   const execution = require("./atlasExecution");
+  const operatorTeams = require("./atlasOperatorTeams");
   const sentinel = require("./atlasSentinel");
   const missions = durable.getAllMissions ? durable.getAllMissions() : [];
   const reconciliation = reconciler.runReconciliationPass();
@@ -51,6 +52,8 @@ async function runMissionPass() {
   const ownerId = configuredOwner ? (configuredOwner.includes("@") ? configuredOwner : configuredOwner + "@s.whatsapp.net") : "";
   const executionReconciliation = ownerId ? execution.reconcileExecutionPass(ownerId) : { scanned: 0, reconciled: 0 };
   if (executionReconciliation.reconciled > 0) log(`⚙️ Atlas reconciled ${executionReconciliation.reconciled} V5 execution checkpoint(s).`);
+  const teamReconciliation = ownerId ? operatorTeams.reconcileOperatorTeamPass(ownerId) : { scanned: 0, reconciled: 0 };
+  if (teamReconciliation.reconciled > 0) log(`🧩 Atlas reconciled ${teamReconciliation.reconciled} V6 operator-team packet(s).`);
   if (ownerId) {
     const sentinelPass = await sentinel.runSentinelPass(ownerId, { notify: true });
     if (sentinelPass.signals?.filter((item) => item.status === "accepted").length > 0) log("🛰️ Atlas Sentinel recorded local mission signal(s).");

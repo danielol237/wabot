@@ -83,3 +83,19 @@ test("natural routing resolves V5 execution controls without a prefix", () => {
   ];
   for (const phrase of phrases) assert.equal(router.resolveNaturalAction(phrase).intent, "atlas", phrase);
 });
+
+
+test("natural routing resolves V6 operator-team controls without a prefix", () => {
+  const phrases = [
+    "start an operator team",
+    "start a research team",
+    "show team status",
+    "show team handoff",
+    "approve team",
+    "pause the operator team",
+    "why is the team blocked",
+    "review release readiness",
+    "retrospect the operator team",
+  ];
+  for (const phrase of phrases) assert.equal(router.resolveNaturalAction(phrase).intent, "atlas", phrase);
+});

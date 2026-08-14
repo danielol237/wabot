@@ -115,3 +115,21 @@ test("natural routing resolves V7 project knowledge and artifact controls withou
   ];
   for (const phrase of phrases) assert.equal(router.resolveNaturalAction(phrase).intent, "atlas", phrase);
 });
+
+
+test("natural routing resolves V8 connected-delivery controls without a prefix", () => {
+  const phrases = [
+    "show connected delivery",
+    "connected delivery status",
+    "is the release ready",
+    "show deployment evidence",
+    "show delivery proposals",
+    "map github repository danielol237/wabot",
+    "connect render srv-demo",
+    "what failed in github",
+    "approve delivery_test",
+    "reject delivery_test",
+    "resolve delivery_test",
+  ];
+  for (const phrase of phrases) assert.equal(router.resolveNaturalAction(phrase).intent, "atlas", phrase);
+});

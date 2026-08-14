@@ -230,7 +230,7 @@ main{max-width:1100px;margin:0 auto;padding:84px 22px 40px}
 
 /* avatar */
 .avatar-stage{flex:0 0 260px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;margin:0 auto}
-.aura{position:absolute;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(139,124,246,.25),transparent 70%);animation:breathe 4s ease-in-out infinite}
+.aura{position:absolute;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(139,124,246,.25),transparent 70%);animation:breathe 4s ease-in-out infinite}.avatar-mark{position:relative;z-index:2;display:block;width:190px;height:190px;object-fit:cover;border:1px solid var(--line2);border-radius:42px;background:#090b12;box-shadow:0 24px 70px rgba(139,124,246,.24);animation:floaty 5s ease-in-out infinite}
 @keyframes breathe{0%,100%{opacity:.6;transform:scale(1)}50%{opacity:1;transform:scale(1.07)}}
 .face{position:relative;width:180px;height:200px;z-index:2;animation:floaty 5s ease-in-out infinite;background:linear-gradient(180deg,#ffd9c9,#f5b79a);border-radius:48% 48% 46% 46%/40% 40% 60% 60%}
 @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
@@ -298,7 +298,7 @@ main{max-width:1100px;margin:0 auto;padding:84px 22px 40px}
 </head>
 <body>
 <nav class="nav">
-  <div class="brand">◢ <span>ARIA</span></div>
+  <div class="brand"><img src="/aria-mark.png" alt="ARIA" width="28" height="28" style="display:block;border-radius:8px;object-fit:cover" /> <span>ARIA</span></div>
   <div class="links">
     <a href="#home">Home</a><a href="#chat">Chat</a><a href="#missions">Missions</a>
     <a href="#memory">Memory</a><a href="#media">Media</a><a href="#alerts">Alerts</a>
@@ -318,7 +318,7 @@ main{max-width:1100px;margin:0 auto;padding:84px 22px 40px}
     <div>
       <span class="kicker">✦ personal intelligence</span>
       <h1>I'm <span class="grad">ARIA</span>.</h1>
-      <p class="lede">A persistent mind living in your world. I remember, I act, I explain myself, and I always come back. Not a chatbot — a presence.</p>
+      <p class="lede">A persistent project operator with memory, real tools, and clear boundaries. I track context, explain decisions, and help you move work forward without pretending to be human.</p>
       <div class="hero-cta">
         <button class="btn btn-primary" onclick="scrollToId('chat')">💬 Talk to me</button>
         <button class="btn" onclick="scrollToId('missions')">Missions</button>
@@ -328,14 +328,8 @@ main{max-width:1100px;margin:0 auto;padding:84px 22px 40px}
     </div>
     <div class="avatar-stage">
       <div class="aura"></div>
-      <div class="face">
-        <div class="ear ear-l"></div><div class="ear ear-r"></div>
-        <div class="hair-back"></div><div class="bangs"></div>
-        <div class="eye eye-l" data-eye></div><div class="eye eye-r" data-eye></div>
-        <div class="blush blush-l"></div><div class="blush blush-r"></div>
-        <div class="mouth"></div>
-      </div>
-      <div class="speech" id="speech">hey, you made it 🤍</div>
+      <img class="avatar-mark" src="/aria-mark.png" alt="ARIA operator mark" width="190" height="190" />
+      <div class="speech" id="speech">Ready when you are.</div>
     </div>
   </section>
 
@@ -385,7 +379,7 @@ main{max-width:1100px;margin:0 auto;padding:84px 22px 40px}
   </section>
 </main>
 
-<div class="footer">◢ <span>ARIA</span> — a personal intelligence · built with care · <span id="year"></span></div>
+<div class="footer"><img src="/aria-mark.png" alt="" width="20" height="20" style="vertical-align:-5px;border-radius:6px;object-fit:cover" /> <span>ARIA</span> — a personal project operator · built with care · <span id="year"></span></div>
 
 <script>
 const yearEl=document.getElementById('year'); yearEl.textContent=new Date().getFullYear();

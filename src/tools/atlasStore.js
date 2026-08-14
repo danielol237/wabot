@@ -23,6 +23,7 @@ const MAX_TEAM_HANDOFFS = 30;
 const MAX_KNOWLEDGE_NODES = 400;
 const MAX_KNOWLEDGE_EDGES = 800;
 const MAX_ARTIFACTS = 200;
+const MAX_CONNECTED_PROPOSALS = 60;
 
 function ensureDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -58,6 +59,80 @@ function defaultIntegrationHealth(source) {
   };
 }
 
+function defaultConnectedDelivery() {
+  return {
+    version: 8,
+    enabled: false,
+    status: "not_configured",
+    revision: 0,
+    github: {
+      repository: null,
+      defaultBranch: "main",
+      lastEvent: null,
+      lastCheck: null,
+      lastPullRequest: null,
+      lastMergeAt: 0,
+    },
+    render: {
+      serviceId: null,
+      serviceName: null,
+      environment: "production",
+      lastEvent: null,
+      lastBuild: null,
+      lastDeploy: null,
+      availability: "unknown",
+    },
+    release: { status: "not_configured", evidenceIds: [], signalIds: [], proposalId: null, lastAssessedAt: 0 },
+    proposals: [],
+    lastVerifiedAt: 0,
+    updatedAt: 0,
+  };
+}
+
+function connectedProposalValue(proposal = {}) {
+  const statuses = ["open", "approved", "rejected", "resolved"];
+  const actionLevels = ["observe", "prepare", "propose", "commit"];
+  return {
+    id: cleanText(proposal.id || "delivery_" + crypto.randomUUID(), 120),
+    kind: cleanText(proposal.kind || "review", 80),
+    title: cleanText(proposal.title || "Connected delivery review", 240),
+    rationale: cleanText(proposal.rationale || proposal.summary, 1600),
+    evidenceIds: Array.isArray(proposal.evidenceIds) ? proposal.evidenceIds.map(String).slice(0, 30) : [],
+    signalIds: Array.isArray(proposal.signalIds) ? proposal.signalIds.map(String).slice(0, 30) : [],
+    actionLevel: actionLevels.includes(proposal.actionLevel) ? proposal.actionLevel : "propose",
+    status: statuses.includes(proposal.status) ? proposal.status : "open",
+    decisionBy: cleanText(proposal.decisionBy, 120) || null,
+    decisionNote: cleanText(proposal.decisionNote, 600) || null,
+    createdAt: Number(proposal.createdAt) || Date.now(),
+    decidedAt: Number(proposal.decidedAt) || 0,
+    updatedAt: Date.now(),
+  };
+}
+
+function connectedDeliveryValue(delivery = {}) {
+  const statuses = ["not_configured", "observing", "needs_review", "blocked", "ready_for_owner_review", "approved_no_side_effect", "released_verified", "unknown"];
+  const normalized = defaultConnectedDelivery();
+  return {
+    ...normalized,
+    ...delivery,
+    version: 8,
+    enabled: Boolean(delivery.enabled),
+    status: statuses.includes(delivery.status) ? delivery.status : normalized.status,
+    revision: Math.max(0, Number(delivery.revision) || 0),
+    github: { ...normalized.github, ...(delivery.github || {}) },
+    render: { ...normalized.render, ...(delivery.render || {}) },
+    release: {
+      ...normalized.release,
+      ...(delivery.release || {}),
+      evidenceIds: Array.isArray(delivery.release?.evidenceIds) ? delivery.release.evidenceIds.map(String).slice(-30) : [],
+      signalIds: Array.isArray(delivery.release?.signalIds) ? delivery.release.signalIds.map(String).slice(-30) : [],
+    },
+    proposals: Array.isArray(delivery.proposals) ? delivery.proposals.slice(-MAX_CONNECTED_PROPOSALS).map(connectedProposalValue) : [],
+    lastVerifiedAt: Number(delivery.lastVerifiedAt) || 0,
+    updatedAt: Number(delivery.updatedAt) || 0,
+  };
+}
+
 function defaultSentinel() {
   return {
     version: 4,
@@ -81,6 +156,7 @@ function normalizeWorkspace(workspace) {
   workspace.knowledgeNodes = Array.isArray(workspace.knowledgeNodes) ? workspace.knowledgeNodes.slice(-MAX_KNOWLEDGE_NODES).map(knowledgeNodeValue) : [];
   workspace.knowledgeEdges = Array.isArray(workspace.knowledgeEdges) ? workspace.knowledgeEdges.slice(-MAX_KNOWLEDGE_EDGES).map(knowledgeEdgeValue) : [];
   workspace.artifacts = Array.isArray(workspace.artifacts) ? workspace.artifacts.slice(-MAX_ARTIFACTS).map(artifactValue) : [];
+  workspace.connectedDelivery = connectedDeliveryValue(workspace.connectedDelivery);
   workspace.knowledgeRevision = Math.max(0, Number(workspace.knowledgeRevision) || 0);
   workspace.lastProjectedAt = Number(workspace.lastProjectedAt) || 0;
   const defaults = defaultSentinel();
@@ -187,6 +263,7 @@ function createWorkspace(ownerId, input = {}) {
     knowledgeNodes: [],
     knowledgeEdges: [],
     artifacts: [],
+    connectedDelivery: defaultConnectedDelivery(),
     knowledgeRevision: 0,
     lastProjectedAt: 0,
     sentinel: defaultSentinel(),
@@ -725,6 +802,69 @@ function updateKnowledgeMeta(ownerId, id, patch = {}) {
   });
 }
 
+function getConnectedDelivery(ownerId, id) {
+  const workspace = getWorkspace(ownerId, id);
+  return workspace ? connectedDeliveryValue(workspace.connectedDelivery) : null;
+}
+
+function updateConnectedDelivery(ownerId, id, patch = {}) {
+  let result = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const current = connectedDeliveryValue(value.connectedDelivery);
+    const next = connectedDeliveryValue({
+      ...current,
+      ...patch,
+      github: { ...current.github, ...(patch.github || {}) },
+      render: { ...current.render, ...(patch.render || {}) },
+      release: { ...current.release, ...(patch.release || {}) },
+      proposals: patch.proposals === undefined ? current.proposals : patch.proposals,
+      revision: current.revision + 1,
+      updatedAt: Date.now(),
+    });
+    value.connectedDelivery = next;
+    result = next;
+  });
+  return workspace ? result : null;
+}
+
+function listConnectedProposals(ownerId, id, options = {}) {
+  const delivery = getConnectedDelivery(ownerId, id);
+  if (!delivery) return [];
+  return delivery.proposals.filter((proposal) => !options.status || proposal.status === options.status).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+function addConnectedProposal(ownerId, id, proposal = {}) {
+  let result = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const current = connectedDeliveryValue(value.connectedDelivery);
+    const normalized = connectedProposalValue(proposal);
+    const existing = current.proposals.find((item) => item.id === normalized.id || (item.status === "open" && item.kind === normalized.kind && item.title === normalized.title));
+    if (existing) { result = { proposal: existing, duplicate: true }; return; }
+    current.proposals = [...current.proposals, normalized].slice(-MAX_CONNECTED_PROPOSALS);
+    current.revision += 1;
+    current.updatedAt = Date.now();
+    value.connectedDelivery = connectedDeliveryValue(current);
+    result = { proposal: normalized, duplicate: false };
+  });
+  return workspace ? result : null;
+}
+
+function updateConnectedProposal(ownerId, id, proposalId, patch = {}) {
+  let result = null;
+  const workspace = mutate(ownerId, id, (value) => {
+    const current = connectedDeliveryValue(value.connectedDelivery);
+    const target = current.proposals.find((proposal) => proposal.id === proposalId);
+    if (!target) return;
+    const normalized = connectedProposalValue({ ...target, ...patch, id: target.id, createdAt: target.createdAt });
+    current.proposals = current.proposals.map((proposal) => proposal.id === target.id ? normalized : proposal);
+    current.revision += 1;
+    current.updatedAt = Date.now();
+    value.connectedDelivery = connectedDeliveryValue(current);
+    result = normalized;
+  });
+  return workspace ? result : null;
+}
+
 function operatorTeamValue(team = {}) {
   const states = ["draft", "awaiting_approval", "running", "paused", "blocked", "completed", "cancelled"];
   const packets = Array.isArray(team.packets || team.rolePackets) ? (team.packets || team.rolePackets).slice(0, MAX_TEAM_PACKETS).map(operatorPacketValue) : [];
@@ -1224,6 +1364,11 @@ module.exports = {
   addKnowledgeEdge,
   listKnowledgeEdges,
   addArtifact,
+  getConnectedDelivery,
+  updateConnectedDelivery,
+  listConnectedProposals,
+  addConnectedProposal,
+  updateConnectedProposal,
   getArtifact,
   listArtifacts,
   updateKnowledgeMeta,

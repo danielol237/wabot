@@ -268,3 +268,47 @@ test("Atlas dashboard renders V7 Knowledge Graph and Artifact Vault safely", asy
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+
+test("Atlas dashboard renders and protects V8 Connected Delivery controls", async () => {
+  const app = express();
+  app.use(express.json({ limit: "256kb" }));
+  app.use(express.urlencoded({ extended: true }));
+  app.use("/dashboard", dashboard);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  let workspaceId = null;
+  try {
+    const csrf = (await request(server, "/dashboard/api/csrf")).json().csrf;
+    const created = await request(server, "/dashboard/api/atlas/workspaces", { method: "POST", body: { title: "Connected delivery cockpit", outcome: "Observe GitHub and Render safely", _csrf: csrf } });
+    assert.equal(created.status, 201);
+    workspaceId = created.json().id;
+
+    const page = await request(server, `/dashboard/atlas?workspace=${workspaceId}`);
+    assert.equal(page.status, 200);
+    assert.match(page.body, /Connected Delivery/);
+    assert.match(page.body, /deliveryAction/);
+    assert.match(page.body, /verified awareness/);
+
+    const unauthenticated = await request(server, `/dashboard/api/atlas/${workspaceId}/connected-delivery`, { auth: false, headers: { Accept: "application/json" } });
+    assert.equal(unauthenticated.status, 401);
+    const initial = await request(server, `/dashboard/api/atlas/${workspaceId}/connected-delivery`);
+    assert.equal(initial.status, 200);
+    assert.equal(initial.json().connected.status, "not_configured");
+
+    const noCsrf = await request(server, `/dashboard/api/atlas/${workspaceId}/connected-delivery`, { method: "POST", body: { action: "map", repository: "danielol237/wabot", serviceId: "srv-demo", _csrf: "wrong" } });
+    assert.equal(noCsrf.status, 403);
+    assert.equal(noCsrf.json().code, "csrf_invalid");
+
+    const mapped = await request(server, `/dashboard/api/atlas/${workspaceId}/connected-delivery`, { method: "POST", body: { action: "map", repository: "danielol237/wabot", serviceId: "srv-demo", _csrf: csrf } });
+    assert.equal(mapped.status, 200);
+    assert.equal(mapped.json().connected.mapping.github, "danielol237/wabot");
+    assert.equal(mapped.json().connected.mapping.render, "srv-demo");
+    assert.match(mapped.json().message, /no provider setting was changed/i);
+  } finally {
+    if (workspaceId) {
+      try { require("fs").rmSync(require("path").join(atlas.ATLAS_DIR, workspaceId + ".json"), { force: true }); } catch (_) {}
+    }
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

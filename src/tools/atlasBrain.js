@@ -10,6 +10,7 @@ const { handleSentinel } = require("./atlasSentinel");
 const { handleExecution } = require("./atlasExecution");
 const { handleOperatorTeams } = require("./atlasOperatorTeams");
 const { handleKnowledge } = require("./atlasKnowledge");
+const { handleConnectedDelivery } = require("./atlasConnectedDelivery");
 
 function clean(value, max = 1000) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -93,6 +94,10 @@ async function handleAtlas(ownerId, text, options = {}) {
   const lower = input.toLowerCase();
   if (/^(?:aria[,:!]?\s*)?(?:this is|this is my|new|create|start)\s+(?:a\s+)?(?:new\s+)?project\b/i.test(input)) {
     return { kind: "created", workspace: createAtlasProject(ownerId, input) };
+  }
+
+  if (/\b(?:connected delivery|delivery status|release readiness|release ready|deployment evidence|delivery proposals)\b|\b(?:map|connect)\b.*\b(?:github|render|delivery)\b|\bwhat failed in\s+(?:github|render)\b|\b(?:approve|reject|resolve)\s+delivery_/i.test(lower)) {
+    return handleConnectedDelivery(ownerId, input, options);
   }
 
   if (/\b(?:show|refresh|rebuild|project|what changed)\b.*(?:knowledge|graph)|\bknowledge graph\b|\bproject knowledge\b|\b(?:show|check|what is|what's)\b.*\b(?:stale|conflicts?|contradictions?)\b|\bwhat\s+supports\b|\bwhat\s+is\s+blocking\s+this\s+project\b|\btrace\b.*\b(?:artifact|output|file|report)\b|\badd\b.*\bartifact\b|\b(?:record|add)\b.*\brequirement\b|\blink\b.*\b(?:evidence|artifact|decision|requirement)\b/i.test(lower)) {

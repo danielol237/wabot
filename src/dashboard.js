@@ -165,7 +165,7 @@ function checkAuth(req, res, next) {
 
 function loginForm() {
   return `<div class="login">
-    <div class="login-logo" aria-hidden="true">A</div>
+    <img class="login-logo" src="/aria-mark.png" alt="ARIA" width="48" height="48" />
     <div class="login-kicker">OWNER CONTROL CENTER</div>
     <h1>Welcome back.</h1>
     <p class="login-lede">Monitor ARIA, inspect activity, manage downloads, and keep the bot healthy from one private workspace.</p>
@@ -421,7 +421,7 @@ function renderLiveStrip(ls) {
       <div class="page-title">Command center</div><div class="page-sub">A calm overview of ARIA’s current state and the next useful action.</div>
       <div class="hero command-hero">
         <div class="hrow">
-          <div class="avatar" aria-hidden="true">A</div>
+          <img class="avatar" src="/aria-mark.png" alt="ARIA" width="42" height="42" />
           <div><h2>ARIA core <span class="badge ${configured ? "b-green" : "b-amber"}" id="core-badge">● ${configured ? "ONLINE" : "NEEDS AI CONFIG"}</span></h2>
             <div class="sub">Primary model <b>${modelLabel}</b> · fallback <b>${fallbackLabel}</b></div>
           </div>
@@ -689,6 +689,8 @@ function renderAtlasPane(workspaces, brief, csrf) {
   const knowledgeNodes = (workspace?.knowledgeNodes || []).slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const knowledgeEdges = workspace?.knowledgeEdges || [];
   const artifacts = (workspace?.artifacts || []).slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 6);
+  const connected = workspace ? require("./tools/atlasConnectedDelivery").connectedDelivery(workspace.ownerId, workspace.id) : null;
+  const connectedProposals = connected?.proposals?.filter((proposal) => proposal.status === "open").slice(0, 5) || [];
   const knowledgeStale = knowledgeNodes.filter((node) => node.freshness === "stale");
   const knowledgeNodeIds = new Set(knowledgeNodes.map((node) => node.id));
   const knowledgeOrphans = knowledgeEdges.filter((edge) => !knowledgeNodeIds.has(edge.sourceId) || !knowledgeNodeIds.has(edge.targetId));
@@ -723,6 +725,9 @@ function renderAtlasPane(workspaces, brief, csrf) {
   const artifactRows = artifacts.length
     ? artifacts.map((artifact) => `<div class="atlas-list-row"><span><b>${esc(artifact.title)}</b><small>${esc(artifact.kind)} · ${esc(artifact.sourceType || "unknown")} · ${esc(artifact.id)}</small></span><span class="badge ${artifact.freshness === "stale" ? "b-amber" : "b-green"}">${esc(artifact.freshness || "unknown")}</span></div>`).join("")
     : `<div class="empty">No artifacts recorded in the project vault yet.</div>`;
+  const connectedProposalRows = connectedProposals.length
+    ? connectedProposals.map((proposal) => `<div class="atlas-brief"><div class="atlas-brief-top"><b>${esc(proposal.title)}</b><span class="badge ${proposal.actionLevel === "propose" ? "b-amber" : "b-muted"}">${esc(proposal.actionLevel)}</span></div><small>${esc(proposal.rationale)}</small><div class="actions"><button class="qbtn compact purple" onclick='deliveryAction("approve",${JSON.stringify(proposal.id)})'>Approve</button><button class="qbtn compact" onclick='deliveryAction("reject",${JSON.stringify(proposal.id)})'>Reject</button><button class="qbtn compact" onclick='deliveryAction("resolve",${JSON.stringify(proposal.id)})'>Resolve</button></div></div>`).join("")
+    : `<div class="empty">No open connected-delivery proposals.</div>`;
   const briefs = (workspace?.briefs || []).filter((item) => !["resolved", "rejected"].includes(item.status)).slice(-5).reverse();
   const openTasks = workspace ? workspace.tasks.filter((task) => !["done", "cancelled"].includes(task.status)).length : 0;
   const progress = brief?.progress || 0;
@@ -776,6 +781,7 @@ function renderAtlasPane(workspaces, brief, csrf) {
         <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Execution lanes</h2><small>${executions.length} recent</small></div><p class="hint" style="margin:0 0 8px">Every run has a lane, checkpoints, evidence, and an explicit approval boundary.</p>${executionRows}<div id="execution-result" class="hint"></div></section><section class="atlas-section"><div class="atlas-section-head"><h2>Retrospectives</h2><small>what ARIA learned</small></div>${retrospectiveRows}</section></div>
         <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Operator Teams</h2><small>${operatorTeams.length} recent</small></div><p class="hint" style="margin:0 0 8px">Specialist role packets move through accepted handoffs; budgets and quality gates stay visible.</p>${operatorTeamRows}<div class="actions"><button class="qbtn purple" onclick="operatorTeamAction('start')">Start operator team</button></div><div id="operator-team-result" class="hint"></div></section><section class="atlas-section"><div class="atlas-section-head"><h2>Latest team handoff</h2><small>accepted context only</small></div>${latestHandoff ? `<div class="atlas-note"><b>${esc(latestHandoff.fromRole)} → ${esc(latestHandoff.toRole)}</b><small>${esc(latestHandoff.summary)}${latestHandoff.evidenceIds?.length ? ` · evidence ${esc(latestHandoff.evidenceIds.join(", "))}` : ""}</small></div>` : `<div class="empty">No accepted handoff yet.</div>`}</section></div>
         <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Knowledge Graph</h2><small>revision ${workspace?.knowledgeRevision || 0}</small></div><p class="hint" style="margin:0 0 8px">Requirements, decisions, evidence, risks, tasks, and runs are linked with explicit provenance.</p><div class="knowledge-actions"><span class="badge ${knowledgeStale.length || knowledgeOrphans.length || knowledgeConflicts.length ? "b-amber" : "b-green"}">${knowledgeStale.length + knowledgeOrphans.length + knowledgeConflicts.length ? `${knowledgeStale.length + knowledgeOrphans.length + knowledgeConflicts.length} review item(s)` : "healthy"}</span><button class="qbtn compact purple" onclick="knowledgeAction('project')">Project graph</button></div>${knowledgeNodeRows}<div class="hint">${knowledgeNodes.length} nodes · ${knowledgeEdges.length} edges · ${knowledgeStale.length} stale · ${knowledgeOrphans.length} orphan · ${knowledgeConflicts.length} conflict</div><div id="knowledge-result" class="hint"></div></section><section class="atlas-section"><div class="atlas-section-head"><h2>Artifact Vault</h2><small>${workspace?.artifacts?.length || 0} recorded</small></div><p class="hint" style="margin:0 0 8px">Outputs remain traceable by source role, mission, team, checksum, and related knowledge nodes.</p>${artifactRows}<div id="artifact-result" class="hint"></div></section></div>
+        <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Connected Delivery</h2><small>V8 · verified awareness</small></div><p class="hint" style="margin:0 0 8px">GitHub and Render health become release evidence. ARIA will not commit, merge, deploy, rollback, or change provider settings from this panel.</p><div class="atlas-kpis" style="grid-template-columns:repeat(3,1fr);margin:0 0 10px"><div class="atlas-kpi"><div class="value" style="font-size:16px">${esc(connected?.status || "not_configured")}</div><div class="label">Release status</div></div><div class="atlas-kpi"><div class="value" style="font-size:16px">${connected?.mapping?.github ? "mapped" : "—"}</div><div class="label">GitHub</div></div><div class="atlas-kpi"><div class="value" style="font-size:16px">${connected?.mapping?.render ? "mapped" : "—"}</div><div class="label">Render</div></div></div><div class="atlas-form"><input id="connected-github-repo" placeholder="GitHub repository: owner/name" value="${esc(connected?.mapping?.github || "")}" maxlength="160" /><input id="connected-render-service" placeholder="Render service ID: srv-…" value="${esc(connected?.mapping?.render || "")}" maxlength="140" /><div class="actions"><button class="qbtn purple" onclick="deliveryAction('map')">Save mapping</button><button class="qbtn" onclick="deliveryAction('refresh')">Refresh state</button></div><div class="hint">Manual provider setup still requires signed secrets and webhook entries outside this dashboard.</div><div id="delivery-result" class="hint"></div></div></section><section class="atlas-section"><div class="atlas-section-head"><h2>Delivery proposals</h2><small>owner decisions</small></div>${connectedProposalRows}</section></div>
         <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Sentinel signals</h2><small>${sentinel.enabled ? "watching" : "disabled"}</small></div><p class="hint" style="margin:0 0 8px">Signed project events and local monitoring become evidence-backed review items.</p>${signalRows}<div class="atlas-form" style="margin-top:12px"><input id="sentinel-github-repo" placeholder="GitHub repository: owner/name" value="${esc(sentinel.sources?.github?.repository || "")}" maxlength="160" /><input id="sentinel-render-service" placeholder="Render service ID (optional)" value="${esc(sentinel.sources?.render?.serviceId || "")}" maxlength="120" /><div class="actions"><button class="qbtn purple" onclick="sentinelAction('enable')">Enable / save</button><button class="qbtn" onclick="sentinelAction('disable')">Disable</button><button class="qbtn" onclick="sentinelAction('run')">Run local pass</button><button class="qbtn" onclick="sentinelAction('diagnose')">Diagnose connections</button><button class="qbtn" onclick="sentinelAction('self_test')">Test local verifier</button></div><div id="sentinel-result" class="hint"></div></div></section><section class="atlas-section"><div class="atlas-section-head"><h2>Decision briefs</h2><small>owner review</small></div>${briefRows}</section></div>
         <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Integration health</h2><small>V4 diagnostics</small></div>${sourceRows}</section><section class="atlas-section"><div class="atlas-section-head"><h2>Recent deliveries</h2><small>redacted transport log</small></div>${deliveryRows}</section></div>
         <div class="atlas-grid"><section class="atlas-section"><div class="atlas-section-head"><h2>Recent decisions</h2><small>recorded choices</small></div>${decisionRows}</section><section class="atlas-section"><div class="atlas-section-head"><h2>Evidence</h2><small>attached sources</small></div>${evidenceRows}</section></div>
@@ -789,6 +795,7 @@ function renderAtlasPane(workspaces, brief, csrf) {
     async function executionAction(action,id){const result=document.getElementById('execution-result')||document.getElementById('atlas-plan-result');try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/execution',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:ATLAS_CSRF,action,id})});const data=await dashboardJson(response);if(result)result.textContent=data.message||'Execution updated. Refreshing…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
     async function operatorTeamAction(action,id){const result=document.getElementById('operator-team-result');try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/operator-teams',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:ATLAS_CSRF,action,id})});const data=await dashboardJson(response);if(result)result.textContent=data.message||'Operator team updated. Refreshing…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
     async function knowledgeAction(action){const result=document.getElementById('knowledge-result');try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/knowledge',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:ATLAS_CSRF,action})});const data=await dashboardJson(response);if(result)result.textContent=data.message||'Knowledge graph updated. Refreshing…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
+    async function deliveryAction(action,id){const result=document.getElementById('delivery-result');const body={_csrf:ATLAS_CSRF,action,id};if(action==='map'){body.repository=document.getElementById('connected-github-repo')?.value||'';body.serviceId=document.getElementById('connected-render-service')?.value||'';}try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/connected-delivery',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await dashboardJson(response);if(result)result.textContent=data.message||'Connected delivery updated. Refreshing…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
     async function atlasPlan(action){const result=document.getElementById('atlas-plan-result');try{const response=await fetch('/dashboard/api/atlas/${workspace?.id || ""}/plan',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({_csrf:ATLAS_CSRF,action})});const data=await dashboardJson(response);if(result)result.textContent=action==='apply'?'Roadmap applied. Refreshing…':'Roadmap drafted. Refreshing for review…';setTimeout(()=>window.location.reload(),350);}catch(error){if(result)result.textContent=error.message;}}
     document.getElementById('atlas-create-form')?.addEventListener('submit',async(event)=>{event.preventDefault();const form=event.currentTarget;const result=document.getElementById('atlas-create-result');const body=Object.fromEntries(new FormData(form).entries());body._csrf=ATLAS_CSRF;try{const response=await fetch('/dashboard/api/atlas/workspaces',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await dashboardJson(response);window.location.href='/dashboard/atlas?workspace='+encodeURIComponent(data.id);}catch(error){if(result)result.textContent=error.message;}});
     </script>
@@ -831,7 +838,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .app{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
 .sidebar{width:248px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:24px 16px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
 .sb-brand{display:flex;align-items:center;gap:11px;padding:0 8px;margin-bottom:26px}
-.sb-logo{display:grid;place-items:center;width:38px;height:38px;overflow:hidden;border-radius:9px;background:var(--brand);color:#fff;font-size:16px;font-weight:800;letter-spacing:-.08em;box-shadow:0 6px 16px rgba(79,140,255,.25)}
+.sb-logo{display:block;width:38px;height:38px;object-fit:cover;overflow:hidden;border-radius:10px;background:#0b0d12;box-shadow:0 6px 16px rgba(255,107,107,.18)}
 .sb-name{font-size:16px;font-weight:800;color:var(--text);letter-spacing:-.01em}
 .sb-name small{display:block;font-size:11px;color:var(--muted);font-weight:600}
 .sb-group{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);font-weight:800;padding:0 10px;margin:22px 0 7px}
@@ -916,7 +923,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .hint{color:var(--faint);margin-top:12px;font-size:11px}
 
 @media(max-width:820px){
-  .app{display:block;padding-bottom:72px}.sidebar{width:100%;height:58px;position:sticky;top:0;z-index:40;padding:10px 16px;border-right:0;border-bottom:1px solid var(--line);display:flex;flex-direction:row;align-items:center}.sb-brand{padding:0;margin:0}.sb-brand .sb-logo{width:30px;height:30px;font-size:13px}.sb-name,.sb-group,.sb-online,.sidebar .navitem,.sidebar .sb-bottom{display:none}.main{max-width:none;padding:0 16px 40px}.topbar{height:64px;margin-bottom:26px}.topbar-kicker{font-size:9px}.topbar-context strong{font-size:13px}.topbar-status span:not(.dot){display:none}.page-title{font-size:26px}.grid2{grid-template-columns:1fr}.quick-grid{grid-template-columns:1fr}.mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);gap:2px;bottom:0;left:0;right:0;z-index:50;padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:rgba(8,13,20,.96);border-top:1px solid var(--line);backdrop-filter:blur(14px)}.mobile-nav a{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);text-decoration:none;font-size:9px;font-weight:650}.mobile-nav a span{font:700 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--faint)}.mobile-nav a:hover,.mobile-nav a:focus{color:var(--accent)}.card{padding:16px}.hero{padding:22px 18px}.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:14px}.stat .n{font-size:22px}
+  .app{display:block;padding-bottom:72px}.sidebar{width:100%;height:58px;position:sticky;top:0;z-index:40;padding:10px 16px;border-right:0;border-bottom:1px solid var(--line);display:flex;flex-direction:row;align-items:center}.sb-brand{padding:0;margin:0}.sb-brand .sb-logo{width:30px;height:30px}.sb-name,.sb-group,.sb-online,.sidebar .navitem,.sidebar .sb-bottom{display:none}.main{max-width:none;padding:0 16px 40px}.topbar{height:64px;margin-bottom:26px}.topbar-kicker{font-size:9px}.topbar-context strong{font-size:13px}.topbar-status span:not(.dot){display:none}.page-title{font-size:26px}.grid2{grid-template-columns:1fr}.quick-grid{grid-template-columns:1fr}.mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);gap:2px;bottom:0;left:0;right:0;z-index:50;padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:rgba(8,13,20,.96);border-top:1px solid var(--line);backdrop-filter:blur(14px)}.mobile-nav a{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);text-decoration:none;font-size:9px;font-weight:650}.mobile-nav a span{font:700 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--faint)}.mobile-nav a:hover,.mobile-nav a:focus{color:var(--accent)}.card{padding:16px}.hero{padding:22px 18px}.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:14px}.stat .n{font-size:22px}
 }
 </style>
 </head>
@@ -924,7 +931,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 <div class="app">
   <aside class="sidebar">
-    <div class="sb-brand"><div class="sb-logo" aria-hidden="true">A</div><div class="sb-name">ARIA<small>operator console</small></div></div>
+    <div class="sb-brand"><img class="sb-logo" src="/aria-mark.png" alt="ARIA" width="38" height="38" /><div class="sb-name">ARIA<small>operator console</small></div></div>
     <div class="sb-group">Workspace</div>
     ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">01</span><span>Command center</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">01</span><span>Command center</span></div>`}
     <a class="navitem" href="/dashboard/atlas"><span class="ico">02</span><span>Atlas projects</span></a>
@@ -1449,6 +1456,48 @@ router.post("/api/atlas/:id/knowledge", checkAuth, (req, res) => {
   } catch (e) {
     console.error("[dashboard-atlas-knowledge-action]", e);
     return res.status(500).json({ error: "Could not update Atlas knowledge graph" });
+  }
+});
+
+router.get("/api/atlas/:id/connected-delivery", checkAuth, (req, res) => {
+  try {
+    const owner = atlasOwnerId();
+    const workspaceId = String(req.params.id);
+    const atlasStore = require("./tools/atlasStore");
+    const connected = require("./tools/atlasConnectedDelivery");
+    if (!atlasStore.getWorkspace(owner, workspaceId)) return res.status(404).json({ error: "workspace not found" });
+    return res.json({ ok: true, connected: connected.connectedDelivery(owner, workspaceId) });
+  } catch (e) {
+    console.error("[dashboard-atlas-connected-delivery-read]", e);
+    return res.status(500).json({ error: "Could not read connected-delivery state" });
+  }
+});
+
+router.post("/api/atlas/:id/connected-delivery", checkAuth, (req, res) => {
+  try {
+    const owner = atlasOwnerId();
+    const workspaceId = String(req.params.id);
+    const atlasStore = require("./tools/atlasStore");
+    const connected = require("./tools/atlasConnectedDelivery");
+    const workspace = atlasStore.getWorkspace(owner, workspaceId);
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    const action = String(req.body?.action || "").toLowerCase();
+    if (action === "map") {
+      const state = connected.configureConnectedDelivery(owner, workspaceId, { repository: req.body?.repository, serviceId: req.body?.serviceId });
+      return state ? res.json({ ok: true, action, connected: connected.connectedDelivery(owner, workspaceId), message: "Connected-delivery mapping saved. Configure signed provider webhooks separately; no provider setting was changed." }) : res.status(400).json({ error: "mapping could not be saved" });
+    }
+    if (action === "refresh") return res.json({ ok: true, action, connected: connected.connectedDelivery(owner, workspaceId), message: "Connected-delivery state refreshed from verified Atlas records." });
+    if (["approve", "reject", "resolve"].includes(action)) {
+      const proposalId = String(req.body?.id || "");
+      const proposal = atlasStore.updateConnectedProposal(owner, workspaceId, proposalId, { status: action === "approve" ? "approved" : action === "reject" ? "rejected" : "resolved", decisionBy: owner, decisionNote: `${action} recorded from the Atlas cockpit; no provider side effect executed.`, decidedAt: Date.now() });
+      if (!proposal) return res.status(404).json({ error: "connected-delivery proposal not found" });
+      if (action === "approve") atlasStore.updateConnectedDelivery(owner, workspaceId, { status: "approved_no_side_effect", release: { status: "approved_no_side_effect", proposalId, lastAssessedAt: Date.now() } });
+      return res.json({ ok: true, action, proposal, connected: connected.connectedDelivery(owner, workspaceId), message: `${action[0].toUpperCase() + action.slice(1)}d proposal ${proposalId}. No commit, merge, deploy, rollback, post, or provider configuration change was executed.` });
+    }
+    return res.status(400).json({ error: "action must be map, refresh, approve, reject, or resolve" });
+  } catch (e) {
+    console.error("[dashboard-atlas-connected-delivery-action]", e);
+    return res.status(500).json({ error: "Could not update connected-delivery state" });
   }
 });
 

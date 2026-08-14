@@ -5,29 +5,26 @@ const { getAIResponse } = require("./ai");
 // the AI hallucinating a plausible-sounding but inaccurate self-review.
 const ACTUAL_CAPABILITIES = `
 Built and working:
-- Multi-provider AI chat (Cerebras, Gemini, Groq, OpenRouter fallback chain)
-- Per-chat persistent memory + per-user preference memory
-- Vision (image analysis via Groq)
-- Web search (Tavily/Brave/DuckDuckGo fallback chain) — both manual (!search) and automatic for time-sensitive questions
-- App builder: plan → generate → npm build verification → auto-repair → zip → Gofile upload, with project state that persists across restarts (!build, !continue, !status, !projects)
-- Think mode (!think) — shows a plan before generating code
-- File editing on existing projects (!edit)
-- Code debugging (!fix)
-- Voice transcription (Groq Whisper) and TTS replies (ElevenLabs/FreeTTS)
-- Stickers, image generation, downloads (YouTube/TikTok/etc via yt-dlp)
-- Group admin: kick/promote/demote/tagall/antilink/welcome messages/warnings
-- Owner/admin permission system, broadcast, health checks, bot stats
-- Party games (joke/truth/dare/ship/roast), simple games (tic-tac-toe, dice), card economy
-- Reply-to-bot detection using real message ID tracking (not field-guessing)
-- Reminders (one-time and recurring)
+- Multi-provider AI chat with provider telemetry and fallback chains (Cerebras, Gemini, Groq, OpenRouter)
+- Persistent per-chat history, unified profile data, semantic memories, preferences, facts, and project context
+- Vision, voice transcription, text-to-speech, stickers, image generation, and yt-dlp-backed media tools
+- Web search and URL browsing with outbound URL safety checks
+- App builder with planning, generation, build verification, repair, project state, zip delivery, and optional deployment
+- Think mode, file editing, code debugging, sandboxed code execution, and durable mission execution
+- GitHub repository inspection, local git actions, pull-request support, and repository-aware developer workflows
+- Group administration, anti-link/welcome/warning tools, owner/admin permissions, broadcasts, health checks, and telemetry
+- Anime catalog, provider-race source resolution, validation, signed playback/file capabilities, safe catalog filtering, and queued downloads
+- Academy/LMS with hidden assessments, learner profiles, engineering-skill signals, durable XP ledger, portal accounts, Google OAuth, and WhatsApp linking
+- Reminders, recurring tasks, autonomous owner check-ins, proactive operational monitoring, and background task polling
 
 Known gaps:
-- No multi-agent role separation (planner/coder/reviewer are one model with different prompts, not architecturally separate passes)
-- No file-dependency graph checking across generated project files
-- No GitHub push integration
-- No VPS control commands (restart/RAM check via chat)
-- No autonomous background tasks (e.g. "watch BTC price and notify me")
-- Build quality for complex multi-file projects can still be inconsistent — cross-file awareness during generation is limited
+- Role-based agent prompts exist, but planner/researcher/builder/verifier are not isolated services with independent budgets and failure domains
+- Generated-project dependency graphs and repository-wide AST/test analysis are incomplete
+- External calendar, email, and household integrations are not yet approval-first connected actions
+- Anime watchlist/progress migration is now scoped by user, but older callers still use the legacy compatibility scope until account IDs are supplied
+- Full outbound pinning cannot be inherited by third-party subprocesses such as yt-dlp/ffprobe without additional OS-level isolation
+- Companion emotion is an expressive, transparent persona state—not biological consciousness—and the system still needs a user-facing memory center, retention controls, and deeper evaluation coverage
+- Complex multi-file builds can still fail across files even after local syntax/build repair
 `.trim();
 
 async function runEvolveCheck(senderName) {

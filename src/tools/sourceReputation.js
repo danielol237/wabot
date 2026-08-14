@@ -46,6 +46,7 @@ function rec(provider) {
       attempts: 0,
       lastEvent: null,
       lastError: null,
+      probeInFlight: false,
       // rolling tallies for the dashboard
       tally: { search: 0, resolve: 0, validate: 0, download: 0, httpErrors: 0, noResults: 0 },
     };
@@ -78,16 +79,23 @@ function record(provider, outcome, ok, { latencyMs, error } = {}) {
   // Latency penalty (>8s counts against).
   if (latencyMs && latencyMs > 8000) r.score = Math.max(0, r.score - 3);
 
-  // Circuit breaker logic.
+  // Circuit breaker logic. A successful half-open probe closes the circuit;
+  // a failed half-open probe reopens it with exponential backoff.
   if (ok) {
     r.consecutiveFailures = 0;
-    if (r.circuit === "open") { r.circuit = "half-open"; r.openUntil = 0; }
+    r.probeInFlight = false;
+    if (r.circuit === "half-open" || r.circuit === "open") {
+      r.circuit = "closed";
+      r.openUntil = 0;
+      r.openCount = 0;
+    }
   } else {
     r.consecutiveFailures++;
     if (r.consecutiveFailures >= FAIL_THRESHOLD) {
       const openCount = (r.openCount || 0) + 1;
       r.openCount = openCount;
       r.circuit = "open";
+      r.probeInFlight = false;
       r.openUntil = Date.now() + backoffMs(openCount);
       r.consecutiveFailures = 0; // reset so backoff re-arms on later failures
     }
@@ -99,19 +107,38 @@ function record(provider, outcome, ok, { latencyMs, error } = {}) {
 // Is this provider currently usable? Open circuit + still cooling down = no.
 function usable(provider) {
   const r = rec(provider);
-  if (r.circuit === "open" && Date.now() < r.openUntil) return false;
+  const now = Date.now();
+  if (r.circuit === "open") {
+    if (now < r.openUntil) return false;
+    r.circuit = "half-open";
+    r.openUntil = 0;
+    r.probeInFlight = false;
+    persist();
+  }
+  if (r.circuit === "half-open") {
+    if (r.probeInFlight) return false;
+    r.probeInFlight = true;
+    persist();
+  }
   return true;
 }
 
 // Full status for routing + dashboard.
 function status(provider) {
   const r = rec(provider);
-  const open = r.circuit === "open" && Date.now() < r.openUntil;
+  const now = Date.now();
+  if (r.circuit === "open" && now >= r.openUntil) {
+    r.circuit = "half-open";
+    r.openUntil = 0;
+    r.probeInFlight = false;
+    persist();
+  }
+  const open = r.circuit === "open" && now < r.openUntil;
   return {
     provider,
     score: r.score,
     circuit: open ? "open" : r.circuit,
-    retryAfterMs: open ? Math.max(0, r.openUntil - Date.now()) : 0,
+    retryAfterMs: open ? Math.max(0, r.openUntil - now) : 0,
     attempts: r.attempts,
     lastError: r.lastError,
     tally: r.tally,

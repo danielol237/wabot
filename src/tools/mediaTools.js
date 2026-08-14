@@ -23,10 +23,10 @@ function exec(cmd, args, timeoutMs = 120000) {
 }
 
 // Build the base yt-dlp flags shared by all operations.
-//  - Deno as the JS runtime (YouTube extraction now needs one; deno is what
-//    yt-dlp prefers). Falls back to node if deno isn't on PATH.
+//  - Prefer Deno for yt-dlp's JavaScript challenge solver. If Deno is not
+//    installed, use the Node 22 runtime by name (not its absolute path).
 //  - Cookies from the YT_COOKIES env var (a Netscape-format cookies.txt pasted
-//    into Render env) to get past YouTube's 2026 bot wall.
+//    into Render env) to get past YouTube's bot wall.
 function whichBin(name) {
   try {
     const out = require("child_process").execSync(`which ${name}`, { stdio: "ignore" });
@@ -36,7 +36,7 @@ function whichBin(name) {
 
 function ytBaseFlags() {
   const flags = [];
-  const runtime = whichBin("deno") || whichBin("node");
+  const runtime = whichBin("deno") ? "deno" : (whichBin("node") ? "node" : "");
   if (runtime) flags.push("--js-runtimes", runtime);
   const cookies = process.env.YT_COOKIES;
   if (cookies && cookies.trim()) {
@@ -126,4 +126,4 @@ async function downloadVideo(sourceUrl, maxMB = 50) {
   });
 }
 
-module.exports = { searchYt, downloadAudio, downloadVideo, TEMP_DIR };
+module.exports = { searchYt, downloadAudio, downloadVideo, TEMP_DIR, ytBaseFlags };

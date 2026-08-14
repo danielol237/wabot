@@ -200,7 +200,7 @@ router.get("/auth/google/callback", async (req, res) => {
     }
     const learner = accounts[sub];
     const token = issuePortalToken(learner);
-    res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
+    res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
     return res.redirect("/portal");
   } catch (e) {
     return res.redirect("/portal/login?error=oauth-failed");
@@ -226,20 +226,20 @@ router.post("/auth/email", express.json({ limit: "16kb" }), (req, res) => {
     save();
     const learner = accounts[id];
     const token = issuePortalToken(learner);
-    res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
+    res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
     return res.json({ ok: true });
   }
   // login
   if (!existing) { recordAuthAttempt(req); return res.status(401).json({ error: "no account with that email" }); }
   if (!verifyPw(password, existing.passwordHash)) { recordAuthAttempt(req); return res.status(401).json({ error: "wrong password" }); }
   const token = issuePortalToken(existing);
-  res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000 * 1000, path: "/portal" });
+  res.cookie("aria_portal", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
   return res.json({ ok: true });
 });
 
 router.post("/link", portalAuth, (req, res) => {
   if (!portalCsrfOk(req)) return res.status(403).send("Invalid or missing form token.");
-  const uid = linking.consumeCode(req.body.code);
+  const uid = linking.consumeCode(req.body.code, req.learner.sub, req.ip || req.socket?.remoteAddress || "unknown");
   if (!uid) return res.redirect("/portal?error=invalid-link-code");
   linking.linkAccount(req.learner.sub, uid);
   res.redirect("/portal?linked=1");
@@ -322,7 +322,7 @@ router.get("/", portalAuth, (req, res) => {
   const linkedNotice = req.query.linked === "1" ? `<div class="ok" role="status">Your WhatsApp academy progress is now connected to this learner space.</div>` : "";
   const linkError = req.query.error === "invalid-link-code" ? `<div class="err" role="alert">That link code is invalid or expired. Send <code>!portal</code> in WhatsApp to create a new one.</div>` : "";
   const linkPanel = req.learner.linked ? `<div class="notice"><span class="tag">Linked</span><div><strong>WhatsApp progress connected</strong>Your XP, lessons, streaks, and ARIA notes are sourced from learner ID <code>${esc(req.learner.uid)}</code>.</div></div>` : `
-    <div class="portal-card link-card"><div class="section-title">Connect your WhatsApp progress <span>recommended</span></div><p class="portal-sub">Open WhatsApp, send <code>!portal</code> to ARIA, then paste the one-time code here. This keeps your account separate while connecting your existing academy history.</p><form class="link-form" method="post" action="/portal/link"><input type="hidden" name="_csrf" value="${portalCsrf(req)}"><input class="link-input" name="code" inputmode="text" autocomplete="one-time-code" placeholder="e.g. 4F8A2C19" maxlength="12" required><button class="btn" type="submit">Link progress</button></form></div>`;
+    <div class="portal-card link-card"><div class="section-title">Connect your WhatsApp progress <span>recommended</span></div><p class="portal-sub">Open WhatsApp, send <code>!portal</code> to ARIA, then paste the one-time code here. This keeps your account separate while connecting your existing academy history.</p><form class="link-form" method="post" action="/portal/link"><input type="hidden" name="_csrf" value="${portalCsrf(req)}"><input class="link-input" name="code" inputmode="text" autocomplete="one-time-code" placeholder="e.g. 4F8A2C19D7B6C0EF" maxlength="16" required><button class="btn" type="submit">Link progress</button></form></div>`;
   const card = (title, content) => `<section class="portal-card portal-section"><div class="section-title">${esc(title)}</div>${content}</section>`;
   const notesHtml = notes.length ? notes.slice(0, 6).map((n) => `<div class="note">${inlineText(n.text)}<div class="hint">${esc(new Date(n.ts).toLocaleDateString())}</div></div>`).join("") : `<div class="empty">No notes yet. ARIA will add observations as you study.</div>`;
   const strengths = space?.skills?.strong?.length ? space.skills.strong.map((s) => `<span class="tag">${esc(s.skill)} · ${Math.round(s.confidence)}%</span>`).join(" ") : `<div class="empty">Your strengths appear after a few attempts.</div>`;

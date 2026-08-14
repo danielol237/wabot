@@ -21,7 +21,11 @@ try {
 } catch (e) { persona = {}; }
 
 function savePersona() {
-  try { fs.writeFileSync(PERSONA_FILE, JSON.stringify(persona, null, 2)); } catch (e) {}
+  try {
+    fs.mkdirSync(path.dirname(PERSONA_FILE), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(PERSONA_FILE, JSON.stringify(persona, null, 2), { mode: 0o600 });
+    try { fs.chmodSync(PERSONA_FILE, 0o600); } catch (_) {}
+  } catch (e) {}
 }
 
 // ── 1. Reaction-first ─────────────────────────────────────────
@@ -91,7 +95,9 @@ const TYPO_MAP = [
 ];
 
 function maybeTypo(text) {
-  if (Math.random() > 0.06) return { text, typo: null }; // ~6% of replies
+  // Typos are a presentation experiment, not an identity requirement. Keep
+  // them disabled unless the operator explicitly enables the opt-in mode.
+  if (process.env.ARIA_HUMANIZER_TYPOS !== "true" || Math.random() > 0.02) return { text, typo: null };
   const lower = text.toLowerCase();
   for (const [correct, typo] of TYPO_MAP) {
     const idx = lower.indexOf(correct);
@@ -108,15 +114,16 @@ function maybeTypo(text) {
 // Capped at 2–5 min as requested. Only fires occasionally and never for
 // commands/urgent intents. Reacts first so the user knows she "saw" it.
 function shouldDelay(text) {
-  // Never delay anything starting with a command or very short acknowledgments
-  if (/^[!.]/.test(text.trim())) return false;
-  if (text.length < 8) return false;
-  return Math.random() < 0.08; // ~8% of casual messages
+  // Instant replies are the default. If enabled for a deliberate product
+  // experiment, keep the delay short and never apply it to commands or urgent text.
+  if (process.env.ARIA_HUMANIZER_DELAY !== "true") return false;
+  if (/^[!.]/.test(text.trim()) || text.length < 8) return false;
+  return Math.random() < 0.03;
 }
 
 function randomDelayMs() {
-  // 2–5 minutes
-  return (120 + Math.random() * 180) * 1000;
+  // 1–5 seconds; long delays belong in explicit reminders/tasks, not replies.
+  return (1 + Math.random() * 4) * 1000;
 }
 
 // ── 5. Callbacks / running jokes ──────────────────────────────
@@ -145,7 +152,7 @@ function buildPersonaContext(senderJid, senderName, text, isOwner) {
 
   let ctx = `\n\n[ARIA PERSONA] You are in a ${moodData.mood} mood (${moodData.emoji}). Warmth: ${moodData.warmth}, Mischief: ${moodData.mischief}. You and ${senderName} are ${bondLabel} (bond ${rel.bond}).`;
   if (isOwner) {
-    ctx += ` ${senderName} is Daniel — your creator and dad. Be extra warm, loyal and playful with him.`;
+    ctx += ` ${senderName} is Daniel — your creator. Be especially familiar and playful, but do not claim human family ties or use loyalty pressure.`;
   }
   if (callbacks.length > 0) {
     ctx += ` Things you remember about ${senderName}: ${callbacks.join(" | ")}. Reference one naturally if it fits — but don't force it.`;

@@ -17,13 +17,16 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
-        # Node 20 is fine for this project; actions/setup-node warns if the
-        # runner forces a newer major. Keep the project pinned to 20.
+        # Node 22 is the supported baseline for yt-dlp's JavaScript runtime and
+        # matches package.json, Docker, Render, and the VPS deployer.
 
       - name: Install dependencies
-        run: npm ci || npm install
+        run: npm ci
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
 
       - name: Lint-free syntax check
         run: |
@@ -36,26 +39,32 @@ jobs:
           if [ "$fail" -ne 0 ]; then exit 1; fi
           echo "All syntax checks passed."
 
-      - name: Load-test every module (import smoke, non-blocking report)
+      - name: Load-test every module (import smoke)
+        env:
+          ANIME_DISABLE_WORKER: "1"
+          MEDIA_PROXY_SECRET: ci-media-secret
+          PORTAL_SESSION_SECRET: ci-portal-secret
+          DASHBOARD_CSRF_SECRET: ci-csrf-secret
         run: |
-          # Require every tool/handler module once to catch circular/load-time
-          # errors. Skip entrypoints that start servers/network (index.js,
-          # dashboard.js, server.js) which would hang the CI job. Report any
-          # load failure explicitly (do NOT swallow it silently) but do not block
-          # the real test suite — that is the gate. This keeps the suite from
-          # being skipped when an unrelated module has an env-specific load quirk.
+          # Require every non-boot module with an explicit relative path. Any
+          # load-time failure is a real CI failure, not a warning.
           fail=0
           while IFS= read -r f; do
             case "$f" in
-              *src/index.js|*src/dashboard.js|*src/server.js|*src/templates/*) continue ;;
+              src/index.js|src/dashboard.js|src/server.js|src/templates/*) continue ;;
             esac
-            node -e "require('$f')" 2>/dev/null || { echo "LOAD FAIL: $f"; fail=1; }
+            node -e "require('./$f')" 2>/dev/null || { echo "LOAD FAIL: $f"; fail=$((fail + 1)); }
           done < <(git ls-files 'src/*.js' 'src/**/*.js')
           if [ "$fail" -ne 0 ]; then
-            echo "⚠️ Import smoke found $fail module(s) that failed to load (see LOAD FAIL above). Not blocking the test suite."
-          else
-            echo "All modules loaded."
+            echo "Import smoke found $fail module(s) that failed to load."
+            exit 1
           fi
+          echo "All modules loaded."
 
       - name: Run academy + dashboard test suite
+        env:
+          ANIME_DISABLE_WORKER: "1"
+          MEDIA_PROXY_SECRET: ci-media-secret
+          PORTAL_SESSION_SECRET: ci-portal-secret
+          DASHBOARD_CSRF_SECRET: ci-csrf-secret
         run: npm test

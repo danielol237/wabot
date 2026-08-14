@@ -35,12 +35,20 @@ Pair WhatsApp from the owner dashboard. Open `/dashboard`, sign in with `DASHBOA
 | `SESSION_ENCRYPT_KEY` | Required for Git-backed session backup | Dedicated random key of at least 32 characters |
 | `ANIME_WHATSAPP_MAX_MB` | No | WhatsApp delivery ceiling; default 150 MB |
 | `MEDIA_ALLOWED_HOSTS` | No | Comma-separated HTTPS provider host allowlist |
+| `YTDLP_VERSION` | No | Pinned yt-dlp version; default `2026.7.4` |
+| `YTDLP_EJS_VERSION` | No | Pinned yt-dlp JavaScript solver package; default `0.8.0` |
+| `ANIME_PUBLIC_DOWNLOADS_PER_HOUR` | No | Anonymous browser download quota; default 10 per client IP |
+| `ANIME_PUBLIC_ACTIVE_LIMIT` | No | Maximum active public jobs per client; default 3 |
+| `ANIME_PUBLIC_QUEUE_LIMIT` | No | Global public queue ceiling; default 100 |
+| `ARIA_HUMANIZER_TYPOS` | No | Opt-in presentation experiment; default `false` |
+| `ARIA_HUMANIZER_DELAY` | No | Opt-in short response delay experiment; default `false` |
+| `ARIA_RANDOM_MOOD` | No | Opt-in random mood variation; default `false` |
 | `PHONE_NUMBER` | No | If set, enables pairing-code mode instead of QR |
 
 ## Features
 
 ### 🤖 AI Chat
-Talk naturally — mention "aria" or just send a message. Falls back through Cerebras → Gemini → Groq → OpenRouter if one fails. Fully unrestricted — no content filters.
+Talk naturally — mention "aria" or just send a message. Falls back through Cerebras → Gemini → Groq → OpenRouter if one fails. ARIA’s personality is direct and expressive, but she stays honest about being an AI companion and does not use manipulation or abusive low blows as a substitute for personality.
 
 ### 🎤 Voice Conversation
 Send a voice note → ARIA transcribes it (Groq Whisper) → AI thinks → replies with audio (ElevenLabs/FreeTTS). Full spoken conversation.
@@ -79,7 +87,7 @@ These execute code or write files on the server, so they're restricted to `OWNER
 `!job create <task>` — background AI job
 `!evolve` / `!selfcheck` — self-improvement engine
 
-Other dev commands open to everyone: `!remember`, `!preferences`, `!learn`, `!facts`.
+Other dev commands open to everyone: `!remember`, `!preferences`, `!learn`, `!facts`, and `!memories`. Use `!memory on|off|export|forget <id>|clear` to control ARIA’s semantic memory. Memory capture is transparent, and clearing it removes the stored semantic memories and learned companion profile.
 
 ### 🌐 Web surfaces
 The public root opens the catalog at `/anime`. Browse/search remain login-free; watch and download links are short-lived signed capabilities. The learner portal is at `/portal/login`, and the owner dashboard is at `/dashboard`.
@@ -105,8 +113,7 @@ The dashboard requires `DASHBOARD_PASSWORD` in `.env`. The QR pairing screen is 
 Anime downloads (`!animedl`, the web browser) depend on two things that are
 **not npm packages**, so they must exist on the host:
 
-- **`yt-dlp`**, **`ffmpeg`**, and **`ffprobe`** — used to download, merge, validate, and deliver the final video. The production Dockerfile installs and verifies them; Render deployments must use that Dockerfile or install the same binaries.
-  (`pip install yt-dlp`, or via apt). If it's missing, ARIA logs a clear error
+- **Node 22**, **`yt-dlp`**, **`yt-dlp-ejs`**, **`ffmpeg`**, and **`ffprobe`** — used to solve current JavaScript challenges, download, merge, validate, and deliver the final video. The production Dockerfile pins and verifies them; Render deployments must use that Dockerfile or run `build.sh` with the same Node 22 baseline. If one is missing, ARIA logs a clear error
   at startup and the download step reports `DOWNLOAD_FAILED` instead of silently
   breaking. Providers like OmniSave return direct MP4 URLs and Gogo/AnimePahe
   return HLS `.m3u8` — both go through yt-dlp.
@@ -134,7 +141,7 @@ On any fresh Ubuntu/Debian VPS, run as root:
 ```bash
 curl -sSL https://raw.githubusercontent.com/danielol237/wabot/main/deploy.sh | bash
 ```
-Installs Node 20 LTS, clones the repo, installs deps, sets up PM2, and prints the QR/dashboard URL. Then edit `/opt/wabot/.env` and `pm2 restart aria`.
+Installs Node 22 LTS, clones the repo, installs deps, sets up PM2, and prints the QR/dashboard URL. Then edit `/opt/wabot/.env` and `pm2 restart aria`.
 
 ## Running on Server
 
@@ -156,4 +163,4 @@ pm2 startup
 ```
 
 ## Scheduled & Recurring Messages
-`!schedule`/`!remind` messages are persisted to `data/schedules.json` and re-armed automatically on restart, so they survive redeploys.
+`!schedule`/`!remind` messages are persisted to `data/schedules.json` and re-armed automatically on restart, so they survive redeploys. For persistent production operation, use Render/Docker/PM2 or another always-on host; the default sandbox is not a production scheduler.

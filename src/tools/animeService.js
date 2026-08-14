@@ -308,11 +308,11 @@ async function getDetails(entry) {
   }
 
   if (provider === "anilist") {
-    const data = await anilist(`query($id:Int){Media(id:$id,type:ANIME){id title{english romaji native} coverImage{extraLarge large} description genres tags{name} isAdult status seasonYear averageScore episodes format}}`, { id: Number(id) });
+    const data = await anilist(`query($id:Int){Media(id:$id,type:ANIME){id title{english romaji native} coverImage{extraLarge large} description genres tags{name} isAdult status seasonYear averageScore episodes format externalLinks{site url type language}}}`, { id: Number(id) });
     const a = data?.Media;
     if (a) {
       const description = a.description ? a.description.replace(/<[^>]+>/g, "").slice(0, 800) : "";
-      return { id: String(a.id), title: a.title?.english || a.title?.romaji || a.title?.native || "Untitled", cover: a.coverImage?.extraLarge || a.coverImage?.large || "", description, overview: description, genres: a.genres || [], tags: (a.tags || []).map((tag) => tag?.name || tag).filter(Boolean), isAdult: a.isAdult === true, status: a.status ? a.status.replace(/_/g, " ") : "", year: a.seasonYear, rating: a.averageScore ? a.averageScore / 10 : null, episodes: a.episodes, type: a.format, provider: "anilist" };
+      return { id: String(a.id), title: a.title?.english || a.title?.romaji || a.title?.native || "Untitled", cover: a.coverImage?.extraLarge || a.coverImage?.large || "", description, overview: description, genres: a.genres || [], tags: (a.tags || []).map((tag) => tag?.name || tag).filter(Boolean), externalLinks: (a.externalLinks || []).filter((link) => link?.url).map((link) => ({ site: link.site || "Official site", url: link.url, type: link.type || "", language: link.language || "" })), isAdult: a.isAdult === true, status: a.status ? a.status.replace(/_/g, " ") : "", year: a.seasonYear, rating: a.averageScore ? a.averageScore / 10 : null, episodes: a.episodes, type: a.format, provider: "anilist" };
     }
   }
 

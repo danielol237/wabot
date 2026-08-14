@@ -56,3 +56,35 @@ test("anime public download status preserves the requested quality", async () =>
     server.close();
   }
 });
+
+
+test("anime V11: home exposes persistent dark/light theme controls", async () => {
+  const { base, server } = await boot();
+  try {
+    const response = await fetch(`${base}/`);
+    const html = await response.text();
+    assert.strictEqual(response.status, 200);
+    assert.ok(html.includes('id="theme-toggle"'));
+    assert.ok(html.includes("aria-anime-theme"));
+    assert.ok(html.includes('data-theme="dark"'));
+  } finally {
+    server.close();
+  }
+});
+
+test("anime V11: public download session survives the redirect and rejects a different session", async () => {
+  const { base, server } = await boot();
+  try {
+    const first = await fetch(`${base}/dl/21?prov=anilist&ep=1&quality=360`, { redirect: "manual" });
+    assert.strictEqual(first.status, 302);
+    const cookie = String(first.headers.get("set-cookie") || "").split(";")[0];
+    assert.match(cookie, /^aria_anime_sid=/);
+    const location = new URL(first.headers.get("location"), base).toString();
+    const sameSession = await fetch(location, { headers: { cookie } });
+    assert.strictEqual(sameSession.status, 200);
+    const differentSession = await fetch(location);
+    assert.strictEqual(differentSession.status, 403);
+  } finally {
+    server.close();
+  }
+});

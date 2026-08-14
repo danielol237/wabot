@@ -58,7 +58,7 @@ async function main() {
     const location = new URL(start.headers.get("location"));
     const cookie = start.headers.get("set-cookie") || "";
     if (mode === "start") {
-      process.stdout.write(JSON.stringify({ status: start.status, redirectUri: location.searchParams.get("redirect_uri"), scope: location.searchParams.get("scope"), hasNonce: Boolean(location.searchParams.get("nonce")), secureCookie: /\bSecure\b/i.test(cookie) }));
+      process.stdout.write(JSON.stringify({ status: start.status, redirectUri: location.searchParams.get("redirect_uri"), scope: location.searchParams.get("scope"), hasNonce: Boolean(location.searchParams.get("nonce")), secureCookie: /\bSecure\b/i.test(cookie), cookiePath: (cookie.match(/(?:^|;)\s*Path=([^;]+)/i) || [])[1] || "" }));
       return;
     }
     const callback = await fetch(`${base}/auth/google/callback?code=trusted-code&state=${encodeURIComponent(location.searchParams.get("state"))}`, { headers: { Cookie: cookie }, redirect: "manual" });

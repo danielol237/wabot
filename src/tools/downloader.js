@@ -4,6 +4,7 @@ const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
 const { validateOutboundUrl } = require("../utils/outboundUrlPolicy");
 const { ytBaseFlags } = require("./mediaTools");
+const { resolveYtDlp, commandArgs } = require("../utils/mediaRuntime");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 
@@ -42,7 +43,9 @@ async function downloadFromUrl(rawUrl) {
       target.url.toString(),
     ];
 
-    execFile("yt-dlp", args, { timeout: 60000 }, async (err, stdout, stderr) => {
+    const command = resolveYtDlp();
+    if (!command) return resolve({ text: "❌ Download unavailable: the media runtime is not installed on this server." });
+    execFile(command.file, commandArgs(command, args), { env: command.env, timeout: 60000 }, async (err, stdout, stderr) => {
       if (err) {
         console.error("yt-dlp error:", stderr);
         return resolve({ text: "❌ Download failed. Make sure the URL is valid and public." });

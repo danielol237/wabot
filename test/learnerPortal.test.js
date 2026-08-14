@@ -117,6 +117,7 @@ test("portal: Google config derives the deployed callback URI and OAuth start in
   assert.equal(start.scope, "openid email profile");
   assert.equal(start.hasNonce, true);
   assert.equal(start.secureCookie, true);
+  assert.equal(start.cookiePath, "/");
 });
 
 test("portal: explicit Google redirect URI wins over the derived origin", () => {
@@ -127,7 +128,7 @@ test("portal: explicit Google redirect URI wins over the derived origin", () => 
 test("portal: Google rejects unverified identities and reuses an email account", () => {
   const rejected = runOAuthHarness("unverified");
   assert.equal(rejected.status, 302);
-  assert.match(rejected.location, /oauth-failed/);
+  assert.match(rejected.location, /google-identity-invalid/);
 
   const reused = runOAuthHarness("email-reuse");
   assert.equal(reused.status, 302);

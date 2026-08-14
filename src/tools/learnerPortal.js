@@ -175,7 +175,9 @@ router.get("/auth/google", (req, res) => {
   const stateNonce = crypto.randomBytes(24).toString("hex");
   const oidcNonce = crypto.randomBytes(24).toString("hex");
   const state = signToken({ r: stateNonce, n: oidcNonce, exp: Date.now() + 10 * 60 * 1000 });
-  res.cookie(OAUTH_COOKIE, stateNonce, { httpOnly: true, secure: GOOGLE_REDIRECT_URI.startsWith("https://"), sameSite: "lax", maxAge: 10 * 60 * 1000, path: "/portal" });
+  // Use the root path so Render/proxy rewrites and future portal subroutes do
+  // not accidentally hide the state cookie from the callback.
+  res.cookie(OAUTH_COOKIE, stateNonce, { httpOnly: true, secure: COOKIE_SECURE, sameSite: "lax", maxAge: 10 * 60 * 1000, path: "/" });
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
     redirect_uri: GOOGLE_REDIRECT_URI,
@@ -191,9 +193,10 @@ router.get("/auth/google/callback", async (req, res) => {
   const code = req.query.code;
   const state = verifyToken(req.query.state);
   const browserNonce = req.cookies?.[OAUTH_COOKIE] || "";
-  res.clearCookie(OAUTH_COOKIE, { path: "/portal" });
+  res.clearCookie(OAUTH_COOKIE, { path: "/" });
   if (!state?.r || !safeEqual(state.r, browserNonce)) return res.redirect("/portal/login?error=oauth-state-invalid");
   if (!code) return res.redirect("/portal/login?error=no-code");
+  let oauthStage = "token";
   try {
     const tok = await axios.post("https://oauth2.googleapis.com/token",
       new URLSearchParams({
@@ -206,12 +209,14 @@ router.get("/auth/google/callback", async (req, res) => {
       { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 20000 }
     );
     if (!tok.data?.access_token) throw new Error("Google did not return an access token");
+    oauthStage = "userinfo";
     const info = await axios.get("https://www.googleapis.com/oauth2/v2/userinfo", {
       headers: { Authorization: `Bearer ${tok.data.access_token}` }, timeout: 20000,
     });
     const p = info.data || {}; // { id, email, verified_email, name, picture }
     const sub = String(p.id || "").trim();
     const email = String(p.email || "").toLowerCase().trim();
+    oauthStage = "identity";
     if (!sub || !email || p.verified_email === false) throw new Error("Google identity was incomplete or unverified");
     const existingGoogle = accounts[sub];
     const existingEmail = Object.values(accounts).find((account) => String(account.email || "").toLowerCase() === email);
@@ -221,11 +226,19 @@ router.get("/auth/google/callback", async (req, res) => {
     learner.googleSub = sub;
     accounts[learner.id] = learner;
     save();
+    oauthStage = "session";
     const token = issuePortalToken(learner);
     res.cookie("aria_portal", token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
     return res.redirect("/portal");
   } catch (e) {
-    return res.redirect("/portal/login?error=oauth-failed");
+    const detail = String(e?.response?.data?.error || e?.response?.data?.error_description || e?.message || "").toLowerCase();
+    const errorCode = /redirect_uri_mismatch/.test(detail) ? "google-redirect-mismatch" :
+      /invalid_grant|expired|already.*used/.test(detail) ? "google-code-expired" :
+      oauthStage === "userinfo" ? "google-userinfo-failed" :
+      oauthStage === "identity" ? "google-identity-invalid" :
+      oauthStage === "session" ? "portal-session-failed" : "google-token-failed";
+    console.error(`[portal] Google OAuth ${oauthStage} failed: ${String(e?.response?.data?.error || e?.message || "unknown").slice(0, 240)}`);
+    return res.redirect(`/portal/login?error=${errorCode}`);
   }
 });
 
@@ -297,7 +310,13 @@ router.get("/login", (req, res) => {
   const err = req.query.error || "";
   const errMsg = err === "portal-not-configured" ? "Learner sign-in is not configured. Add PORTAL_SESSION_SECRET in Render, or keep GOOGLE_CLIENT_SECRET set for the secure fallback." :
     err === "google-not-configured" ? "Google sign-in isn't set up yet — create an account with email below, or ask ARIA to enable it." :
-    err === "no-code" || err === "oauth-failed" || err === "oauth-state-invalid" ? "Google sign-in didn't complete securely. Please try again." :
+    err === "oauth-state-invalid" ? "Google sign-in expired or the browser blocked its security cookie. Start again and allow cookies for this site." :
+    err === "google-redirect-mismatch" ? "Google rejected the callback address. Add https://wabot-ytal.onrender.com/portal/auth/google/callback to the OAuth client's authorised redirect URIs." :
+    err === "google-code-expired" ? "Google's sign-in code expired or was already used. Start sign-in again." :
+    err === "google-userinfo-failed" ? "Google returned an incomplete account response. Try again with a verified Google account." :
+    err === "google-identity-invalid" ? "Google did not return a verified email identity. Use a verified account and try again." :
+    err === "portal-session-failed" ? "The learner session could not be created. Check PORTAL_SESSION_SECRET in Render and redeploy." :
+    err === "no-code" || err === "google-token-failed" ? "Google rejected the sign-in exchange. Confirm the client secret and redirect URI in Render and Google Cloud, then try again." :
     err === "logged-out" ? "You've been logged out." : err === "auth-rate-limited" ? "Too many sign-in attempts. Please wait a few minutes and try again." : "";
   const body = `
   <div class="auth-shell"><div class="auth-layout">

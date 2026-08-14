@@ -185,3 +185,61 @@ test("Atlas Sentinel explains enabled-but-quiet local monitoring in plain langua
     cleanup(workspace.id);
   }
 });
+
+test("Atlas V4 records a rejected GitHub delivery with an actionable reason code", async () => {
+  const express = require("express");
+  const http = require("node:http");
+  const rawOwner = "atlas-v4-owner-" + Date.now() + "-reject";
+  const owner = rawOwner + "@s.whatsapp.net";
+  const workspace = atlas.createWorkspace(owner, { title: "V4 diagnostics", outcome: "Explain webhook failures" });
+  atlas.configureSentinel(owner, workspace.id, { enabled: true, sources: { github: { repository: "danielol237/wabot" } } });
+  const previousOwner = process.env.OWNER_NUMBER;
+  const previousSecret = process.env.GITHUB_WEBHOOK_SECRET;
+  process.env.OWNER_NUMBER = rawOwner;
+  process.env.GITHUB_WEBHOOK_SECRET = "v4-diagnostic-secret";
+  const app = express();
+  app.use(express.json({ limit: "256kb", verify: (req, res, buf) => { req.rawBody = Buffer.from(buf); } }));
+  app.use("/webhooks/atlas", webhooks);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => server.once("listening", resolve));
+  const body = JSON.stringify({ action: "completed", check_run: { conclusion: "failure" }, repository: { full_name: "danielol237/wabot" } });
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port: server.address().port, path: "/webhooks/atlas/github", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body), "User-Agent": "GitHub-Hookshot/test", "X-GitHub-Event": "check_run", "X-GitHub-Delivery": "v4-rejected-1", "X-Hub-Signature-256": "sha256=not-the-secret" } }, (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => { text += chunk; });
+        res.on("end", () => resolve({ status: res.statusCode, json: JSON.parse(text) }));
+      });
+      req.on("error", reject);
+      req.write(body);
+      req.end();
+    });
+    assert.equal(result.status, 401);
+    assert.equal(result.json.code, "invalid_signature");
+    const stored = atlas.getWorkspace(owner, workspace.id);
+    assert.equal(stored.sentinel.health.github.status, "misconfigured");
+    assert.equal(stored.sentinel.health.github.reasonCode, "invalid_signature");
+    assert.equal(stored.sentinel.deliveries[0].deliveryId, "v4-rejected-1");
+    assert.equal(stored.sentinel.deliveries[0].detail.includes("v4-diagnostic-secret"), false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (previousOwner === undefined) delete process.env.OWNER_NUMBER; else process.env.OWNER_NUMBER = previousOwner;
+    if (previousSecret === undefined) delete process.env.GITHUB_WEBHOOK_SECRET; else process.env.GITHUB_WEBHOOK_SECRET = previousSecret;
+    cleanup(workspace.id);
+  }
+});
+
+test("Atlas V4 local verifier reports the running HMAC path without claiming a provider delivery", () => {
+  const previousSecret = process.env.GITHUB_WEBHOOK_SECRET;
+  process.env.GITHUB_WEBHOOK_SECRET = "v4-local-self-test-secret";
+  try {
+    const result = webhooks._test.localGithubSelfTest();
+    assert.equal(result.pass, true);
+    assert.equal(result.reasonCode, "local_verifier_passed");
+    assert.match(result.message, /does not test GitHub delivery/);
+    assert.equal(result.message.includes("v4-local-self-test-secret"), false);
+  } finally {
+    if (previousSecret === undefined) delete process.env.GITHUB_WEBHOOK_SECRET; else process.env.GITHUB_WEBHOOK_SECRET = previousSecret;
+  }
+});

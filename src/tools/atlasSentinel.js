@@ -235,6 +235,32 @@ function signalList(workspace) {
   return (workspace?.signals || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
 }
 
+function integrationDiagnostic(workspace, source) {
+  const health = workspace?.sentinel?.health?.[source] || {};
+  const mapping = source === "github" ? workspace?.sentinel?.sources?.github?.repository : workspace?.sentinel?.sources?.render?.serviceId;
+  const status = health.status || (mapping ? "attention" : "unconfigured");
+  const next = status === "healthy" ? "No action needed; verified deliveries are arriving." : status === "misconfigured" ? `Check the provider secret and redeploy the running service. Reason: ${health.reasonCode || "configuration mismatch"}.` : status === "unconfigured" ? `Map a ${source} source in the Atlas dashboard if you want external events.` : status === "disabled" ? "Enable Sentinel from the dashboard before expecting monitoring." : "Send a provider test delivery, then inspect the delivery response and runtime logs.";
+  return { source, status, reasonCode: health.reasonCode || "unknown", message: health.message || "No diagnostic available.", mapping: mapping || null, lastAttemptAt: health.lastAttemptAt || 0, lastSuccessAt: health.lastSuccessAt || 0, lastFailureAt: health.lastFailureAt || 0, lastHttpStatus: health.lastHttpStatus || null, attempts: health.attempts || 0, successes: health.successes || 0, failures: health.failures || 0, next };
+}
+
+function sentinelDiagnostics(ownerId, query = "") {
+  const workspace = atlas.findWorkspace(ownerId, query);
+  if (!workspace) return null;
+  const sources = [integrationDiagnostic(workspace, "github"), integrationDiagnostic(workspace, "render")];
+  const deliveries = (workspace.sentinel?.deliveries || []).slice().sort((a, b) => (b.receivedAt || 0) - (a.receivedAt || 0)).slice(0, 8);
+  return { workspaceId: workspace.id, title: workspace.title, enabled: Boolean(workspace.sentinel?.enabled), sources, deliveries };
+}
+
+function formatDiagnostics(ownerId, query = "") {
+  const diagnostics = sentinelDiagnostics(ownerId, query);
+  if (!diagnostics) return "I don’t have an Atlas workspace yet. Create one, then enable Sentinel from the dashboard.";
+  let text = `🧭 *Atlas integration diagnostics — ${diagnostics.title}*\n\nSentinel: ${diagnostics.enabled ? "enabled" : "disabled"}`;
+  text += "\n\n" + diagnostics.sources.map((source) => `*${source.source}*: ${source.status}\n${source.message}\nNext: ${source.next}`).join("\n\n");
+  if (diagnostics.deliveries.length) text += `\n\n*Latest deliveries*\n${diagnostics.deliveries.slice(0, 5).map((delivery) => `• ${delivery.source}/${delivery.eventName} · ${delivery.status} · ${delivery.reasonCode}${delivery.httpStatus ? ` · HTTP ${delivery.httpStatus}` : ""}`).join("\n")}`;
+  else text += "\n\nNo provider delivery attempts have been recorded yet.";
+  return text;
+}
+
 function formatSentinel(ownerId, query = "") {
   const workspace = atlas.findWorkspace(ownerId, query);
   if (!workspace) return "I don’t have an Atlas workspace with Sentinel enabled yet. Create a project, then enable Sentinel from the dashboard.";
@@ -268,6 +294,9 @@ function handleSentinel(ownerId, text) {
   const workspace = atlas.findWorkspace(ownerId);
   if (!workspace) return { kind: "text", text: formatSentinel(ownerId) };
   const lower = input.toLowerCase();
+  if (/\b(?:diagnose|inspect|check)\b.*\b(?:sentinel|integration|webhook|connection|delivery)\b/i.test(lower) || /\b(?:sentinel|integration|webhook|connection)\b.*\b(?:health|status|diagnostic|working)\b/i.test(lower)) {
+    return { kind: "text", text: formatDiagnostics(ownerId) };
+  }
   if (/\b(?:enable|turn on)\s+sentinel\b/i.test(lower)) {
     const configured = atlas.configureSentinel(ownerId, workspace.id, { enabled: true });
     return { kind: "text", text: configured ? `Sentinel is now enabled for *${workspace.title}*. Configure a GitHub repository or Render service in the dashboard to receive signed external events.` : "I couldn't enable Sentinel for this workspace." };
@@ -323,6 +352,8 @@ module.exports = {
   ingestLocal,
   runSentinelPass,
   formatSentinel,
+  sentinelDiagnostics,
+  formatDiagnostics,
   handleSentinel,
   severityRank,
 };

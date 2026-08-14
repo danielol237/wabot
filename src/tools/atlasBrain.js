@@ -96,7 +96,7 @@ async function handleAtlas(ownerId, text, options = {}) {
     return handlePlanner(ownerId, input);
   }
 
-  if (/\b(?:show sentinel|sentinel status|enable sentinel|disable sentinel|show project signals|project signals|what changed in the project|what changed on the project|show decision briefs|acknowledge signal|resolve signal|approve brief)\b/i.test(lower)) {
+  if (/\b(?:show sentinel|sentinel status|enable sentinel|disable sentinel|show project signals|project signals|what changed in the project|what changed on the project|show decision briefs|acknowledge signal|resolve signal|approve brief|diagnose integrations?|inspect integrations?|check (?:the )?(?:sentinel|integration|webhook|connection)|is (?:the )?(?:sentinel|github|webhook|connection) (?:healthy|working|connected)|webhook status|integration health|delivery diagnostics)\b/i.test(lower)) {
     return handleSentinel(ownerId, input);
   }
 

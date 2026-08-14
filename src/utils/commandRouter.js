@@ -1374,20 +1374,20 @@ async function handleAnimeEps(sock, msg, args, ctx) {
 
 async function handleAnimePlay(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !animedl <anime name> <episode> [quality] — e.g. !animedl solo leveling ep1 720");
+  if (!args) return reply(sock, msg, "Tell ARIA: download <anime name> episode <number> [360p|480p|720p|1080p|Auto] — e.g. download Solo Leveling episode 1 720p");
   await react(sock, msg, "⏬");
-  const qMatch = args.match(/\s(360|480|720|1080|best)\s*$/i);
+  const qMatch = args.match(/\s(360|480|720|1080|best)(?:p)?\s*$/i);
   const quality = qMatch ? qMatch[1].toLowerCase() : "best";
   const baseArgs = qMatch ? args.slice(0, qMatch.index).trim() : args.trim();
   const epMatch = baseArgs.match(/(?:ep|episode|ep\.)?\s*#?\s*(\d{1,4})\s*$/i);
   const episode = epMatch ? parseInt(epMatch[1], 10) : NaN;
-  if (!episode || episode < 1) return reply(sock, msg, "🤨 Which episode? Try: !animedl solo leveling ep1 (or add 720/1080 for quality)");
+  if (!episode || episode < 1) return reply(sock, msg, "🤨 Which episode? Try: download Solo Leveling episode 1 720p");
   const name = baseArgs.replace(/(?:ep|episode)\s*#?\s*\d{1,4}\s*$/i, "").replace(/\s+$/, "").trim();
-  if (!name) return reply(sock, msg, "🤨 What anime? Try: !animedl solo leveling ep1");
+  if (!name) return reply(sock, msg, "🤨 What anime? Try: download Solo Leveling episode 1");
   const { enqueueAnimeJob } = require("../tools/animeJobManager");
   const job = enqueueAnimeJob({ name, episode, quality, sock, chatId: ctx.chatId, quotedMsg: msg });
   try { require("../tools/animeService").trackProgress({ id: "wa:" + name, provider: "whatsapp", title: name, episode, quality, status: "watching" }); } catch (_) {}
-  return reply(sock, msg, `⏳ *${name}* Ep ${episode} queued (job \`${job.id}\`)${quality !== "best" ? " at " + quality + "p" : ""}.\nI'll report progress here and send the video when it is ready.`);
+  return reply(sock, msg, `⏳ *${name}* Ep ${episode} queued (job \`${job.id}\`)${quality !== "best" ? " at " + quality + "p" : " on Auto quality"}.\nI'll report progress here and send the video when it is ready.\n\nSupported choices: 360p · 480p · 720p · 1080p · Auto.`);
 }
 
 async function handleTrending(sock, msg, args, ctx) {

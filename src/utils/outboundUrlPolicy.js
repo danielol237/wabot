@@ -74,7 +74,7 @@ function pinnedAgent(target) {
   const Agent = target.url.protocol === "https:" ? https.Agent : http.Agent;
   return new Agent({
     keepAlive: false,
-    lookup(_hostname, _options, callback) { callback(null, target.address, target.family); },
+    lookup(_hostname, options, callback) { options?.all ? callback(null, [{ address: target.address, family: target.family }]) : callback(null, target.address, target.family); },
   });
 }
 

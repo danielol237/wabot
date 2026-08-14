@@ -169,15 +169,21 @@ const DISCOVERERS = [
   },
   {
     provider: "consumet",
-    enabled: () => rep.usable("consumet"),
+    // Consumet is a bundle of independent adapters. Do not let one grouped
+    // reputation record suppress Hianime, KickAssAnime, AnimeSaturn, and the
+    // remaining fallbacks together; animeConsumet bounds each provider call.
+    enabled: () => true,
     async discover(title, episode) {
       const { consumetSearch, consumetEpisodeStream } = require("./animeConsumet");
       const s = await consumetSearch(title);
       const anime = pickBestResult(title, s.results);
-      if (!anime?.id) return { candidates: [], noResults: true };
-      const got = await consumetEpisodeStream(anime.id, episode, null);
-      if (!got?.url) return { candidates: [], error: got?.error || "no stream" };
-      return { candidates: [{ provider: "consumet", url: got.url, type: /m3u8/i.test(got.url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0" }, title: anime.title }] };
+      // Do not make a separate search endpoint a hard gate. Consumet’s stream
+      // resolver can search each provider again with the title and fall back
+      // across adapters, which is more reliable during provider churn.
+      const lookup = anime?.id || title;
+      const got = await consumetEpisodeStream(lookup, episode, null);
+      if (!got?.url) return { candidates: [], noResults: !got?.error, error: got?.error || "no stream" };
+      return { candidates: [{ provider: "consumet", url: got.url, type: /m3u8/i.test(got.url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0" }, title: anime?.title || title }] };
     },
   },
   {

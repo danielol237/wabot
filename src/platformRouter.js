@@ -1,7 +1,8 @@
 const express = require("express");
 const platform = require("./core");
 const crm = require("./core/business/crm");
-const { checkAuth, csrfOk } = require("./dashboard");
+const { checkAuth, csrfOk: dashboardCsrfOk } = require("./dashboard");
+const platformAuth = require("./core/identity/auth");
 
 const router = express.Router();
 
@@ -11,7 +12,20 @@ function ownerContext() {
   return platform.contextFor({ userId: workspace.user.id, tenantId: workspace.tenant.id, role: "owner", source: "dashboard" });
 }
 
+function platformOrDashboardAuth(req, res, next) {
+  if (req.platformContext) return next();
+  const found = platformAuth.readRequestContext(req);
+  if (found) {
+    req.platformContext = found.context;
+    req.platformSessionToken = found.token;
+    req.platformCsrf = found.csrf;
+    return next();
+  }
+  return checkAuth(req, res, next);
+}
+
 function requireContext(req, res, next) {
+  if (req.platformContext) return next();
   const context = ownerContext();
   if (!context) return res.status(503).json({ ok: false, error: "Platform owner workspace is not configured." });
   req.platformContext = context;
@@ -19,7 +33,8 @@ function requireContext(req, res, next) {
 }
 
 function requireMutation(req, res, next) {
-  if (!csrfOk(req)) return res.status(403).json({ ok: false, error: "Invalid or missing CSRF token." });
+  const valid = req.platformSessionToken ? platformAuth.csrfOk(req) : dashboardCsrfOk(req);
+  if (!valid) return res.status(403).json({ ok: false, error: "Invalid or missing CSRF token." });
   next();
 }
 
@@ -36,7 +51,7 @@ function handle(handler) {
   };
 }
 
-router.use(checkAuth, requireContext);
+router.use(platformOrDashboardAuth, requireContext);
 
 router.get("/overview", handle((req) => {
   const context = req.platformContext;

@@ -329,6 +329,36 @@ function healthRow(item) {
   return `<div class="row"><span class="k">${item.name}</span><span class="v"><span class="badge ${ok ? "b-green" : "b-red"}">${ok ? "healthy" : item.error || "down"}</span>${item.latency ? ` · ${item.latency}ms` : ""}${item.status ? ` · HTTP ${item.status}` : ""}</span></div>`;
 }
 
+function renderBusinessPane() {
+  let workspace = null, summary = null, recommendations = null, plan = null, subscription = null, usage = [];
+  try {
+    const platform = require("./core");
+    const crm = require("./core/business/crm");
+    const autopilot = require("./core/business/autopilot");
+    workspace = platform.bootstrapOwnerWorkspace();
+    if (workspace) {
+      const context = platform.contextFor({ userId: workspace.user.id, tenantId: workspace.tenant.id, role: "owner", source: "dashboard" });
+      summary = crm.summary(context);
+      recommendations = autopilot.recommendations(context);
+      plan = platform.billing.resolveTenantPlan(context.tenantId);
+      subscription = platform.billing.getActiveSubscription(context.tenantId);
+      usage = platform.usage.summary({ tenantId: context.tenantId, limit: 2000 });
+    }
+  } catch (_) {}
+  if (!workspace || !summary) return `<div class="pane" id="pane-business"><div class="page-title">Business OS</div><div class="page-sub">Revenue Engine · workspace foundation</div><div class="card"><div class="empty">Business workspace is not configured yet. Set OWNER_NUMBER and reload the dashboard.</div></div></div>`;
+  const usedAi = usage.filter((item) => item.category === "ai" && item.metric === "messages").reduce((sum, item) => sum + item.units, 0);
+  const usedMedia = usage.filter((item) => item.category === "media" && item.metric === "downloads").reduce((sum, item) => sum + item.units, 0);
+  const leadRows = (summary.hotLeads || []).slice(0, 6).map((lead) => `<div class="feed-item"><div class="feed-ico">${lead.score >= 85 ? "✦" : "↗"}</div><div class="feed-body"><div class="t">${esc(lead.title || "Opportunity")}</div><div class="m">${esc(lead.stage)} · score ${esc(lead.score)} · ${esc(lead.currency)} ${esc(lead.value)}</div><div class="s">${esc(lead.recommendation || "Review next action")}</div></div></div>`).join("");
+  const followupRows = (recommendations?.dueFollowups || []).slice(0, 6).map((item) => `<div class="feed-item"><div class="feed-ico">◷</div><div class="feed-body"><div class="t">${esc(item.followup.message || "Follow-up")}</div><div class="m">${esc(new Date(item.followup.scheduledAt).toLocaleString())}</div><div class="s">Approval required before any outbound send</div></div></div>`).join("");
+  return `<div class="pane" id="pane-business">
+    <div class="page-title">Business OS</div><div class="page-sub">Revenue Engine · customers, pipeline, approvals, and usage</div>
+    <div class="hero command-hero"><div class="hero-top"><div><div class="kicker">ARIA REVENUE ENGINE</div><h2>${esc(workspace.tenant.name)}</h2><p class="sub">A controlled operating layer for turning conversations into qualified opportunities, approved follow-ups, and attributable revenue.</p></div><span class="badge b-accent">${esc(plan?.name || "ARIA Free")}</span></div></div>
+    <div class="stats" style="margin-top:16px"><div class="stat"><div class="n">${esc(summary.customers)}</div><div class="l">Customers</div></div><div class="stat"><div class="n">${esc(summary.leads)}</div><div class="l">Leads</div></div><div class="stat"><div class="n">${esc(summary.orders)}</div><div class="l">Orders</div></div><div class="stat"><div class="n">${esc(summary.revenue)} <small>${esc(plan?.currency || "XAF")}</small></div><div class="l">Recorded revenue</div></div></div>
+    <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Pipeline <span class="badge b-accent">live model</span></div>${Object.entries(summary.byStage || {}).map(([stage, count]) => `<div class="row"><span class="k">${esc(stage)}</span><span class="v">${esc(count)}</span></div>`).join("")}</div><div class="card"><div class="h">Capacity & governance</div><div class="row"><span class="k">Plan</span><span class="v">${esc(plan?.name || "ARIA Free")}</span></div><div class="row"><span class="k">Subscription</span><span class="v">${esc(subscription?.status || "not activated")}</span></div><div class="row"><span class="k">AI messages metered</span><span class="v">${esc(usedAi)}</span></div><div class="row"><span class="k">Media downloads metered</span><span class="v">${esc(usedMedia)}</span></div><div class="row"><span class="k">Autopilot</span><span class="badge b-amber">approval-first</span></div></div></div>
+    <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Hot opportunities <span class="badge b-accent">${esc((summary.hotLeads || []).length)}</span></div>${leadRows || `<div class="empty">No hot opportunities yet. ARIA will surface qualified leads here.</div>`}</div><div class="card"><div class="h">Attention queue <span class="badge b-amber">${esc((recommendations?.dueFollowups || []).length)}</span></div>${followupRows || `<div class="empty">No due follow-ups. Approved actions will appear here before delivery.</div>`}</div></div>
+  </div>`;
+}
+
 function renderHealthPane() {
   let src = [], prov = [], srcChecked = null, provChecked = null;
   try { const s = require("./tools/sourceHealth").getHealth(); src = s.results || []; srcChecked = s.lastCheckedAt; } catch (_) {}
@@ -946,9 +976,10 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="sb-brand"><img class="sb-logo" src="/aria-mark.png" alt="ARIA" width="38" height="38" /><div class="sb-name">ARIA<small>operator console</small></div></div>
     <div class="sb-group">Workspace</div>
     ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">01</span><span>Command center</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">01</span><span>Command center</span></div>`}
-    <a class="navitem" href="/dashboard/atlas"><span class="ico">02</span><span>Atlas projects</span></a>
-    <div class="navitem" data-pane="activity"><span class="ico">03</span><span>Activity</span></div>
-    <div class="navitem" data-pane="analytics"><span class="ico">04</span><span>Analytics</span></div>
+    <div class="navitem" data-pane="business"><span class="ico">02</span><span>Business OS</span></div>
+    <a class="navitem" href="/dashboard/atlas"><span class="ico">03</span><span>Atlas projects</span></a>
+    <div class="navitem" data-pane="activity"><span class="ico">04</span><span>Activity</span></div>
+    <div class="navitem" data-pane="analytics"><span class="ico">05</span><span>Analytics</span></div>
     <div class="sb-group">Intelligence</div>
     <div class="navitem" data-pane="brain"><span class="ico">05</span><span>System brain</span></div>
     <div class="navitem" data-pane="memory"><span class="ico">06</span><span>Memory</span></div>
@@ -982,7 +1013,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 const CSRF=${JSON.stringify(csrf || "")};
 const STANDALONE_PANE=${JSON.stringify(standalonePane)};
 const INITIAL_PANE=${JSON.stringify(initialPane)};
-const titles={home:['Command',"ARIA core · live telemetry"],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
+const titles={home:['Command',"ARIA core · live telemetry"],business:['Business OS','customers · pipeline · revenue'],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 const htmlEscClient=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function showPane(p){
@@ -1652,6 +1683,7 @@ router.get("/", checkAuth, (req, res) => {
     const profile = tel.learnerProfile(selfUid);
     const active = d.activeMissions[0] || d.missions[0];
     let content = renderLiveStrip(ls);
+    content += renderBusinessPane();
     content += renderAnalyticsPane(a);
     content += renderAcademyPane(ad, selfUid, profile);
     try {
@@ -1732,7 +1764,7 @@ router.get("/", checkAuth, (req, res) => {
     content += renderHealthPane();
     content += renderLogsPane();
 
-    const requestedPane = ["home","activity","analytics","brain","memory","media","academy","learnerspace","missions","downloads","sources","incidents","health","logs","system","household","admin"].includes(String(req.query.pane || "")) ? String(req.query.pane) : "home";
+    const requestedPane = ["home","business","activity","analytics","brain","memory","media","academy","learnerspace","missions","downloads","sources","incidents","health","logs","system","household","admin"].includes(String(req.query.pane || "")) ? String(req.query.pane) : "home";
     res.send(renderPage("Home", content, false, false, csrfFor(req), false, requestedPane));
   } catch (e) {
     res.send(renderPage("Error", `<div class="card"><div class="empty">${e.message}</div></div>`));

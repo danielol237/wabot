@@ -85,6 +85,9 @@ app.use("/api/companion", require("./companion"));
 // enter the durable project brain. They remain opt-in through environment secrets
 // and workspace source mappings.
 app.use("/webhooks/atlas", require("./tools/atlasWebhooks"));
+// Payment callbacks are signature-verified and idempotently stored; provider-specific
+// settlement is deliberately not guessed or auto-captured from generic payloads.
+app.use("/webhooks/payments", require("./paymentWebhooks"));
 
 // Mount web dashboard
 const dashboardRouter = require("./dashboard");

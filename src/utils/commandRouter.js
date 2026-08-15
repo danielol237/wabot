@@ -338,6 +338,22 @@ function resolveExplicitNaturalCommand(cleaned) {
   };
 
   if (/^(?:kick|remove|banish)\s+(?:everyone|everybody|all(?:\s+members)?)(?:\s+(?:in|from)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("kickall");
+  if (/^(?:make|promote|appoint|give)\s+(?:him|her|them|this person|that person)\s+(?:an?\s+)?admin(?:\s+(?:in|of)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("promote");
+  if (/^(?:make|promote|appoint|give)\s+.+?\s+(?:an?\s+)?admin(?:\s+(?:in|of)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("promote");
+  if (/^(?:remove|take|strip)\s+(?:his|her|their|the)\s+admin(?:\s+(?:rights?|role|status))?$/i.test(lower) || /^(?:demote|remove\s+admin)\s+.+$/i.test(lower)) return makeCommand("demote");
+  if (/^(?:kick|remove|banish)\s+(?:him|her|them|this person|that person)$/i.test(lower)) return makeCommand("kick");
+  const directToggle = lower.match(/^(enable|disable)\s+(antibot|antidemote|antigroupmention|antigroupstatus|antihijack|antimention|antipromote|slowmode)$/i);
+  if (directToggle) return makeCommand(directToggle[2], directToggle[1].toLowerCase() === "enable" ? "on" : "off");
+  const turnToggle = lower.match(/^(?:turn|switch)\s+(on|off)\s+((?:anti[- ]?)?(?:bot|demote|groupmention|groupstatus|hijack|mention|promote)|slowmode)$/i);
+  const enableToggle = lower.match(/^(enable|disable)\s+((?:anti[- ]?)?(?:bot|demote|groupmention|groupstatus|hijack|mention|promote)|slowmode)$/i);
+  const protectionToggle = turnToggle || enableToggle;
+  if (protectionToggle) {
+    const enabled = turnToggle ? protectionToggle[1] === "on" : protectionToggle[1] === "enable";
+    const rawName = turnToggle ? protectionToggle[2] : protectionToggle[2];
+    const compact = rawName.replace(/-/g, "").replace(/groupmention/i, "antigroupmention").replace(/groupstatus/i, "antigroupstatus");
+    const name = compact.startsWith("anti") || compact === "slowmode" ? compact : `anti${compact}`;
+    return makeCommand(name, enabled ? "on" : "off");
+  }
   if (/^(?:set|change|update)\s+(?:your|aria(?:'s)?|the bot(?:'s)?)\s+(?:profile\s*)?(?:pic|picture|photo|avatar)(?:\s+to\s+(?:this|that|it))?$/i.test(lower)) return makeCommand("setpp", "this");
   if (/^(?:set|change|update)\s+(?:your|aria(?:'s)?)\s+(?:whatsapp\s+)?(?:bio|status)(?:\s+to\s+(.+))?$/i.test(lower)) return makeCommand("setbio", lower.match(/\b(?:bio|status)\s+to\s+(.+)$/i)?.[1] || "");
   if (/^(?:set|change|update)\s+(?:your|aria(?:'s)?)\s+(?:whatsapp\s+)?name(?:\s+to\s+(.+))?$/i.test(lower)) return makeCommand("setname", lower.match(/\bname\s+to\s+(.+)$/i)?.[1] || "");

@@ -34,12 +34,38 @@ function getGroupSettings(groupId) {
   return settings[groupId];
 }
 
+function identityValues(value) {
+  if (value && typeof value === "object") {
+    return [value.id, value.jid, value.lid, value.phoneNumber]
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+  const text = String(value || "").trim();
+  return text ? [text] : [];
+}
+
+function identityKey(value) {
+  return String(value || "").split(":")[0].split("@")[0];
+}
+
+function sameIdentity(left, right) {
+  const a = String(left || "").trim();
+  const b = String(right || "").trim();
+  return Boolean(a && b && (a === b || identityKey(a) === identityKey(b)));
+}
+
 function setAntiAdmin(groupId, jid, blocked, metadata = {}) {
   const gs = getGroupSettings(groupId);
   gs.antiAdmins = { ...(gs.antiAdmins || {}) };
-  const key = String(jid);
+  const raw = identityValues(jid)[0] || "";
+  const key = String(raw);
   if (blocked) gs.antiAdmins[key] = { jid: key, ...metadata, updatedAt: Date.now() };
-  else delete gs.antiAdmins[key];
+  else {
+    for (const storedKey of Object.keys(gs.antiAdmins)) {
+      const stored = gs.antiAdmins[storedKey]?.jid || storedKey;
+      if (identityValues(jid).some((candidate) => sameIdentity(candidate, stored))) delete gs.antiAdmins[storedKey];
+    }
+  }
   save();
   return gs.antiAdmins;
 }
@@ -49,7 +75,12 @@ function getAntiAdmins(groupId) {
 }
 
 function isAntiAdminBlocked(groupId, jid) {
-  return !!getGroupSettings(groupId).antiAdmins?.[String(jid)];
+  const candidates = identityValues(jid);
+  if (!candidates.length) return false;
+  return Object.values(getGroupSettings(groupId).antiAdmins || {}).some((entry) => {
+    const stored = identityValues(entry?.jid || entry);
+    return stored.some((saved) => candidates.some((candidate) => sameIdentity(saved, candidate)));
+  });
 }
 
 function setProtection(groupId, name, enabled) {

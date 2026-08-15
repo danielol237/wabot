@@ -4,6 +4,7 @@ const { commands, detectCommandCollisions } = require("../src/utils/commandRoute
 const { getPasquaCommands, handleWcgCommand } = require("../src/tools/pasquaCommands");
 const { getGroupSettings, setAntiAdmin } = require("../src/utils/groupSettings");
 const { handleParticipantUpdate } = require("../src/tools/groupProtection");
+const { isBotAdmin, isSenderAdmin } = require("../src/tools/groupAdmin");
 const { resolveNaturalAction } = require("../src/utils/commandRouter");
 
 function fakeMessage(chatId = "120363000000000000@g.us") {
@@ -53,6 +54,10 @@ test("PASQUA: natural-language phrases resolve to real owner/media commands", ()
   assert.equal(kick?.command?.ownerOnly, true);
   assert.equal(resolveNaturalAction("ARIA, set your profile pic to this")?.command?.name, "setpp");
   assert.equal(resolveNaturalAction("ARIA, never make @23456000000 an admin")?.command?.name, "antiadmin");
+  assert.equal(resolveNaturalAction("ARIA, make him admin")?.command?.name, "promote");
+  assert.equal(resolveNaturalAction("ARIA, remove his admin")?.command?.name, "demote");
+  assert.equal(resolveNaturalAction("ARIA, kick him")?.command?.name, "kick");
+  assert.equal(resolveNaturalAction("ARIA, enable antigroupmention")?.command?.name, "antigroupmention");
   assert.equal(resolveNaturalAction("ARIA, give me 10 pics of Goku")?.command?.name, "pinterest");
   const releases = resolveNaturalAction("ARIA, search on GitHub about this and bring the link to releases");
   assert.equal(releases?.command?.name, "releases");
@@ -70,6 +75,17 @@ test("PASQUA: protection commands persist on/off state", async () => {
   assert.equal(getGroupSettings(ctx.chatId).protections.antibot, false);
 });
 
+test("group admin checks recognize phone and LID identities", async () => {
+  const sock = fakeSock();
+  sock.user = { id: "12345000000@s.whatsapp.net", lid: "555000000000000@lid" };
+  sock.groupMetadata = async () => ({ participants: [
+    { id: "555000000000000@lid", phoneNumber: "12345000000@s.whatsapp.net", admin: "superadmin" },
+    { id: "666000000000000@lid", phoneNumber: "23456000000@s.whatsapp.net", admin: "admin" },
+  ] });
+  assert.equal(await isBotAdmin(sock, "120363000000000000@g.us"), true);
+  assert.equal(await isSenderAdmin(sock, "120363000000000000@g.us", "666000000000000@lid"), true);
+});
+
 test("PASQUA: anti-admin denylist demotes a blocked promotion and restores the owner", async () => {
   const sock = fakeSock();
   const chatId = "120363000000000000@g.us";
@@ -82,6 +98,26 @@ test("PASQUA: anti-admin denylist demotes a blocked promotion and restores the o
   assert.ok(updates.some((entry) => entry.action === "add" && entry.ids.includes("12345000000@s.whatsapp.net")));
   assert.ok(updates.some((entry) => entry.action === "demote" && entry.ids.includes("23456000000@s.whatsapp.net")));
   setAntiAdmin(chatId, blocked, false);
+});
+
+test("PASQUA: anti-admin enforcement matches a stored phone identity to a promoted LID", async () => {
+  const sock = fakeSock();
+  sock.user = { id: "12345000000@s.whatsapp.net", lid: "555000000000000@lid" };
+  sock.groupMetadata = async () => ({ participants: [
+    { id: "555000000000000@lid", phoneNumber: "12345000000@s.whatsapp.net", admin: "superadmin" },
+    { id: "666000000000000@lid", phoneNumber: "34567000000@s.whatsapp.net", admin: "admin" },
+  ] });
+  const chatId = "120363000000000000@g.us";
+  setAntiAdmin(chatId, "34567000000@s.whatsapp.net", true, { addedBy: "12345000000@s.whatsapp.net" });
+  await handleParticipantUpdate(sock, {
+    id: chatId,
+    author: "23456000000@s.whatsapp.net",
+    participants: [{ id: "666000000000000@lid", phoneNumber: "34567000000@s.whatsapp.net" }],
+    action: "promote",
+  });
+  const updates = sock.sent.filter((entry) => entry.groupUpdate).map((entry) => entry.groupUpdate);
+  assert.ok(updates.some((entry) => entry.action === "demote" && entry.ids.includes("666000000000000@lid")));
+  setAntiAdmin(chatId, "34567000000@s.whatsapp.net", false);
 });
 
 test("PASQUA: secure password command returns a non-empty generated secret", async () => {

@@ -21,7 +21,16 @@ function platformOrDashboardAuth(req, res, next) {
     req.platformCsrf = found.csrf;
     return next();
   }
-  return checkAuth(req, res, next);
+  // The dashboard middleware is mounted under `/dashboard`, so its relative
+  // req.path no longer begins with `/api/` here. Force its unauthenticated
+  // branch to preserve an API response contract for platform clients.
+  const previousAccept = req.headers.accept;
+  req.headers.accept = "application/json";
+  return checkAuth(req, res, (err) => {
+    if (previousAccept === undefined) delete req.headers.accept;
+    else req.headers.accept = previousAccept;
+    next(err);
+  });
 }
 
 function requireContext(req, res, next) {

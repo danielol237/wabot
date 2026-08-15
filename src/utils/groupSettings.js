@@ -7,7 +7,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, "groupSettings.json");
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// Structure: { [groupId]: { antilink: bool, welcome: bool, welcomeMsg: string, leaveMsg: string, protections: object, slowmodeSeconds: number, introCard: object, warnings: { [userId]: count } } }
+// Structure: { [groupId]: { antilink: bool, welcome: bool, welcomeMsg: string, leaveMsg: string, protections: object, slowmodeSeconds: number, introCard: object, antiAdmins: object, warnings: { [userId]: count } } }
 let settings = {};
 
 try {
@@ -29,9 +29,58 @@ function save() {
 
 function getGroupSettings(groupId) {
   if (!settings[groupId]) {
-    settings[groupId] = { antilink: false, welcome: false, welcomeMsg: null, leaveMsg: null, protections: {}, slowmodeSeconds: 0, introCard: null, warnings: {} };
+    settings[groupId] = { antilink: false, welcome: false, welcomeMsg: null, leaveMsg: null, protections: {}, slowmodeSeconds: 0, introCard: null, antiAdmins: {}, warnings: {} };
   }
   return settings[groupId];
+}
+
+function identityValues(value) {
+  if (value && typeof value === "object") {
+    return [value.id, value.jid, value.lid, value.phoneNumber]
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+  const text = String(value || "").trim();
+  return text ? [text] : [];
+}
+
+function identityKey(value) {
+  return String(value || "").split(":")[0].split("@")[0];
+}
+
+function sameIdentity(left, right) {
+  const a = String(left || "").trim();
+  const b = String(right || "").trim();
+  return Boolean(a && b && (a === b || identityKey(a) === identityKey(b)));
+}
+
+function setAntiAdmin(groupId, jid, blocked, metadata = {}) {
+  const gs = getGroupSettings(groupId);
+  gs.antiAdmins = { ...(gs.antiAdmins || {}) };
+  const raw = identityValues(jid)[0] || "";
+  const key = String(raw);
+  if (blocked) gs.antiAdmins[key] = { jid: key, ...metadata, updatedAt: Date.now() };
+  else {
+    for (const storedKey of Object.keys(gs.antiAdmins)) {
+      const stored = gs.antiAdmins[storedKey]?.jid || storedKey;
+      if (identityValues(jid).some((candidate) => sameIdentity(candidate, stored))) delete gs.antiAdmins[storedKey];
+    }
+  }
+  save();
+  return gs.antiAdmins;
+}
+
+function getAntiAdmins(groupId) {
+  return { ...(getGroupSettings(groupId).antiAdmins || {}) };
+}
+
+function isAntiAdminBlocked(groupId, jid) {
+  const candidates = identityValues(jid);
+  if (!candidates.length) return false;
+  return Object.values(getGroupSettings(groupId).antiAdmins || {}).some((entry) => {
+    const stored = identityValues(entry?.jid || entry);
+    return stored.some((saved) => candidates.some((candidate) => sameIdentity(saved, candidate)));
+  });
 }
 
 function setProtection(groupId, name, enabled) {
@@ -100,6 +149,9 @@ module.exports = {
   getGroupSettings,
   setProtection,
   isProtectionEnabled,
+  setAntiAdmin,
+  getAntiAdmins,
+  isAntiAdminBlocked,
   setSlowmode,
   setIntroCard,
   setAntilink,

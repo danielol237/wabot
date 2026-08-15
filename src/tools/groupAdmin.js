@@ -5,21 +5,44 @@ function jidNumber(jid) {
   return String(jid || "").split(":")[0].split("@")[0];
 }
 
+function participantJids(participant) {
+  if (!participant) return [];
+  if (typeof participant === "string") return [participant.trim()].filter(Boolean);
+  return [participant.id, participant.jid, participant.lid, participant.phoneNumber]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
+
+function identityMatches(left, right) {
+  const a = String(left || "").trim();
+  const b = String(right || "").trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return jidNumber(a) !== "" && jidNumber(a) === jidNumber(b);
+}
+
+function participantMatches(participant, identities) {
+  const values = participantJids(participant);
+  return values.some((value) => identities.some((identity) => identityMatches(value, identity)));
+}
+
+function isAdminParticipant(participant) {
+  return participant?.admin === "admin" || participant?.admin === "superadmin";
+}
+
+function botIdentities(sock) {
+  return [sock?.user?.id, sock?.user?.jid, sock?.user?.lid, sock?.user?.phoneNumber]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+}
+
 async function isBotAdmin(sock, groupId) {
   try {
     const metadata = await sock.groupMetadata(groupId);
-    // Robustly extract the bot's number. Baileys sock.user.id can be
-    // "phone@s.whatsapp.net" or "phone:device@s.whatsapp.net". Handle sock.user
-    // being undefined and normalize both sides before comparing.
-    const rawId = sock?.user?.id;
-    if (!rawId) return false;
-    const botNumber = jidNumber(rawId);
-    if (!botNumber) return false;
-    const botParticipant = metadata.participants.find((p) => {
-      const pid = jidNumber(p?.id);
-      return pid === botNumber;
-    });
-    return botParticipant?.admin === "admin" || botParticipant?.admin === "superadmin";
+    const identities = botIdentities(sock);
+    if (!identities.length) return false;
+    const botParticipant = metadata.participants.find((participant) => participantMatches(participant, identities));
+    return isAdminParticipant(botParticipant);
   } catch (err) {
     console.error("isBotAdmin check failed:", err.message);
     return false;
@@ -29,9 +52,8 @@ async function isBotAdmin(sock, groupId) {
 async function isSenderAdmin(sock, groupId, senderJid) {
   try {
     const metadata = await sock.groupMetadata(groupId);
-    const senderNumber = jidNumber(senderJid);
-    const participant = metadata.participants.find((p) => jidNumber(p?.id) === senderNumber);
-    return participant?.admin === "admin" || participant?.admin === "superadmin";
+    const participant = metadata.participants.find((candidate) => participantMatches(candidate, [senderJid]));
+    return isAdminParticipant(participant);
   } catch (err) {
     console.error("isSenderAdmin check failed:", err.message);
     return false;
@@ -117,4 +139,4 @@ async function purgeMessages(sock, groupId, messageKeys) {
   return { success: true, deleted };
 }
 
-module.exports = { jidNumber, isBotAdmin, isSenderAdmin, kickUser, addUser, promoteUser, demoteUser, tagAll, hideTag, purgeMessages };
+module.exports = { jidNumber, participantJids, identityMatches, participantMatches, isBotAdmin, isSenderAdmin, kickUser, addUser, promoteUser, demoteUser, tagAll, hideTag, purgeMessages };

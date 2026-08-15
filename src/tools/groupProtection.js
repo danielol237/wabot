@@ -1,5 +1,5 @@
-const { getGroupSettings } = require("../utils/groupSettings");
-const { jidNumber, isBotAdmin } = require("./groupAdmin");
+const { getGroupSettings, isAntiAdminBlocked } = require("../utils/groupSettings");
+const { jidNumber, participantJids, participantMatches, isBotAdmin } = require("./groupAdmin");
 
 const slowmodeLast = new Map();
 
@@ -47,23 +47,47 @@ async function handleParticipantUpdate(sock, update) {
   const chatId = update?.id;
   if (!chatId) return;
   const settings = getGroupSettings(chatId);
-  const botId = jidNumber(sock?.user?.id);
+  const botIdentities = [sock?.user?.id, sock?.user?.jid, sock?.user?.lid, sock?.user?.phoneNumber].filter(Boolean);
+  const ownerIdentities = [process.env.OWNER_NUMBER, process.env.OWNER_LID].filter(Boolean);
+  const actorJid = String(update.author || "").trim();
+  const ownerParticipants = (update.participants || []).filter((participant) =>
+    participantJids(participant).some((candidate) => ownerIdentities.some((owner) => candidate === owner || jidNumber(candidate) === jidNumber(owner)))
+  );
+  const ownerWasRemoved = update.action === "remove" && ownerIdentities.length > 0 && ownerParticipants.length > 0;
   if (update.action === "add" && settings.introCard?.text) {
     for (const participant of update.participants || []) {
-      await sock.sendMessage(chatId, { text: settings.introCard.text.replace("{user}", `@${jidNumber(participant)}`), mentions: [participant] }).catch(() => {});
+      const mentionJid = participantJids(participant)[0] || participant;
+      await sock.sendMessage(chatId, { text: settings.introCard.text.replace("{user}", `@${jidNumber(mentionJid)}`), mentions: [mentionJid] }).catch(() => {});
     }
   }
   if (!(await isBotAdmin(sock, chatId))) return;
+  if (ownerWasRemoved) {
+    const ownerJid = participantJids(ownerParticipants[0])[0] || ownerParticipants[0];
+    if (ownerJid) await sock.groupParticipantsUpdate(chatId, [ownerJid], "add").catch(() => {});
+    const actorIsBot = botIdentities.some((candidate) => candidate === actorJid || jidNumber(candidate) === jidNumber(actorJid));
+    const actorIsOwner = ownerIdentities.some((candidate) => candidate === actorJid || jidNumber(candidate) === jidNumber(actorJid));
+    if (actorJid && !actorIsBot && !actorIsOwner) {
+      await sock.groupParticipantsUpdate(chatId, [actorJid.includes("@") ? actorJid : `${actorJid}@s.whatsapp.net`], "demote").catch(() => {});
+    }
+    await sock.sendMessage(chatId, { text: "🛡️ Owner protection restored the owner and reversed the removal attempt." }).catch(() => {});
+  }
   for (const participant of update.participants || []) {
-    const id = jidNumber(participant);
-    if (!id || id === botId || settings.ownerNumber === id) continue;
+    const mentionJid = participantJids(participant)[0] || participant;
+    const id = jidNumber(mentionJid);
+    if (!id || participantMatches(participant, [...botIdentities, ...ownerIdentities])) continue;
+    if (update.action === "promote" && isAntiAdminBlocked(chatId, participant)) {
+      await sock.groupParticipantsUpdate(chatId, [mentionJid], "demote").catch(() => {});
+      await sock.sendMessage(chatId, { text: `🛡️ Anti-admin denylist enforced: @${id} was demoted immediately.`, mentions: [mentionJid] }).catch(() => {});
+      continue;
+    }
     if (update.action === "promote" && enabled(settings, "antipromote")) {
-      await sock.groupParticipantsUpdate(chatId, [participant], "demote").catch(() => {});
-      await sock.sendMessage(chatId, { text: `🛡️ Anti-promote reverted an unauthorized promotion for @${id}.`, mentions: [participant] }).catch(() => {});
+      await sock.groupParticipantsUpdate(chatId, [mentionJid], "demote").catch(() => {});
+      await sock.sendMessage(chatId, { text: `🛡️ Anti-promote reverted an unauthorized promotion for @${id}.`, mentions: [mentionJid] }).catch(() => {});
+      continue;
     }
     if (update.action === "demote" && enabled(settings, "antidemote")) {
-      await sock.groupParticipantsUpdate(chatId, [participant], "promote").catch(() => {});
-      await sock.sendMessage(chatId, { text: `🛡️ Anti-demote restored admin status for @${id}.`, mentions: [participant] }).catch(() => {});
+      await sock.groupParticipantsUpdate(chatId, [mentionJid], "promote").catch(() => {});
+      await sock.sendMessage(chatId, { text: `🛡️ Anti-demote restored admin status for @${id}.`, mentions: [mentionJid] }).catch(() => {});
     }
   }
 }

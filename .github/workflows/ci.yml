@@ -11,6 +11,7 @@ jobs:
     env:
       DASHBOARD_PASSWORD: ci-test-password
       DASHBOARD_CSRF_SECRET: ci-csrf-secret
+      OWNER_NUMBER: 12345000000
     steps:
       - uses: actions/checkout@v4
 
@@ -45,6 +46,7 @@ jobs:
           MEDIA_PROXY_SECRET: ci-media-secret
           PORTAL_SESSION_SECRET: ci-portal-secret
           DASHBOARD_CSRF_SECRET: ci-csrf-secret
+          OWNER_NUMBER: 12345000000
         run: |
           # Require every non-boot module with an explicit relative path. Any
           # load-time failure is a real CI failure, not a warning.
@@ -67,4 +69,5 @@ jobs:
           MEDIA_PROXY_SECRET: ci-media-secret
           PORTAL_SESSION_SECRET: ci-portal-secret
           DASHBOARD_CSRF_SECRET: ci-csrf-secret
+          OWNER_NUMBER: 12345000000
         run: npm test

@@ -87,7 +87,7 @@ const INTENTS = {
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
   deploy: ["deploy", "deploy it", "deploy through vercel", "host it", "host this", "host through vercel", "publish it", "put it online"],
   edit: ["edit", "edit this", "change the file", "update the file", "fix the file"],
-  github: ["on github", "look on github", "github search", "search github", "find it on github", "git hub"],
+  github: ["on github", "look on github", "github search", "search github", "search on github", "look up on github", "find it on github", "git hub"],
   reddit: ["on reddit", "look on reddit", "reddit search", "search reddit", "find it on reddit"],
   wikipedia: ["on wikipedia", "wikipedia search", "search wikipedia", "on wiki", "wikipedia about"],
   deathBattle: ["who would win", "who wins", "death battle", "deathbattle", "would beat", "in a fight", "fight between"],
@@ -330,9 +330,51 @@ function findRegisteredCommand(token) {
     commands.find((command) => (command.aliases || []).includes(normalized)) || null;
 }
 
+function resolveExplicitNaturalCommand(cleaned) {
+  const lower = cleaned.toLowerCase().replace(/[?!.]+$/g, "").trim();
+  const makeCommand = (name, args = "") => {
+    const command = findRegisteredCommand(name);
+    return command ? { handler: command.handler, intent: command.name, args, command } : null;
+  };
+
+  if (/^(?:kick|remove|banish)\s+(?:everyone|everybody|all(?:\s+members)?)(?:\s+(?:in|from)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("kickall");
+  if (/^(?:make|promote|appoint|give)\s+(?:him|her|them|this person|that person)\s+(?:an?\s+)?admin(?:\s+(?:in|of)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("promote");
+  if (/^(?:make|promote|appoint|give)\s+.+?\s+(?:an?\s+)?admin(?:\s+(?:in|of)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("promote");
+  if (/^(?:remove|take|strip)\s+(?:his|her|their|the)\s+admin(?:\s+(?:rights?|role|status))?$/i.test(lower) || /^(?:demote|remove\s+admin)\s+.+$/i.test(lower)) return makeCommand("demote");
+  if (/^(?:kick|remove|banish)\s+(?:him|her|them|this person|that person)$/i.test(lower)) return makeCommand("kick");
+  const directToggle = lower.match(/^(enable|disable)\s+(antibot|antidemote|antigroupmention|antigroupstatus|antihijack|antimention|antipromote|slowmode)$/i);
+  if (directToggle) return makeCommand(directToggle[2], directToggle[1].toLowerCase() === "enable" ? "on" : "off");
+  const turnToggle = lower.match(/^(?:turn|switch)\s+(on|off)\s+((?:anti[- ]?)?(?:bot|demote|groupmention|groupstatus|hijack|mention|promote)|slowmode)$/i);
+  const enableToggle = lower.match(/^(enable|disable)\s+((?:anti[- ]?)?(?:bot|demote|groupmention|groupstatus|hijack|mention|promote)|slowmode)$/i);
+  const protectionToggle = turnToggle || enableToggle;
+  if (protectionToggle) {
+    const enabled = turnToggle ? protectionToggle[1] === "on" : protectionToggle[1] === "enable";
+    const rawName = turnToggle ? protectionToggle[2] : protectionToggle[2];
+    const compact = rawName.replace(/-/g, "").replace(/groupmention/i, "antigroupmention").replace(/groupstatus/i, "antigroupstatus");
+    const name = compact.startsWith("anti") || compact === "slowmode" ? compact : `anti${compact}`;
+    return makeCommand(name, enabled ? "on" : "off");
+  }
+  if (/^(?:set|change|update)\s+(?:your|aria(?:'s)?|the bot(?:'s)?)\s+(?:profile\s*)?(?:pic|picture|photo|avatar)(?:\s+to\s+(?:this|that|it))?$/i.test(lower)) return makeCommand("setpp", "this");
+  if (/^(?:set|change|update)\s+(?:your|aria(?:'s)?)\s+(?:whatsapp\s+)?(?:bio|status)(?:\s+to\s+(.+))?$/i.test(lower)) return makeCommand("setbio", lower.match(/\b(?:bio|status)\s+to\s+(.+)$/i)?.[1] || "");
+  if (/^(?:set|change|update)\s+(?:your|aria(?:'s)?)\s+(?:whatsapp\s+)?name(?:\s+to\s+(.+))?$/i.test(lower)) return makeCommand("setname", lower.match(/\bname\s+to\s+(.+)$/i)?.[1] || "");
+
+  if (/\b(?:never|don't|dont|do not|block|deny|ban)\b.*\badmins?\b/i.test(lower) || /\b(?:make|mark|set)\b.*\bnever\b.*\badmins?\b/i.test(lower)) return makeCommand("antiadmin", "on");
+  if (/^(?:allow|let|unblock|remove)\s+(?:him|her|them|this person|that person)\s+(?:to\s+be\s+)?admins?\b/i.test(lower)) return makeCommand("antiadmin", "off");
+  if (/^(?:antiadmin|anti-admin|denyadmin|neveradmin)\s+(?:on|off|list|status|remove|clear|allow|unblock)?$/i.test(lower)) return makeCommand("antiadmin", lower.split(/\s+/).slice(1).join(" ") || "status");
+
+  const pins = lower.match(/^(?:give|send|show|get)(?:\s+me)?\s+(?:(\d{1,2})\s+)?(?:pics?|pictures?|images?|photos?)\s+(?:of|for)\s+(.+)$/i);
+  if (pins) return makeCommand("pinterest", `${pins[1] || 5} pics of ${pins[2]}`);
+
+  const releaseRequest = lower.match(/^(?:search|look\s+up|find)\s+(?:on\s+)?github\s+(?:about\s+)?(.+?)\s+(?:and\s+)?(?:bring|give|show|find)\s+(?:me\s+)?(?:the\s+)?(?:(?:release(?:s)?\s+links?)|(?:links?\s+to\s+release(?:s)?))$/i);
+  if (releaseRequest) return makeCommand("releases", releaseRequest[1].trim());
+  return null;
+}
+
 function resolveNaturalAction(text) {
   const cleaned = stripAriaAddress(text);
   if (!cleaned) return null;
+  const explicit = resolveExplicitNaturalCommand(cleaned);
+  if (explicit) return explicit;
   const intent = detectIntent(cleaned);
   if (intent && intentHandlers[intent]) {
     return { handler: intentHandlers[intent], intent, args: naturalArgs(intent, cleaned), command: findRegisteredCommand(intent) };
@@ -1557,20 +1599,24 @@ function formatResearchResult(result) {
 }
 
 async function handleGitHub(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !github <thing> — e.g. !github whatwg html\n\nTip: use !releases owner/repo to get download links.");
+  const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
+  let query = String(args || "").trim();
+  if (/^(?:this|it|that|the repo|the repository)$/i.test(query)) query = getQuotedMessageText(msg) || "";
+  if (!query) return reply(sock, msg, "Tell me what to look up on GitHub, or reply to the repository/topic and say “search this on GitHub”.");
   await react(sock, msg, "🐙");
   const { research } = require("../tools/sourceResearch");
-  const result = await research({ source: "github", query: args });
+  const result = await research({ source: "github", query });
   await reply(sock, msg, formatResearchResult(result));
 }
 
 async function handleGitHubReleases(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !releases owner/repo — e.g. !releases sharplab/yt-dlp");
+  const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
+  let query = String(args || "").trim();
+  if (!query || /^(?:this|it|that|the repo|the repository)$/i.test(query)) query = getQuotedMessageText(msg) || "";
+  if (!query) return reply(sock, msg, "Tell me the GitHub repository/topic, or reply to it and ask for the release links.");
   await react(sock, msg, "📦");
   const { research } = require("../tools/sourceResearch");
-  const result = await research({ source: "releases", query: args });
+  const result = await research({ source: "releases", query });
   await reply(sock, msg, formatResearchResult(result));
 }
 
@@ -1624,10 +1670,12 @@ function formatBuildResult(result) {
 }
 
 async function handleBuild(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Tell me what to build, for example: build a full-stack todo app with email login.");
+  const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
+  let request = String(args || "").trim();
+  if (/^(?:this|it|that|the brief|the project)$/i.test(request)) request = getQuotedMessageText(msg) || "";
+  if (!request) return reply(sock, msg, "Tell me what to build, or reply to a project brief and say “ARIA, build this”.");
   await react(sock, msg, "🏗️");
-  const result = await buildProject(args, ctx.senderName, ctx.chatId);
+  const result = await buildProject(request, ctx.senderName, ctx.chatId);
   await reply(sock, msg, formatBuildResult(result));
 }
 

@@ -10,13 +10,14 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const axios = require("axios");
+const { resolveYtDlp, commandArgs } = require("../utils/mediaRuntime");
 
 const TEMP_DIR = path.join(os.tmpdir(), "aria-media");
 try { fs.mkdirSync(TEMP_DIR, { recursive: true }); } catch (_) {}
 
-function exec(cmd, args, timeoutMs = 120000) {
+function exec(cmd, args, timeoutMs = 120000, env = process.env) {
   return new Promise((resolve) => {
-    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(cmd, args, { env, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ err, stdout: String(stdout || ""), stderr: String(stderr || "") });
     });
   });
@@ -51,13 +52,15 @@ function ytBaseFlags() {
 // a resolvable format. The old -J approach made yt-dlp try to resolve formats and
 // failed with "Requested format is not available" -> search always returned null.
 async function searchYt(query) {
-  const r = await exec("yt-dlp", [
+  const command = resolveYtDlp();
+  if (!command) return null;
+  const r = await exec(command.file, commandArgs(command, [
     ...ytBaseFlags(),
     "--flat-playlist",
     "--no-warnings",
     "--print", "%(id)s\t%(title)s\t%(duration)s\t%(uploader)s",
     "ytsearch1:" + query,
-  ], 45000);
+  ]), 45000, command.env);
   if (r.err) return null;
   const line = String(r.stdout).split("\n").find((l) => l.includes("\t"));
   if (!line) return null;
@@ -87,7 +90,9 @@ async function downloadAudio(sourceUrl, title = "") {
       "--no-playlist",
     ];
     args.push(sourceUrl);
-    const proc = spawn("yt-dlp", args, { timeout: 300000 });
+    const command = resolveYtDlp();
+    if (!command) return resolve({ success: false, error: "yt-dlp unavailable" });
+    const proc = spawn(command.file, commandArgs(command, args), { env: command.env, timeout: 300000 });
     proc.on("error", () => resolve({ success: false, error: "yt-dlp unavailable" }));
     proc.on("close", (code) => {
       const file = fs.readdirSync(TEMP_DIR).find((f) => f.startsWith(path.basename(outBase)));
@@ -113,7 +118,9 @@ async function downloadVideo(sourceUrl, maxMB = 50) {
       "--no-playlist",
     ];
     args.push(sourceUrl);
-    const proc = spawn("yt-dlp", args, { timeout: 600000 });
+    const command = resolveYtDlp();
+    if (!command) return resolve({ success: false, error: "yt-dlp unavailable" });
+    const proc = spawn(command.file, commandArgs(command, args), { env: command.env, timeout: 600000 });
     proc.on("error", () => resolve({ success: false, error: "yt-dlp unavailable" }));
     proc.on("close", (code) => {
       const file = fs.readdirSync(TEMP_DIR).find((f) => f.startsWith(path.basename(outBase)));

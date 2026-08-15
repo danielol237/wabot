@@ -180,7 +180,11 @@ const DISCOVERERS = [
       // Do not make a separate search endpoint a hard gate. Consumet’s stream
       // resolver can search each provider again with the title and fall back
       // across adapters, which is more reliable during provider churn.
-      const lookup = anime?.id || title;
+      // A Consumet search result ID belongs to the provider that returned it.
+      // Passing that slug into every other adapter makes Hianime/AnimePahe/etc.
+      // report false "no title match" errors. Let each fallback search the
+      // original human title and resolve its own provider-native episode ID.
+      const lookup = title;
       const got = await consumetEpisodeStream(lookup, episode, null);
       if (!got?.url) return { candidates: [], noResults: !got?.error, error: got?.error || "no stream" };
       return { candidates: [{ provider: "consumet", url: got.url, type: /m3u8/i.test(got.url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0" }, title: anime?.title || title }] };

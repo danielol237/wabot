@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const { error, log } = require("../utils/logger");
+const { resolveYtDlp, commandArgs } = require("../utils/mediaRuntime");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 
@@ -256,7 +257,9 @@ async function downloadVideo(url) {
       url,
     ];
 
-    execFile("yt-dlp", args, { timeout: 300000 }, (err, stdout, stderr) => {
+    const command = resolveYtDlp();
+    if (!command) return resolve({ success: false, error: "yt-dlp runtime is unavailable" });
+    execFile(command.file, commandArgs(command, args), { env: command.env, timeout: 300000 }, (err, stdout, stderr) => {
       if (err) {
         console.error("Download stderr:", stderr?.slice(0, 500));
 

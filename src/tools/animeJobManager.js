@@ -21,6 +21,7 @@ const { execFile, spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const { EventEmitter } = require("events");
 const { log, error, warn } = require("../utils/logger");
+const { resolveYtDlp, commandArgs } = require("../utils/mediaRuntime");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 const QUEUE_FILE = path.join(__dirname, "../../data/animeQueue.json");
@@ -31,12 +32,17 @@ let ytDlpCheck = null;
 function checkYtDlp() {
   if (ytDlpCheck) return ytDlpCheck;
   ytDlpCheck = new Promise((resolve) => {
-    execFile("yt-dlp", ["--version"], { timeout: 8000 }, (err, stdout) => {
+    const command = resolveYtDlp();
+    if (!command) {
+      error("yt-dlp is not available on PATH or in the configured Render media runtime.");
+      return resolve(false);
+    }
+    execFile(command.file, commandArgs(command, ["--version"]), { env: command.env, timeout: 8000 }, (err, stdout) => {
       if (err) {
-        error("yt-dlp binary NOT available — install yt-dlp before using anime downloads.");
+        error(`yt-dlp runtime check failed using ${command.display}: ${err.message}`);
         return resolve(false);
       }
-      log(`[anime] yt-dlp ${String(stdout).trim()} ready`);
+      log(`[anime] yt-dlp ${String(stdout).trim()} ready via ${command.display}`);
       resolve(true);
     });
   });
@@ -47,6 +53,7 @@ function checkYtDlp() {
 // health endpoint so missing runtime deps (yt-dlp/ffmpeg/docker/python) are
 // visible before a download or code-exec is attempted, not discovered after.
 function checkBinary(cmd, versionArgs = ["--version"]) {
+  if (cmd === "yt-dlp") return checkYtDlp();
   return new Promise((resolve) => {
     execFile(cmd, versionArgs, { timeout: 8000 }, (err) => {
       resolve(!err);
@@ -242,7 +249,9 @@ function downloadStream(job, url, headers, maxMB, quality = "best", onProgress) 
     }
     args.push(url);
 
-    const proc = spawn("yt-dlp", args, { timeout: DOWNLOAD_TIMEOUT_MS });
+    const command = resolveYtDlp();
+    if (!command) return resolve({ success: false, error: "yt-dlp runtime is unavailable" });
+    const proc = spawn(command.file, commandArgs(command, args), { env: command.env, timeout: DOWNLOAD_TIMEOUT_MS });
     let errTail = "";
     let timedOut = false;
     const killTimer = setTimeout(() => {

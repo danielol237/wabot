@@ -11,6 +11,7 @@ const { handleExecution } = require("./atlasExecution");
 const { handleOperatorTeams } = require("./atlasOperatorTeams");
 const { handleKnowledge } = require("./atlasKnowledge");
 const { handleConnectedDelivery } = require("./atlasConnectedDelivery");
+const { ownerContext, recordProductActivity } = require("../core/productBridge");
 
 function clean(value, max = 1000) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -43,6 +44,18 @@ function projectUrl(pathname = "") {
 function createAtlasProject(ownerId, text) {
   const contract = parseProjectContract(text);
   const workspace = createWorkspace(ownerId, contract);
+  try {
+    recordProductActivity({
+      product: "atlas",
+      action: "project.created",
+      context: ownerContext("atlas-whatsapp"),
+      aggregateType: "workspace",
+      aggregateId: workspace.id,
+      metadata: { title: workspace.title },
+      usage: { category: "atlas", metric: "projects", units: 1 },
+      idempotencyKey: `atlas-project:${workspace.id}`,
+    });
+  } catch (_) {}
   addEvidence(ownerId, workspace.id, {
     kind: "conversation",
     title: "Project contract captured from WhatsApp",
@@ -91,6 +104,17 @@ async function nextSafeStep(ownerId, workspace, options = {}) {
 
 async function handleAtlas(ownerId, text, options = {}) {
   const input = clean(text);
+  try {
+    recordProductActivity({
+      product: "atlas",
+      action: "request.received",
+      context: ownerContext("atlas-whatsapp"),
+      aggregateType: "owner",
+      aggregateId: ownerId,
+      metadata: { mode: options.mode || "whatsapp", hasText: Boolean(input) },
+      usage: { category: "atlas", metric: "requests", units: 1 },
+    });
+  } catch (_) {}
   const lower = input.toLowerCase();
   if (/^(?:aria[,:!]?\s*)?(?:this is|this is my|new|create|start)\s+(?:a\s+)?(?:new\s+)?project\b/i.test(input)) {
     return { kind: "created", workspace: createAtlasProject(ownerId, input) };

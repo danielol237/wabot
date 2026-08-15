@@ -46,7 +46,7 @@ function assertContext(context, capability) {
 
 function recordAction({ context, action, outcome = "success", resourceType = null, resourceId = null, metadata = {}, correlationId, idempotencyKey = null } = {}) {
   const event = events.publish({ type: `platform.${action}`, tenantId: context?.tenantId || null, actorId: context?.userId || null, aggregateType: resourceType, aggregateId: resourceId, correlationId, idempotencyKey, payload: { outcome, ...metadata }, source: context?.source || "platform" });
-  const auditEvent = audit.record({ action, outcome, tenantId: context?.tenantId || null, actorId: context?.userId || null, resourceType, resourceId, metadata, correlationId, idempotencyKey, source: context?.source || "platform" });
+  const auditEvent = audit.record({ action, outcome, tenantId: context?.tenantId || null, actorId: context?.userId || null, resourceType, resourceId, metadata, correlationId, idempotencyKey: idempotencyKey ? `audit:${idempotencyKey}` : null, source: context?.source || "platform" });
   return { event, auditEvent };
 }
 

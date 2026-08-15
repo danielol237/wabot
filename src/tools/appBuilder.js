@@ -446,6 +446,18 @@ function clearPendingPlan(chatId) {
 
 
 async function buildProject(request, senderName, chatId, onProgress, userId = null) {
+  try {
+    const bridge = require("../core/productBridge");
+    bridge.recordProductActivity({
+      product: "developer",
+      action: "build.requested",
+      context: bridge.ownerContext("developer-whatsapp"),
+      aggregateType: "chat",
+      aggregateId: chatId,
+      metadata: { request: String(request || "").slice(0, 180) },
+      usage: { category: "developer", metric: "build-requests", units: 1 },
+    });
+  } catch (_) {}
   // If a think plan exists for this chat, use it directly instead of re-planning —
   // this is what makes "think first, then build" actually save the planning step
   // rather than silently redoing it.
@@ -703,6 +715,20 @@ async function finalizeProject(project, projectDir, onProgress) {
     return { success: false, error: `Built successfully but upload failed after 3 attempts: ${uploadResult.error}` };
   }
 
+  try {
+    const bridge = require("../core/productBridge");
+    bridge.recordProductActivity({
+      product: "developer",
+      action: "build.completed",
+      context: bridge.ownerContext("developer-whatsapp"),
+      aggregateType: "project",
+      aggregateId: project.id,
+      metadata: { fileCount: doneFiles.length, previewUrl: previewUrl || null },
+      usage: { category: "developer", metric: "builds", units: 1 },
+      idempotencyKey: `developer-build:${project.id}`,
+    });
+  } catch (_) {}
+
   return {
     success: true,
     fileCount: doneFiles.length,
@@ -721,6 +747,19 @@ async function deployProject(chatId, projectId = null) {
   const project = projectId ? getProject(projectId) : getAllProjectsForChat(chatId).find((item) => item.status === "done");
   if (!project) return { success: false, error: "No completed project found. Build and verify a project first." };
   if (project.chatId !== chatId) return { success: false, error: "That project belongs to a different chat." };
+  try {
+    const bridge = require("../core/productBridge");
+    bridge.recordProductActivity({
+      product: "developer",
+      action: "deployment.requested",
+      context: bridge.ownerContext("vercel-deployment"),
+      aggregateType: "project",
+      aggregateId: project.id,
+      metadata: { provider: "vercel", goal: project.goal },
+      usage: { category: "developer", metric: "deployment-requests", units: 1, provider: "vercel" },
+      idempotencyKey: `developer-deploy:${project.id}`,
+    });
+  } catch (_) {}
   const projectDir = path.join(TEMP_DIR, `deploy_${project.id}`);
   cleanupDir(projectDir);
   fs.mkdirSync(projectDir, { recursive: true });
@@ -737,6 +776,19 @@ async function deployProject(chatId, projectId = null) {
     const { deployToVercel } = require("./vercelDeploy");
     const result = await deployToVercel(projectDir, project.goal);
     if (!result.success) return { success: false, error: result.error || "Vercel deployment failed." };
+    try {
+      const bridge = require("../core/productBridge");
+      bridge.recordProductActivity({
+        product: "developer",
+        action: "deployment.completed",
+        context: bridge.ownerContext("vercel-deployment"),
+        aggregateType: "project",
+        aggregateId: project.id,
+        metadata: { provider: "vercel", url: result.url },
+        usage: { category: "developer", metric: "deployments", units: 1, provider: "vercel" },
+        idempotencyKey: `developer-deploy-completed:${project.id}`,
+      });
+    } catch (_) {}
     return { success: true, projectId: project.id, url: result.url };
   } finally {
     cleanupDir(projectDir);

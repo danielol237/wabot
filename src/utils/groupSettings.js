@@ -7,7 +7,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, "groupSettings.json");
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// Structure: { [groupId]: { antilink: bool, welcome: bool, welcomeMsg: string, leaveMsg: string, warnings: { [userId]: count } } }
+// Structure: { [groupId]: { antilink: bool, welcome: bool, welcomeMsg: string, leaveMsg: string, protections: object, slowmodeSeconds: number, introCard: object, warnings: { [userId]: count } } }
 let settings = {};
 
 try {
@@ -29,9 +29,34 @@ function save() {
 
 function getGroupSettings(groupId) {
   if (!settings[groupId]) {
-    settings[groupId] = { antilink: false, welcome: false, welcomeMsg: null, leaveMsg: null, warnings: {} };
+    settings[groupId] = { antilink: false, welcome: false, welcomeMsg: null, leaveMsg: null, protections: {}, slowmodeSeconds: 0, introCard: null, warnings: {} };
   }
   return settings[groupId];
+}
+
+function setProtection(groupId, name, enabled) {
+  const gs = getGroupSettings(groupId);
+  gs.protections = { ...(gs.protections || {}), [String(name)]: !!enabled };
+  save();
+  return gs.protections[String(name)];
+}
+
+function isProtectionEnabled(groupId, name) {
+  return !!getGroupSettings(groupId).protections?.[String(name)];
+}
+
+function setSlowmode(groupId, seconds) {
+  const gs = getGroupSettings(groupId);
+  gs.slowmodeSeconds = Math.max(0, Math.min(3600, Number(seconds) || 0));
+  save();
+  return gs.slowmodeSeconds;
+}
+
+function setIntroCard(groupId, introCard) {
+  const gs = getGroupSettings(groupId);
+  gs.introCard = introCard ? { ...introCard } : null;
+  save();
+  return gs.introCard;
 }
 
 function setAntilink(groupId, enabled) {
@@ -73,6 +98,10 @@ function getWarnings(groupId, userId) {
 
 module.exports = {
   getGroupSettings,
+  setProtection,
+  isProtectionEnabled,
+  setSlowmode,
+  setIntroCard,
   setAntilink,
   setWelcome,
   setWelcomeMessage,

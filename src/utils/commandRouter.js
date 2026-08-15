@@ -45,6 +45,7 @@ const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
 const { setReminder } = require("../tools/reminders");
 const { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
+const { registerPasquaCommands } = require("../tools/pasquaCommands");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 // Natural-language routing is the default. The legacy prefix remains accepted
@@ -127,12 +128,12 @@ function registerBuiltinCommands() {
   registerCommand({ name: "setleave", aliases: ["leavemsg"], category: "group", description: "Set leave message", handler: handleSetLeave, ownerOnly: false });
   registerCommand({ name: "warn", aliases: ["warning"], category: "group", description: "Warn a member", handler: handleWarn, ownerOnly: false });
   registerCommand({ name: "warnings", aliases: ["warns"], category: "group", description: "View warnings", handler: handleWarnings, ownerOnly: false });
-  registerCommand({ name: "resetwarns", aliases: ["clearwarns"], category: "group", description: "Reset warnings", handler: handleResetWarns, ownerOnly: false });
+  registerCommand({ name: "resetwarns", aliases: ["clearwarns", "clearwarn"], category: "group", description: "Reset warnings", handler: handleResetWarns, ownerOnly: false });
 
   // Group message stats / moderation
   registerCommand({ name: "top", aliases: ["leaderboard", "topmsgs"], category: "group", description: "Top talkers in this group: !top [N]", handler: handleGroupTop, ownerOnly: false });
-  registerCommand({ name: "active", aliases: ["actives"], category: "group", description: "Active members (>= N msgs): !active [N]", handler: handleGroupActive, ownerOnly: false });
-  registerCommand({ name: "inactive", aliases: ["inactives", "dead"], category: "group", description: "Inactive members (< N msgs): !inactive [N]", handler: handleGroupInactive, ownerOnly: false });
+  registerCommand({ name: "active", aliases: ["actives", "listactive"], category: "group", description: "Active members (>= N msgs): !active [N]", handler: handleGroupActive, ownerOnly: false });
+  registerCommand({ name: "inactive", aliases: ["inactives", "dead", "listinactive"], category: "group", description: "Inactive members (< N msgs): !inactive [N]", handler: handleGroupInactive, ownerOnly: false });
   registerCommand({ name: "purge", aliases: ["prune"], category: "group", description: "Kick members under N msgs: !purge [N]", handler: handleGroupPurge, ownerOnly: false });
 
   // Academy (adaptive learning system)
@@ -270,6 +271,9 @@ function registerBuiltinCommands() {
   registerCommand({ name: "update", aliases: ["plugupdate"], category: "admin", description: "Update a plugin: !update <name>", handler: handlePluginUpdate, ownerOnly: true });
   registerCommand({ name: "enable", aliases: ["plugenable"], category: "admin", description: "Enable a plugin: !enable <name>", handler: handlePluginEnable, ownerOnly: true });
   registerCommand({ name: "disable", aliases: ["plugdisable"], category: "admin", description: "Disable a plugin: !disable <name>", handler: handlePluginDisable, ownerOnly: true });
+
+  // PASQUA compatibility and utility command set.
+  registerPasquaCommands(registerCommand);
 }
 
 // ── Intent detection ──────────────────────────────────────────
@@ -390,7 +394,7 @@ async function routeMessage(sock, msg, context) {
         }
         try {
           try { require("../tools/dashboardTelemetry").record("command", { detail: cmd.name }); } catch (_) {}
-          await cmd.handler(sock, msg, args, context);
+          await cmd.handler(sock, msg, args, { ...context, pasquaCommand: cmd.name });
           try { require("./eventLog").track("command", cmd.name + (args ? " " + args.slice(0, 40) : "")); } catch (_) {}
         } catch (err) {
           // Report the real error so we (and the user) can see exactly what failed
@@ -455,7 +459,7 @@ async function routeMessage(sock, msg, context) {
     try {
       try { require("../tools/dashboardTelemetry").record("natural_action", { detail: natural.intent }); } catch (_) {}
       try { const selfModel = require("../tools/ariaSelfModel"); selfModel.observe(senderJid, text); selfModel.recordAction(natural.intent, natural.args || text); } catch (_) {}
-      await natural.handler(sock, msg, natural.args || text, context);
+      await natural.handler(sock, msg, natural.args || text, { ...context, pasquaCommand: natural.command?.name || natural.intent });
       try { require("./eventLog").track("natural_action", natural.intent); } catch (_) {}
     } catch (err) {
       const { reply: _rp } = require("./baileysHelpers");

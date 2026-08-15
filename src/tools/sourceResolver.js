@@ -40,6 +40,19 @@ function pickBestResult(query, results) {
     .map((result, index) => ({ result, index, score: titleMatchScore(query, result) }))
     .sort((a, b) => b.score - a.score || a.index - b.index)[0]?.result || null;
 }
+
+function pickDownloadForQuality(downloads, requestedQuality = "best") {
+  const available = (Array.isArray(downloads) ? downloads : [])
+    .filter((download) => download?.url && download.vipLocked !== true)
+    .map((download) => ({ ...download, resolution: Number(download.resolution) || 0 }))
+    .filter((download) => download.resolution > 0);
+  if (!available.length) return null;
+  const target = Number.parseInt(requestedQuality, 10);
+  if (!Number.isFinite(target) || target <= 0) return available.sort((a, b) => b.resolution - a.resolution)[0];
+  const atOrBelow = available.filter((download) => download.resolution <= target);
+  const pool = atOrBelow.length ? atOrBelow : available;
+  return pool.sort((a, b) => Math.abs(a.resolution - target) - Math.abs(b.resolution - target) || b.resolution - a.resolution)[0];
+}
 const PROVIDER_TIMEOUT_MS = Math.max(5000, Number(process.env.ANIME_PROVIDER_TIMEOUT_MS || 18000));
 function bounded(promise, ms, fallback) {
   return Promise.race([
@@ -132,7 +145,7 @@ const DISCOVERERS = [
     provider: "omnisave",
     // Circuit breaker: skip when open.
     enabled: () => rep.usable("omnisave"),
-    async discover(title, episode, season) {
+    async discover(title, episode, season, quality) {
       const { searchOmniSave, searchOmniSaveById, getOmniSaveDownload } = require("./animeDownload");
       const list = await searchOmniSave(title);
       if (!list.length) return { candidates: [], noResults: true };
@@ -145,10 +158,10 @@ const DISCOVERERS = [
       // defaulting to 1. The old hardcoded 1 silently grabbed season 1 even for
       // "season 2 ep 1" requests.
       const dl = await getOmniSaveDownload(anime.subjectId, detailPath, season || 1, episode || 1);
-      const chosen = dl?.downloads?.find((d) => d?.url && d.vipLocked !== true);
+      const chosen = pickDownloadForQuality(dl?.downloads, quality);
       const url = chosen?.url;
       if (!url) return { candidates: [], error: "no usable non-VIP URL" };
-      return { candidates: [{ provider: "omnisave", url, type: /m3u8/i.test(url) ? "hls" : "mp4", quality: String(chosen.resolution || "unknown"), headers: { "User-Agent": "Mozilla/5.0", Referer: "https://videodownloader.site/", Origin: "https://videodownloader.site" }, title: anime.title }] };
+      return { candidates: [{ provider: "omnisave", url, type: /m3u8/i.test(url) ? "hls" : "mp4", quality: String(chosen.resolution || "unknown"), height: chosen.resolution || null, codec: chosen.codecName || null, duration: chosen.duration || null, headers: { "User-Agent": "Mozilla/5.0", Referer: "https://videodownloader.site/", Origin: "https://videodownloader.site" }, title: anime.title }] };
     },
   },
   {
@@ -200,20 +213,21 @@ const DISCOVERERS = [
       const anime = pickBestResult(title, list);
       if (!anime) return { candidates: [], noResults: true };
       const got = await animepaheGetStreamUrl(anime.id, episode || 1);
-      if (!got?.url) return { candidates: [], error: got?.error || "no stream url" };
-      return { candidates: [{ provider: "animepahe", url: got.url, type: /m3u8/i.test(got.url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0", Referer: "https://animepahetv.to/" }, title: anime.title }] };
+      const streamUrl = got?.url || got?.m3u8 || "";
+      if (!streamUrl) return { candidates: [], error: got?.error || "no stream url" };
+      return { candidates: [{ provider: "animepahe", url: streamUrl, type: /m3u8/i.test(streamUrl) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0", Referer: "https://animepahetv.to/" }, title: got.title || anime.title }] };
     },
   },
 ];
 
 // Discover candidates from all enabled providers CONCURRENTLY (resolver race).
-async function discoverCandidates(title, episode, season) {
+async function discoverCandidates(title, episode, season, quality) {
   const results = await Promise.all(
     DISCOVERERS.filter((d) => !d.enabled || d.enabled())
       .map(async (d) => {
         const start = Date.now();
         try {
-      const out = await bounded(d.discover(title, episode, season), PROVIDER_TIMEOUT_MS, { candidates: [], error: `provider timeout after ${PROVIDER_TIMEOUT_MS}ms`, timeout: true });
+      const out = await bounded(d.discover(title, episode, season, quality), PROVIDER_TIMEOUT_MS, { candidates: [], error: `provider timeout after ${PROVIDER_TIMEOUT_MS}ms`, timeout: true });
       // Record provider outcome for reputation.
           if (out.noResults) rep.record(d.provider, "no-results", false, {});
           else if (out.error) rep.record(d.provider, "resolve", false, { error: out.error });
@@ -314,7 +328,7 @@ async function resolveEpisode(title, episode, { preference, quality } = {}) {
 
   // 2. Concurrent source discovery.
   const season = parseSeason(title);
-  const disc = await discoverCandidates(title, episode, season);
+  const disc = await discoverCandidates(title, episode, season, quality);
   report.diagnostics = disc.diagnostics;
   report.candidates = disc.candidates;
   // Clean per-provider outcome map (each provider = one entry), so diagnostics
@@ -392,4 +406,4 @@ function reputationReport() {
   return rep.all();
 }
 
-module.exports = { resolveEpisode, resolveCanonical, discoverCandidates, parseSeason, reputationReport, DISCOVERERS, PROVIDER_TIMEOUT_MS };
+module.exports = { resolveEpisode, resolveCanonical, discoverCandidates, parseSeason, pickDownloadForQuality, reputationReport, DISCOVERERS, PROVIDER_TIMEOUT_MS };

@@ -1,11 +1,30 @@
 const { getActiveTasks, updateTaskCheck, deactivateTask } = require("../utils/backgroundTasks");
 const { getCryptoPrice, parseCondition } = require("./priceWatcher");
+const platformJobs = require("../core/jobs");
 
 const POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 min — frequent enough to be useful,
 // infrequent enough to stay well within CoinGecko's free rate limit and not spam
 // the chat or burn through API quota for something running unattended 24/7.
 
 let pollerInterval = null;
+let platformJobInterval = null;
+const PLATFORM_JOB_INTERVAL_MS = Math.max(15000, Number(process.env.PLATFORM_JOB_INTERVAL_MS || 30000));
+
+async function runPlatformJobs() {
+  const result = await platformJobs.runOnce({
+    workerId: `aria-poller-${process.pid}`,
+    handlers: {
+      "business.followup.due": async (job) => ({
+        followupId: job.payload?.followupId || null,
+        approvalRequired: true,
+        outboundSent: false,
+        reason: process.env.ARIA_AUTOPILOT_LIVE === "true" ? "live execution requires a provider-specific sender" : "ARIA_AUTOPILOT_LIVE is disabled",
+      }),
+    },
+  });
+  if (result.processed) console.log(`🧭 Platform job ${result.job?.id || "unknown"} → ${result.job?.status || "processed"}`);
+  return result;
+}
 
 // Checks every active task once. Each task type has its own checker; right now
 // only "crypto_price" is implemented, but this is structured so more types
@@ -61,12 +80,18 @@ function startTaskPoller(sock) {
   pollerInterval = setInterval(() => {
     checkAllTasks(sock).catch((err) => console.error("Task poller cycle failed:", err.message));
   }, POLL_INTERVAL_MS);
+  platformJobInterval = setInterval(() => {
+    runPlatformJobs().catch((err) => console.error("Platform job cycle failed:", err.message));
+  }, PLATFORM_JOB_INTERVAL_MS);
   console.log(`⏰ Background task poller started (checking every ${POLL_INTERVAL_MS / 60000} min).`);
+  console.log(`🧭 Platform job worker started (checking every ${PLATFORM_JOB_INTERVAL_MS / 1000}s).`);
 }
 
 function stopTaskPoller() {
   if (pollerInterval) clearInterval(pollerInterval);
+  if (platformJobInterval) clearInterval(platformJobInterval);
   pollerInterval = null;
+  platformJobInterval = null;
 }
 
-module.exports = { startTaskPoller, stopTaskPoller, checkAllTasks };
+module.exports = { startTaskPoller, stopTaskPoller, checkAllTasks, runPlatformJobs };

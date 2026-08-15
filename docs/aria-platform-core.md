@@ -61,4 +61,6 @@ Existing product modules must not write platform data directly. New integrations
 
 The dashboard now exposes a first-class Business OS pane with plan, usage, customer, lead, pipeline, revenue, and attention-queue visibility. Clear private WhatsApp buying intent is observed conservatively; it creates or updates a lead and conversation but never sends an outbound sales message. Payment callbacks are accepted only with a configured provider secret, and duplicate event IDs are acknowledged without replaying side effects.
 
+Background work is persisted in `src/core/jobs`. Jobs use idempotency keys, due times, priority ordering, leases, retry backoff, and terminal failure states. The existing background task poller now runs a platform worker alongside its 30-minute task checks. A due Business Autopilot follow-up is marked as processed and approval-required; it never sends a message while `ARIA_AUTOPILOT_LIVE=false`. Queue counts are visible in the platform overview and public workspace governance panel.
+
 The next infrastructure step is to replace the transitional repositories with PostgreSQL-backed repositories, add a shared job/event delivery mechanism, and keep the current JSON adapters for rollback and local development until the production migration is complete.

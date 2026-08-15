@@ -50,6 +50,7 @@ The existing Express application now exposes:
 | `POST /api/companion/chat` | Android Companion chat; requires `COMPANION_API_KEY`. |
 | `GET /api/platform/overview` | Authenticated tenant, plan, usage, event, payment-mode, and Revenue Engine summary. |
 | `GET /api/platform/plans` | Authenticated plan catalog. |
+| `GET /api/platform/integrations` | Authenticated readiness matrix for WhatsApp, Anime media, Learner OAuth, Atlas delivery, Companion, Pinterest, Z.AI, Vercel, and payment callbacks. |
 | `GET /api/platform/business/:type` | Authenticated tenant-scoped business records. |
 | `POST/PATCH /api/platform/...` | Authenticated, CSRF-protected Revenue Engine mutations. |
 | `POST /api/platform/autopilot/replies/propose` | Create a source-attributed reply draft without sending it. |

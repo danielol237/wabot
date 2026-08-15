@@ -175,7 +175,11 @@ function summary(context) {
   const orders = Object.values(state.orders).filter((item) => item.tenantId === tenantId);
   const byStage = Object.fromEntries(LEAD_STAGES.map((stage) => [stage, leads.filter((lead) => lead.stage === stage).length]));
   const revenue = orders.filter((order) => ["paid", "fulfilled", "won"].includes(order.status)).reduce((sum, order) => sum + order.total, 0);
-  return { customers: customers.length, leads: leads.length, orders: orders.length, revenue, byStage, hotLeads: leads.filter((lead) => lead.score >= 70 && !["won", "lost"].includes(lead.stage)).sort((a, b) => b.score - a.score).slice(0, 10) };
+  const openLeads = leads.filter((lead) => !["won", "lost"].includes(lead.stage));
+  const pipelineValue = openLeads.reduce((sum, lead) => sum + lead.value, 0);
+  const weightedPipeline = openLeads.reduce((sum, lead) => sum + (lead.value * (lead.score / 100)), 0);
+  const forecast = { pipelineValue, weightedPipeline: Math.round(weightedPipeline), wonValue: revenue, openLeads: openLeads.length, winRate: leads.length ? Math.round((leads.filter((lead) => lead.stage === "won").length / leads.length) * 100) : 0 };
+  return { customers: customers.length, leads: leads.length, orders: orders.length, revenue, byStage, forecast, hotLeads: leads.filter((lead) => lead.score >= 70 && !["won", "lost"].includes(lead.stage)).sort((a, b) => b.score - a.score).slice(0, 10) };
 }
 
 module.exports = { STORE, LEAD_STAGES, ensureCustomer, createLead, updateLead, recordConversation, addKnowledge, scheduleFollowup, updateFollowup, createOrder, list, summary };

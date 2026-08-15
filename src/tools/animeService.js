@@ -18,7 +18,7 @@ const ANILIST_URL = "https://graphql.anilist.co";
 
 // Public catalog policy: exclude AniList adult titles, adult-only genres/tags,
 // and a conservative set of explicit title terms from public discovery.
-const BLOCKED_TITLE_RE = /(?:\bhentai\b|\becchi\b|\bporn\b|\bxxx\b|\berotic\b|kyonyuu|nuki\s*nuki|bokki|sex\s+ga\s+suki|paihame|overflow|adult\s+only)/i;
+const BLOCKED_TITLE_RE = /(?:\bhentai\b|\becchi\b|\bporn\b|\bxxx\b|\berotic\b|kyonyuu|nuki\s*nuki|bokki|sex\s+ga\s+suki|paihame|overflow|adult\s+only|big\s+girls|face\s+the\s+animation|master\s+piece|quiet\s+please|harvest\s+night|junjou\s+shoujo|momoiro\s+bouenkyou)/i;
 const BLOCKED_GENRE_RE = /(?:hentai|ecchi|erotica)/i;
 function isCatalogSafe(item) {
   if (!item || item.isAdult === true || BLOCKED_TITLE_RE.test(String(item.title || ""))) return false;
@@ -26,6 +26,78 @@ function isCatalogSafe(item) {
   return !values.some((value) => BLOCKED_GENRE_RE.test(String(value?.name || value || "")));
 }
 function safeCatalog(items) { return (Array.isArray(items) ? items : []).filter(isCatalogSafe); }
+
+const FALLBACK_CACHE_MS = 15 * 60 * 1000;
+const fallbackCache = new Map();
+const FEATURED_QUERIES = ["one piece", "naruto", "demon slayer", "jujutsu kaisen", "dragon ball", "my hero academia", "solo leveling", "attack on titan"];
+const RECENT_QUERIES = ["2026 anime", "2025 anime", "one piece", "demon slayer", "jujutsu kaisen", "solo leveling"];
+const CURATED_CATALOG = [
+  "One Piece",
+  "Naruto: Shippuden",
+  "Demon Slayer",
+  "Jujutsu Kaisen",
+  "Dragon Ball Z",
+  "My Hero Academia",
+  "Attack on Titan",
+  "Solo Leveling",
+].map((title) => ({
+  id: `curated-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+  title,
+  cover: "",
+  description: "Open the title to search the configured authorized media sources for available episodes.",
+  overview: "Open the title to search the configured authorized media sources for available episodes.",
+  rating: null,
+  year: "",
+  episodes: null,
+  type: "TV",
+  provider: "curated",
+  hasResource: true,
+}));
+
+function normalizeOmniSaveItem(item) {
+  return {
+    id: String(item?.subjectId || item?.id || ""),
+    title: String(item?.title || item?.name || "").trim(),
+    cover: item?.image || item?.cover?.url || "",
+    description: "Open the title to see available episodes and authorized media options.",
+    overview: "Open the title to see available episodes and authorized media options.",
+    rating: item?.rating ? Number(item.rating) : null,
+    year: item?.year ? String(item.year) : "",
+    episodes: null,
+    type: "TV",
+    provider: "omnisave",
+    detailPath: item?.detailPath || "",
+    hasResource: item?.hasResource !== false,
+  };
+}
+
+async function fallbackDiscovery(queries, limit = 24) {
+  const cacheKey = queries.join("|");
+  const cached = fallbackCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.items.slice(0, limit);
+  try {
+    const { searchOmniSave } = require("./animeDownload");
+    const buckets = await Promise.all(queries.map((query) => searchOmniSave(query).catch(() => [])));
+    const seen = new Set();
+    const items = [];
+    for (const bucket of buckets) {
+      for (const raw of bucket) {
+        const item = normalizeOmniSaveItem(raw);
+        if (!item.id || !item.title || !item.hasResource) continue;
+        const key = item.title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        if (seen.has(key) || !isCatalogSafe(item)) continue;
+        seen.add(key);
+        items.push(item);
+      }
+    }
+    const safe = safeCatalog(items).slice(0, 48);
+    const result = safe.length ? safe : CURATED_CATALOG;
+    fallbackCache.set(cacheKey, { expiresAt: Date.now() + FALLBACK_CACHE_MS, items: result });
+    return result.slice(0, limit);
+  } catch (_) {
+    return CURATED_CATALOG.slice(0, limit);
+  }
+}
 
 async function anilist(query, variables) {
   try {
@@ -257,7 +329,12 @@ async function getTrending() {
       year: a.year,
       provider: "jikan",
     })));
-  } catch (_) { return []; }
+  } catch (_) {}
+
+  // Public fallback: OmniSave search is currently the only provider returning
+  // catalog rows when AniList is blocked and Jikan is timing out. These are
+  // curated discovery queries, so the UI must label them as featured picks.
+  return fallbackDiscovery(FEATURED_QUERIES, 24);
 }
 
 // Recently updated (current season, newest) via Jikan seasonal
@@ -284,7 +361,9 @@ async function getLatest() {
       status: a.airing ? "Airing" : "Completed",
       provider: "jikan",
     })));
-  } catch (_) { return []; }
+  } catch (_) {}
+
+  return fallbackDiscovery(RECENT_QUERIES, 24);
 }
 
 // ── Detail + episodes for a provider-pinned anime ─────────────────
@@ -377,7 +456,11 @@ async function browseAnime({ genre, status, year, type, sort = "POPULARITY_DESC"
     title{english romaji native} coverImage{extraLarge large} description genres tags{name} isAdult status
     seasonYear averageScore episodes format}}}`;
   const data = await anilist(query, { page: 1 });
-  return fromAnilist(data?.Page);
+  const anilistItems = fromAnilist(data?.Page);
+  if (anilistItems.length) return anilistItems;
+  const fallback = await fallbackDiscovery(genre || year || type ? [genre || year || type] : FEATURED_QUERIES, perPage);
+  const filtered = fallback.filter((item) => !year || String(item.year || "").startsWith(String(year))).slice(0, perPage);
+  return filtered.length ? filtered : CURATED_CATALOG.slice(0, perPage);
 }
 
 // ── Random anime (AniList) ────────────────────────────────────────

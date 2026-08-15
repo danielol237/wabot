@@ -25,6 +25,34 @@ test("anime home exposes account entry and clear catalog actions", async () => {
   }
 });
 
+test("anime home renders poster artwork with a safe fallback wrapper", async () => {
+  const { base, server } = await boot();
+  try {
+    const response = await fetch(`${base}/`);
+    const html = await response.text();
+    assert.strictEqual(response.status, 200);
+    assert.match(html, /artwork-(?:card|hero)/);
+    assert.match(html, /img\.anili\.st\/media|fallback-art/);
+  } finally {
+    server.close();
+  }
+});
+
+test("curated title preserves episode metadata and renders episode actions", async () => {
+  const { base, server } = await boot();
+  try {
+    const query = new URLSearchParams({ prov: "curated", title: "One Piece", cover: "https://img.anili.st/media/21", episodes: "2", type: "TV" });
+    const response = await fetch(`${base}/title/curated-one-piece?${query}`);
+    const html = await response.text();
+    assert.strictEqual(response.status, 200);
+    assert.ok(html.includes("artwork-poster"));
+    assert.ok(html.includes("Episode 1"));
+    assert.ok(html.includes("Download"));
+  } finally {
+    server.close();
+  }
+});
+
 test("anime download status route returns a stable page for a tracked job", async () => {
   const { enqueueAnimeJob } = require("../src/tools/animeJobManager");
   const { base, server } = await boot();
@@ -88,6 +116,8 @@ test("anime fallback title preserves metadata and manual media controls", async 
     assert.ok(html.includes("Featured"));
     assert.ok(html.includes("manual-ep"));
     assert.ok(html.includes("Download"));
+    assert.ok(html.includes("fallback-art"));
+    assert.ok(html.includes("Source-ready metadata"));
     assert.ok(!html.includes("Untitled"));
   } finally {
     server.close();

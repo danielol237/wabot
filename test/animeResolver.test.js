@@ -66,6 +66,19 @@ test("canonical resolver: confidence + episode existence from AniList", async ()
   }
 });
 
+test("quality selector chooses the requested or closest available resolution", () => {
+  const { pickDownloadForQuality } = require("../src/tools/sourceResolver");
+  const downloads = [
+    { url: "https://example.test/360.mp4", resolution: 360, vipLocked: false },
+    { url: "https://example.test/480.mp4", resolution: 480, vipLocked: false },
+    { url: "https://example.test/720.mp4", resolution: 720, vipLocked: false },
+  ];
+  assert.strictEqual(pickDownloadForQuality(downloads, "360").resolution, 360);
+  assert.strictEqual(pickDownloadForQuality(downloads, "720").resolution, 720);
+  assert.strictEqual(pickDownloadForQuality(downloads, "1080").resolution, 720);
+  assert.strictEqual(pickDownloadForQuality(downloads, "best").resolution, 720);
+});
+
 test("quality router: prefers validated, higher-quality candidates", () => {
   // Internal — test through the ranking logic via the exported resolver.
   const sr = require("../src/tools/sourceResolver");

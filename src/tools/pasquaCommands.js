@@ -3,6 +3,8 @@ const axios = require("axios");
 const QRCode = require("qrcode");
 const {
   getGroupSettings,
+  setAntiAdmin,
+  getAntiAdmins,
   setProtection,
   setSlowmode,
   setIntroCard,
@@ -75,6 +77,22 @@ async function handleSlowmode(sock, msg, args, ctx) {
   return reply(sock, msg, `✅ Slowmode enabled: one message every *${seconds}s* per member.`);
 }
 
+async function handleAntiAdmin(sock, msg, args, ctx) {
+  if (!ctx.isGroup) return reply(sock, msg, "Anti-admin rules only work inside a group.");
+  if (!isOwnerJid(ctx.senderJid)) return reply(sock, msg, "❌ Only the owner can manage the anti-admin denylist.");
+  if (!(await isBotAdmin(sock, ctx.chatId))) return reply(sock, msg, "I need to be a group admin to enforce anti-admin protection.");
+  const raw = clean(args).toLowerCase();
+  const target = getTargetJid(msg);
+  if (raw === "list" || raw === "status") {
+    const blocked = Object.values(getAntiAdmins(ctx.chatId));
+    return reply(sock, msg, blocked.length ? `🛡️ Denied admin candidates:\n${blocked.map((item) => `• @${jidNumber(item.jid)}`).join("\n")}` : "🛡️ The anti-admin denylist is empty.", { mentions: blocked.map((item) => item.jid) });
+  }
+  if (!target) return reply(sock, msg, "Mention or reply to the person, then say *never make them admin* or *antiadmin on*.");
+  const disable = /^(?:off|remove|allow|unblock|clear)\b/i.test(raw);
+  setAntiAdmin(ctx.chatId, target, !disable, { addedBy: ctx.senderJid, reason: disable ? "owner_removed" : "owner_denied_admin" });
+  return reply(sock, msg, disable ? `✅ @${jidNumber(target)} was removed from the anti-admin denylist.` : `🛡️ @${jidNumber(target)} is now a denied admin candidate. If promoted, ARIA will demote them immediately.`, { mentions: [target] });
+}
+
 async function handleKickAll(sock, msg, args, ctx) {
   if (!(await requireGroup(sock, msg, ctx))) return;
   const metadata = await sock.groupMetadata(ctx.chatId);
@@ -113,6 +131,51 @@ async function handleListAdmins(sock, msg, args, ctx) {
 async function sendImageBuffer(sock, msg, ctx, buffer, caption) {
   if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return reply(sock, msg, "No image was returned by the source.");
   await sock.sendMessage(ctx.chatId, { image: buffer, caption }, { quoted: msg });
+}
+
+async function handlePinterestBatch(sock, msg, args, ctx) {
+  const raw = clean(args, 300);
+  const countMatch = raw.match(/\b(\d{1,2})\s*(?:pics?|pictures?|images?|photos?)\b/i);
+  const requested = Math.max(1, Math.min(10, Number.parseInt(countMatch?.[1] || "5", 10)));
+  const query = raw.replace(/\b\d{1,2}\s*(?:pics?|pictures?|images?|photos?)\b/i, "").replace(/^\s*(?:of|for|on)\s+/i, "").trim();
+  if (!query) return reply(sock, msg, "Usage: give me 5 pics of Goku. The default is 5 and the maximum is 10.");
+  const pins = [];
+  try {
+    if (process.env.PINTEREST_ACCESS_TOKEN) {
+      const response = await axios.get("https://api.pinterest.com/v5/search/partner/pins", {
+        params: { query, limit: requested },
+        headers: { Authorization: `Bearer ${process.env.PINTEREST_ACCESS_TOKEN}`, Accept: "application/json" },
+        timeout: 15000,
+      });
+      for (const pin of response.data?.items || []) {
+        const imageUrl = pin.media?.images?.["1200x"]?.url || pin.media?.images?.original?.url || pin.images?.orig?.url;
+        if (imageUrl) pins.push({ imageUrl, link: pin.link || (pin.id ? `https://www.pinterest.com/pin/${pin.id}/` : "") });
+      }
+    } else {
+      // No scraping: the unauthenticated Pinterest web page is not a stable API.
+      // This fallback uses a public image search endpoint and labels the source.
+      const response = await axios.get("https://commons.wikimedia.org/w/api.php", {
+        params: { action: "query", generator: "search", gsrsearch: query, gsrnamespace: 6, gsrlimit: requested, prop: "imageinfo", iiprop: "url", iiurlwidth: 900, format: "json", origin: "*" },
+        headers: { "User-Agent": "ARIA-Bot/1.0" }, timeout: 15000,
+      });
+      for (const page of Object.values(response.data?.query?.pages || {})) {
+        const info = page.imageinfo?.[0];
+        if (info?.thumburl || info?.url) pins.push({ imageUrl: info.thumburl || info.url, link: `https://commons.wikimedia.org/wiki/${encodeURIComponent(String(page.title || "").replace(/ /g, "_"))}` });
+      }
+    }
+  } catch (err) {
+    return reply(sock, msg, `❌ Image search failed: ${err.response?.status || err.message}`);
+  }
+  if (!pins.length) return reply(sock, msg, process.env.PINTEREST_ACCESS_TOKEN ? `No Pinterest images found for *${query}*.` : `No public image results found for *${query}*. Add PINTEREST_ACCESS_TOKEN for official Pinterest results.`);
+  let sent = 0;
+  for (const pin of pins.slice(0, requested)) {
+    try {
+      const image = await axios.get(pin.imageUrl, { responseType: "arraybuffer", timeout: 15000 });
+      await sock.sendMessage(ctx.chatId, { image: Buffer.from(image.data), caption: `🖼️ ${query}${pin.link ? `\n${pin.link}` : ""}` }, { quoted: msg });
+      sent++;
+    } catch (_) {}
+  }
+  return reply(sock, msg, sent ? `✅ Sent ${sent} image${sent === 1 ? "" : "s"} for *${query}*.${process.env.PINTEREST_ACCESS_TOKEN ? " Source: Pinterest." : " Source: public fallback; add PINTEREST_ACCESS_TOKEN for Pinterest."}` : "❌ The image source returned no downloadable images.");
 }
 
 async function handleProfilePicture(sock, msg, args, ctx) {
@@ -444,6 +507,7 @@ function getPasquaCommands() {
   const protections = ["antibot", "antidemote", "antigroupmention", "antigroupstatus", "antihijack", "antimention", "antipromote"];
   for (const name of protections) defs.push(makeDefinition(name, [], "group", handleProtection));
   defs.push(makeDefinition("slowmode", [], "group", handleSlowmode));
+  defs.push(makeDefinition("antiadmin", ["neveradmin", "blockadmin", "denyadmin"], "group", handleAntiAdmin, true));
   defs.push(makeDefinition("kickall", [], "group", handleKickAll, true));
   defs.push(makeDefinition("membercount", ["members"], "group", handleMemberCount));
   defs.push(makeDefinition("listadmins", ["admins"], "group", handleListAdmins));
@@ -457,6 +521,7 @@ function getPasquaCommands() {
   defs.push(makeDefinition("setpp", [], "profile", handleProfile, true));
   defs.push(makeDefinition("pp", [], "media", handleProfilePicture));
   defs.push(makeDefinition("randompp", [], "media", handleProfilePicture));
+  defs.push(makeDefinition("pinterest", ["pins", "pinsearch", "imagebatch"], "media", handlePinterestBatch));
 
   const utilityAliases = {
     ascii: [], b64decode: [], b64encode: [], base: [], base64: [], bin: [], binary: [], caesar: [], capitalize: [], charcount: [], clap: [], datefmt: [], dedupe: [], factorial: [], fibonacci: [], fontmaker: [], gcd: [], hash: [], hexdecode: [], hexencode: [], iss: [], lcm: [], leet: [], len: [], lower: [], lowerall: [], md5: [], mirror: [], mock: [], morse: [], password: ["pass"], pct: [], percentage: [], prime: [], qrcode: ["qr"], quoted: [], randomcolor: [], reverse: [], roman: [], rot13: [], sha1: [], sha256: [], shorturl: [], slugify: [], spongebob: [], timestamp: [], timezone: [], title: [], unascii: [], unbin: [], upper: [], urldecode: [], urlencode: [], uuid: [], vapor: [], vowelcount: [], wordcount: [], pass2: []
@@ -477,4 +542,4 @@ function registerPasquaCommands(register) {
   for (const definition of getPasquaCommands()) register(definition);
 }
 
-module.exports = { getPasquaCommands, registerPasquaCommands, handleWcgReply, handleWcgCommand };
+module.exports = { getPasquaCommands, registerPasquaCommands, handleWcgReply, handleWcgCommand, handlePinterestBatch };

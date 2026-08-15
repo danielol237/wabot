@@ -2,7 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert");
 const { commands, detectCommandCollisions } = require("../src/utils/commandRouter");
 const { getPasquaCommands, handleWcgCommand } = require("../src/tools/pasquaCommands");
-const { getGroupSettings } = require("../src/utils/groupSettings");
+const { getGroupSettings, setAntiAdmin } = require("../src/utils/groupSettings");
+const { handleParticipantUpdate } = require("../src/tools/groupProtection");
+const { resolveNaturalAction } = require("../src/utils/commandRouter");
 
 function fakeMessage(chatId = "120363000000000000@g.us") {
   return { key: { remoteJid: chatId, id: "msg-1", participant: "12345@s.whatsapp.net" }, message: { conversation: "" } };
@@ -21,19 +23,40 @@ function fakeSock() {
     sendMessage: async (chatId, payload) => { sent.push({ chatId, payload }); return {}; },
     updateProfileName: async (name) => { sent.push({ profileName: name }); },
     updateProfileStatus: async (status) => { sent.push({ profileStatus: status }); },
-    groupParticipantsUpdate: async () => [],
+    groupParticipantsUpdate: async (chatId, ids, action) => { sent.push({ groupUpdate: { chatId, ids, action } }); return ids.map((id) => ({ id, status: "200" })); },
+    profilePictureUrl: async () => { throw new Error("profile picture unavailable"); },
   };
 }
 
 test("PASQUA: requested safe commands are registered while approve and confirmkick remain absent", () => {
   const names = new Set(commands.flatMap((c) => [c.name, ...(c.aliases || [])]));
-  for (const name of ["antibot", "antidemote", "antigroupmention", "antigroupstatus", "antihijack", "antimention", "antipromote", "slowmode", "kickall", "getgpp", "setgpp", "introcard", "setwelcomemsg", "setgoodbyemsg", "setbio", "setname", "setpp", "pp", "randompp", "password", "wcg", "aichat", "essay", "summarize"]) assert.ok(names.has(name), `${name} should be registered`);
+  for (const name of ["antibot", "antidemote", "antigroupmention", "antigroupstatus", "antihijack", "antimention", "antipromote", "slowmode", "kickall", "getgpp", "setgpp", "introcard", "setwelcomemsg", "setgoodbyemsg", "setbio", "setname", "setpp", "pp", "randompp", "pinterest", "antiadmin", "password", "wcg", "aichat", "essay", "summarize"]) assert.ok(names.has(name), `${name} should be registered`);
   assert.equal(names.has("approve"), false);
   assert.equal(names.has("confirmkick"), false);
   assert.equal(names.has("randompp"), true);
   assert.deepEqual(detectCommandCollisions(), []);
   assert.equal(commands.find((c) => c.name === "kickall")?.ownerOnly, true);
   assert.equal(getPasquaCommands().find((c) => c.name === "setpp")?.ownerOnly, true);
+  assert.equal(getPasquaCommands().find((c) => c.name === "antiadmin")?.ownerOnly, true);
+});
+
+test("PASQUA: every registered command resolves without a prefix when addressed to ARIA", () => {
+  for (const command of commands) {
+    const resolved = resolveNaturalAction(`ARIA ${command.name}`);
+    assert.equal(resolved?.command?.name, command.name, `${command.name} should resolve without !`);
+  }
+});
+
+test("PASQUA: natural-language phrases resolve to real owner/media commands", () => {
+  const kick = resolveNaturalAction("ARIA, kick everyone in this GC");
+  assert.equal(kick?.command?.name, "kickall");
+  assert.equal(kick?.command?.ownerOnly, true);
+  assert.equal(resolveNaturalAction("ARIA, set your profile pic to this")?.command?.name, "setpp");
+  assert.equal(resolveNaturalAction("ARIA, never make @23456000000 an admin")?.command?.name, "antiadmin");
+  assert.equal(resolveNaturalAction("ARIA, give me 10 pics of Goku")?.command?.name, "pinterest");
+  const releases = resolveNaturalAction("ARIA, search on GitHub about this and bring the link to releases");
+  assert.equal(releases?.command?.name, "releases");
+  assert.equal(releases?.args, "this");
 });
 
 test("PASQUA: protection commands persist on/off state", async () => {
@@ -45,6 +68,20 @@ test("PASQUA: protection commands persist on/off state", async () => {
   assert.equal(getGroupSettings(ctx.chatId).protections.antibot, true);
   await command.handler(sock, msg, "off", ctx);
   assert.equal(getGroupSettings(ctx.chatId).protections.antibot, false);
+});
+
+test("PASQUA: anti-admin denylist demotes a blocked promotion and restores the owner", async () => {
+  const sock = fakeSock();
+  const chatId = "120363000000000000@g.us";
+  const blocked = "34567000000@s.whatsapp.net";
+  setAntiAdmin(chatId, blocked, true, { addedBy: "12345000000@s.whatsapp.net" });
+  await handleParticipantUpdate(sock, { id: chatId, author: "23456000000@s.whatsapp.net", participants: [blocked], action: "promote" });
+  await handleParticipantUpdate(sock, { id: chatId, author: "23456000000@s.whatsapp.net", participants: ["12345000000@s.whatsapp.net"], action: "remove" });
+  const updates = sock.sent.filter((entry) => entry.groupUpdate).map((entry) => entry.groupUpdate);
+  assert.ok(updates.some((entry) => entry.action === "demote" && entry.ids.includes(blocked)));
+  assert.ok(updates.some((entry) => entry.action === "add" && entry.ids.includes("12345000000@s.whatsapp.net")));
+  assert.ok(updates.some((entry) => entry.action === "demote" && entry.ids.includes("23456000000@s.whatsapp.net")));
+  setAntiAdmin(chatId, blocked, false);
 });
 
 test("PASQUA: secure password command returns a non-empty generated secret", async () => {

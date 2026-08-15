@@ -7,7 +7,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, "groupSettings.json");
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// Structure: { [groupId]: { antilink: bool, welcome: bool, welcomeMsg: string, leaveMsg: string, protections: object, slowmodeSeconds: number, introCard: object, warnings: { [userId]: count } } }
+// Structure: { [groupId]: { antilink: bool, welcome: bool, welcomeMsg: string, leaveMsg: string, protections: object, slowmodeSeconds: number, introCard: object, antiAdmins: object, warnings: { [userId]: count } } }
 let settings = {};
 
 try {
@@ -29,9 +29,27 @@ function save() {
 
 function getGroupSettings(groupId) {
   if (!settings[groupId]) {
-    settings[groupId] = { antilink: false, welcome: false, welcomeMsg: null, leaveMsg: null, protections: {}, slowmodeSeconds: 0, introCard: null, warnings: {} };
+    settings[groupId] = { antilink: false, welcome: false, welcomeMsg: null, leaveMsg: null, protections: {}, slowmodeSeconds: 0, introCard: null, antiAdmins: {}, warnings: {} };
   }
   return settings[groupId];
+}
+
+function setAntiAdmin(groupId, jid, blocked, metadata = {}) {
+  const gs = getGroupSettings(groupId);
+  gs.antiAdmins = { ...(gs.antiAdmins || {}) };
+  const key = String(jid);
+  if (blocked) gs.antiAdmins[key] = { jid: key, ...metadata, updatedAt: Date.now() };
+  else delete gs.antiAdmins[key];
+  save();
+  return gs.antiAdmins;
+}
+
+function getAntiAdmins(groupId) {
+  return { ...(getGroupSettings(groupId).antiAdmins || {}) };
+}
+
+function isAntiAdminBlocked(groupId, jid) {
+  return !!getGroupSettings(groupId).antiAdmins?.[String(jid)];
 }
 
 function setProtection(groupId, name, enabled) {
@@ -100,6 +118,9 @@ module.exports = {
   getGroupSettings,
   setProtection,
   isProtectionEnabled,
+  setAntiAdmin,
+  getAntiAdmins,
+  isAntiAdminBlocked,
   setSlowmode,
   setIntroCard,
   setAntilink,

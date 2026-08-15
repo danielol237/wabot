@@ -1,4 +1,4 @@
-const { getGroupSettings } = require("../utils/groupSettings");
+const { getGroupSettings, isAntiAdminBlocked } = require("../utils/groupSettings");
 const { jidNumber, isBotAdmin } = require("./groupAdmin");
 
 const slowmodeLast = new Map();
@@ -48,15 +48,29 @@ async function handleParticipantUpdate(sock, update) {
   if (!chatId) return;
   const settings = getGroupSettings(chatId);
   const botId = jidNumber(sock?.user?.id);
+  const ownerNumber = String(process.env.OWNER_NUMBER || "").replace(/\D/g, "");
+  const actor = jidNumber(update.author);
+  const ownerWasRemoved = update.action === "remove" && ownerNumber && (update.participants || []).some((participant) => jidNumber(participant) === ownerNumber);
   if (update.action === "add" && settings.introCard?.text) {
     for (const participant of update.participants || []) {
       await sock.sendMessage(chatId, { text: settings.introCard.text.replace("{user}", `@${jidNumber(participant)}`), mentions: [participant] }).catch(() => {});
     }
   }
   if (!(await isBotAdmin(sock, chatId))) return;
+  if (ownerWasRemoved) {
+    const ownerJid = (update.participants || []).find((participant) => jidNumber(participant) === ownerNumber);
+    if (ownerJid) await sock.groupParticipantsUpdate(chatId, [ownerJid], "add").catch(() => {});
+    if (actor && actor !== botId && actor !== ownerNumber) await sock.groupParticipantsUpdate(chatId, [`${actor}@s.whatsapp.net`], "demote").catch(() => {});
+    await sock.sendMessage(chatId, { text: "🛡️ Owner protection restored the owner and reversed the removal attempt." }).catch(() => {});
+  }
   for (const participant of update.participants || []) {
     const id = jidNumber(participant);
-    if (!id || id === botId || settings.ownerNumber === id) continue;
+    if (!id || id === botId || id === ownerNumber) continue;
+    if (update.action === "promote" && isAntiAdminBlocked(chatId, participant)) {
+      await sock.groupParticipantsUpdate(chatId, [participant], "demote").catch(() => {});
+      await sock.sendMessage(chatId, { text: `🛡️ Anti-admin denylist enforced: @${id} was demoted immediately.`, mentions: [participant] }).catch(() => {});
+      continue;
+    }
     if (update.action === "promote" && enabled(settings, "antipromote")) {
       await sock.groupParticipantsUpdate(chatId, [participant], "demote").catch(() => {});
       await sock.sendMessage(chatId, { text: `🛡️ Anti-promote reverted an unauthorized promotion for @${id}.`, mentions: [participant] }).catch(() => {});

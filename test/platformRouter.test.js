@@ -46,3 +46,16 @@ test("platform router: mutations reject missing CSRF", async () => {
     server.close();
   }
 });
+
+test("platform router: unauthenticated overview keeps an API JSON contract", async () => {
+  const { base, server } = await boot();
+  try {
+    const response = await fetch(`${base}/api/platform/overview`, { headers: { Accept: "application/json" } });
+    assert.strictEqual(response.status, 401);
+    assert.equal(response.headers.get("content-type")?.includes("application/json"), true);
+    const body = await response.json();
+    assert.match(String(body.error || ""), /unauthorized|authentication|sign-in|session expired/i);
+  } finally {
+    server.close();
+  }
+});

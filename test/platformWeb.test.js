@@ -42,6 +42,8 @@ test("platform web: signed tenant session renders the workspace console", async 
     assert.ok(html.includes("Revenue Engine"));
     assert.ok(html.includes("Web Workspace"));
     assert.ok(html.includes("Capacity & governance"));
+    assert.ok(html.includes("Integrations"));
+    assert.ok(html.includes("/api/platform/integrations"));
   } finally { server.close(); }
 });
 

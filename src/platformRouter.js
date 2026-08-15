@@ -79,10 +79,12 @@ router.get("/overview", handle((req) => {
     },
     events: platform.events.list({ tenantId: context.tenantId, limit: 20 }),
     payments: ["manual", "mtn", "orange"].map((provider) => platform.billing.providerStatus(provider)),
+    integrations: platform.integrations.listIntegrations({ whatsappReady: Boolean(req.app.locals.whatsappReady) }),
   };
 }));
 
 router.get("/plans", handle(() => ({ plans: platform.billing.listPlans() })));
+router.get("/integrations", handle(() => ({ integrations: platform.integrations.listIntegrations({ whatsappReady: Boolean(req.app.locals.whatsappReady) }) })));
 router.get("/business/:type", handle((req) => ({ items: crm.list(req.platformContext, req.params.type, { stage: req.query.stage, status: req.query.status, limit: req.query.limit }) })));
 
 router.post("/customers", requireMutation, handle((req) => ({ customer: crm.ensureCustomer(req.platformContext, req.body || {}) })));

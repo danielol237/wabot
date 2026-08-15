@@ -6,6 +6,7 @@ const audit = require("./events/audit");
 const usage = require("./usage");
 const jobs = require("./jobs");
 const billing = require("./billing");
+const integrations = require("./integrations");
 
 function ownerJid(value = process.env.OWNER_NUMBER || "") {
   const raw = String(value || "").trim();
@@ -49,4 +50,4 @@ function recordAction({ context, action, outcome = "success", resourceType = nul
   return { event, auditEvent };
 }
 
-module.exports = { identity, tenants, permissions, events, audit, usage, jobs, billing, ownerJid, bootstrapOwnerWorkspace, contextFor, assertContext, recordAction };
+module.exports = { identity, tenants, permissions, events, audit, usage, jobs, billing, integrations, ownerJid, bootstrapOwnerWorkspace, contextFor, assertContext, recordAction };

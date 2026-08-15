@@ -562,6 +562,11 @@ async function runJob(job) {
       }
     }
 
+    try {
+      const platform = require("../core");
+      const workspace = platform.bootstrapOwnerWorkspace();
+      if (workspace) platform.usage.record({ tenantId: workspace.tenant.id, actorId: job.createdBy || workspace.user.id, category: "media", metric: "downloads", units: 1, provider: dlProvider, metadata: { quality: job.quality, source: job.source || "anime" }, idempotencyKey: `anime-download:${job.id}` });
+    } catch (_) {}
     job.status = "done";
     job.finishedAt = Date.now();
     emit(job);

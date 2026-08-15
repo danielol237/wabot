@@ -122,6 +122,23 @@ function scheduleFollowup(context, { leadId, customerId, message, scheduledAt, c
   return { ...followup };
 }
 
+function updateFollowup(context, followupId, { status, metadata = {} } = {}) {
+  requireCapability(context, "followup.manage");
+  const tenantId = tenantOf(context);
+  const state = STORE.read();
+  const followup = state.followups[followupId];
+  if (!belongs(followup, tenantId)) throw new Error("follow-up not found in tenant");
+  const allowed = ["pending", "approved", "sent", "cancelled", "failed"];
+  if (status && !allowed.includes(String(status).toLowerCase())) throw new Error("invalid follow-up status");
+  if (status) followup.status = String(status).toLowerCase();
+  followup.metadata = { ...(followup.metadata || {}), ...(metadata || {}) };
+  followup.updatedAt = now();
+  state.followups[followup.id] = followup;
+  STORE.write(state);
+  publish({ type: `business.followup.${followup.status}`, tenantId, actorId: context.userId, aggregateType: "followup", aggregateId: followup.id, payload: { leadId: followup.leadId, customerId: followup.customerId, status: followup.status } });
+  return { ...followup };
+}
+
 function createOrder(context, { customerId, leadId = null, items = [], total = 0, currency = "XAF", status = "draft", metadata = {} } = {}) {
   requireCapability(context, "order.manage");
   const tenantId = tenantOf(context);
@@ -156,4 +173,4 @@ function summary(context) {
   return { customers: customers.length, leads: leads.length, orders: orders.length, revenue, byStage, hotLeads: leads.filter((lead) => lead.score >= 70 && !["won", "lost"].includes(lead.stage)).sort((a, b) => b.score - a.score).slice(0, 10) };
 }
 
-module.exports = { STORE, LEAD_STAGES, ensureCustomer, createLead, updateLead, recordConversation, addKnowledge, scheduleFollowup, createOrder, list, summary };
+module.exports = { STORE, LEAD_STAGES, ensureCustomer, createLead, updateLead, recordConversation, addKnowledge, scheduleFollowup, updateFollowup, createOrder, list, summary };

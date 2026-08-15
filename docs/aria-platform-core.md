@@ -18,7 +18,14 @@ The core currently provides normalized identities, tenants and memberships, role
 | `src/core/usage` | Meter AI, media, automation, knowledge, and business usage. | Transitional atomic JSON repository |
 | `src/core/billing` | Plans, entitlements, subscriptions, payment intents, webhook signatures, and provider status. | Transitional atomic JSON repositories |
 | `src/core/business/crm.js` | Customers, conversations, leads, knowledge, follow-ups, orders, and revenue summary. | Transitional atomic JSON repository |
+| `src/core/business/autopilot.js` | Lead qualification, hot-lead recommendations, due-follow-up proposals, approval, and gated execution. | Shared CRM repository plus event backbone |
 | `src/platformRouter.js` | Authenticated owner-facing overview and Revenue Engine APIs. | Existing dashboard session and CSRF contract |
+
+## Usage bridges
+
+Inbound WhatsApp messages are normalized into platform identities and attributed to the owner workspace during the transitional single-tenant phase. Completed AI responses and successful Anime downloads are also metered. These bridges deliberately do not grant contacts tenant membership; they provide the usage evidence needed before multi-tenant routing is enabled.
+
+Business Autopilot is approval-first. It can qualify leads and recommend next actions immediately, but outbound follow-ups remain proposals unless a user explicitly approves them. Even approved follow-ups remain non-sending while `ARIA_AUTOPILOT_LIVE=false`.
 
 ## Security boundary
 

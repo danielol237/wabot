@@ -63,6 +63,9 @@ router.post("/conversations", requireMutation, handle((req) => ({ conversation: 
 router.post("/knowledge", requireMutation, handle((req) => ({ knowledge: crm.addKnowledge(req.platformContext, req.body || {}) })));
 router.post("/followups", requireMutation, handle((req) => ({ followup: crm.scheduleFollowup(req.platformContext, req.body || {}) })));
 router.post("/orders", requireMutation, handle((req) => ({ order: crm.createOrder(req.platformContext, req.body || {}) })));
+router.get("/autopilot/recommendations", handle(() => ({ recommendations: require("./core/business/autopilot").recommendations(req.platformContext) })));
+router.post("/autopilot/leads/:id/qualify", requireMutation, handle((req) => ({ lead: require("./core/business/autopilot").qualifyLead(req.platformContext, req.params.id, req.body || {}) })));
+router.post("/autopilot/followups/:id/approve", requireMutation, handle((req) => ({ followup: require("./core/business/autopilot").approveFollowup(req.platformContext, req.params.id) })));
 router.post("/payments/intents", requireMutation, handle((req) => ({ intent: platform.billing.createPaymentIntent({ ...req.body, tenantId: req.platformContext.tenantId, actorId: req.platformContext.userId }) })));
 router.post("/payments/:id/status", requireMutation, handle((req) => ({ intent: platform.billing.transitionPayment(req.params.id, req.body?.status, { actorId: req.platformContext.userId, externalId: req.body?.externalId, metadata: req.body?.metadata }) })));
 

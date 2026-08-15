@@ -323,6 +323,19 @@ async function getAIResponse(...args) {
     const ok = typeof out === "string" && !out.startsWith("❌");
     const tel = require("./dashboardTelemetry");
     tel.record("ai", { ok, latency: Date.now() - t0, provider: ok ? lastProvider : "failed" });
+    const platform = require("../core");
+    const workspace = platform.bootstrapOwnerWorkspace();
+    if (workspace) {
+      platform.usage.record({
+        tenantId: workspace.tenant.id,
+        actorId: workspace.user.id,
+        category: "ai",
+        metric: "messages",
+        units: 1,
+        provider: ok ? lastProvider : "failed",
+        metadata: { ok, latencyMs: Date.now() - t0, source: "aria-ai" },
+      });
+    }
   } catch (_) {}
   return out;
 }

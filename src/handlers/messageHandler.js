@@ -41,6 +41,31 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // ── Dashboard telemetry (real inbound messages only) ────────
   try { require("../tools/dashboardTelemetry").record("message"); } catch (_) {}
 
+  // ── Platform identity + usage bridge ───────────────────────
+  // Contacts are normalized into platform identities, while message usage is
+  // attributed to the owner workspace during the transitional single-tenant
+  // phase. This does not grant contacts tenant membership or business access.
+  try {
+    const platform = require("../core");
+    const actor = platform.identity.ensureUser({
+      displayName: senderName || senderJid || "WhatsApp contact",
+      identity: { provider: "whatsapp", value: senderJid || chatId },
+      metadata: { lastChatId: chatId, lastSeenAt: new Date().toISOString() },
+    });
+    const workspace = platform.bootstrapOwnerWorkspace();
+    if (workspace && msg.key?.id) {
+      platform.usage.record({
+        tenantId: workspace.tenant.id,
+        actorId: actor.id,
+        category: "messages",
+        metric: "inbound",
+        units: 1,
+        metadata: { chatId, isGroup, source: "whatsapp" },
+        idempotencyKey: `whatsapp:${msg.key.id}`,
+      });
+    }
+  } catch (_) {}
+
   // ── Build context ──────────────────────────────────────────
   const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins, msg };
 

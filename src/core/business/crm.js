@@ -11,6 +11,7 @@ const STORE = createJsonRepository(path.join(DATA_DIR, "platformBusiness.json"),
   leads: {},
   conversations: {},
   knowledge: {},
+  drafts: {},
   followups: {},
   orders: {},
 }));
@@ -110,6 +111,35 @@ function addKnowledge(context, { title, content, tags = [], source = "manual", m
   return { ...item };
 }
 
+function createDraft(context, { customerId, leadId = null, body, channel = "whatsapp", knowledgeIds = [], metadata = {} } = {}) {
+  requireCapability(context, "followup.manage");
+  const tenantId = tenantOf(context);
+  const state = STORE.read();
+  if (!belongs(state.customers[customerId], tenantId)) throw new Error("customer not found in tenant");
+  if (leadId && !belongs(state.leads[leadId], tenantId)) throw new Error("lead not found in tenant");
+  const draft = { id: id("draft"), tenantId, customerId, leadId, body: text(body, 4000), channel: text(channel || "whatsapp", 40), knowledgeIds: Array.isArray(knowledgeIds) ? knowledgeIds.slice(0, 20) : [], status: "proposed", metadata: metadata || {}, createdAt: now(), updatedAt: now() };
+  if (!draft.body) throw new Error("draft body is required");
+  state.drafts[draft.id] = draft;
+  STORE.write(state);
+  publish({ type: "business.draft.proposed", tenantId, actorId: context.userId, aggregateType: "draft", aggregateId: draft.id, payload: { customerId, leadId, channel: draft.channel, knowledgeIds: draft.knowledgeIds } });
+  return { ...draft };
+}
+
+function updateDraft(context, draftId, patch = {}) {
+  requireCapability(context, "followup.manage");
+  const tenantId = tenantOf(context);
+  const state = STORE.read();
+  const draft = state.drafts[draftId];
+  if (!belongs(draft, tenantId)) throw new Error("draft not found in tenant");
+  if (patch.body != null) draft.body = text(patch.body, 4000);
+  if (patch.status && ["proposed", "approved", "rejected", "sent"].includes(String(patch.status))) draft.status = String(patch.status);
+  draft.updatedAt = now();
+  state.drafts[draft.id] = draft;
+  STORE.write(state);
+  publish({ type: `business.draft.${draft.status}`, tenantId, actorId: context.userId, aggregateType: "draft", aggregateId: draft.id, payload: { customerId: draft.customerId, leadId: draft.leadId } });
+  return { ...draft };
+}
+
 function scheduleFollowup(context, { leadId, customerId, message, scheduledAt, channel = "whatsapp", status = "pending", metadata = {} } = {}) {
   requireCapability(context, "followup.manage");
   const tenantId = tenantOf(context);
@@ -182,4 +212,4 @@ function summary(context) {
   return { customers: customers.length, leads: leads.length, orders: orders.length, revenue, byStage, forecast, hotLeads: leads.filter((lead) => lead.score >= 70 && !["won", "lost"].includes(lead.stage)).sort((a, b) => b.score - a.score).slice(0, 10) };
 }
 
-module.exports = { STORE, LEAD_STAGES, ensureCustomer, createLead, updateLead, recordConversation, addKnowledge, scheduleFollowup, updateFollowup, createOrder, list, summary };
+module.exports = { STORE, LEAD_STAGES, ensureCustomer, createLead, updateLead, recordConversation, addKnowledge, createDraft, updateDraft, scheduleFollowup, updateFollowup, createOrder, list, summary };

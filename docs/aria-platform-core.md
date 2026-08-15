@@ -27,7 +27,7 @@ The core currently provides normalized identities, tenants and memberships, role
 
 Inbound WhatsApp messages are normalized into platform identities and attributed to the owner workspace during the transitional single-tenant phase. Completed AI responses and successful Anime downloads are also metered. These bridges deliberately do not grant contacts tenant membership; they provide the usage evidence needed before multi-tenant routing is enabled.
 
-Business Autopilot is approval-first. It can qualify leads and recommend next actions immediately, but outbound follow-ups remain proposals unless a user explicitly approves them. Even approved follow-ups remain non-sending while `ARIA_AUTOPILOT_LIVE=false`.
+Business Autopilot is approval-first. It can qualify leads and recommend next actions immediately, and it can prepare a knowledge-backed reply draft from tenant-owned documents. Reply drafts record their source knowledge IDs and remain `proposed` until explicitly approved. Outbound follow-ups and approved drafts remain non-sending while `ARIA_AUTOPILOT_LIVE=false`.
 
 ## Security boundary
 
@@ -52,6 +52,8 @@ The existing Express application now exposes:
 | `GET /api/platform/plans` | Authenticated plan catalog. |
 | `GET /api/platform/business/:type` | Authenticated tenant-scoped business records. |
 | `POST/PATCH /api/platform/...` | Authenticated, CSRF-protected Revenue Engine mutations. |
+| `POST /api/platform/autopilot/replies/propose` | Create a source-attributed reply draft without sending it. |
+| `POST /api/platform/autopilot/replies/:id/approve` | Explicitly approve a reply draft; delivery remains gated by live execution policy. |
 | `POST /api/platform/billing/checkout` | Creates a plan subscription/payment intent; paid provider requests remain pending while live payments are disabled. |
 | `POST /api/platform/billing/payment/:id/reconcile` | Reconciles a verified payment state and activates the linked plan only when the transition is allowed. |
 | `POST /webhooks/payments/mtn` | Signature-verified, idempotent MTN callback ingestion. |

@@ -2,9 +2,16 @@ const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
 
-const ROOT = process.env.ARIA_MEDIA_RUNTIME_DIR || path.join(process.cwd(), ".render", "media");
+// Render and other PaaS hosts may start the process from a directory that is
+// not the repository root. Resolve the project root from this module first,
+// then allow an explicit runtime directory for operators who mount media tools
+// elsewhere.
+const PROJECT_ROOT = path.resolve(__dirname, "../..");
+const ROOT = process.env.ARIA_MEDIA_RUNTIME_DIR || path.join(PROJECT_ROOT, ".render", "media");
 const BIN_DIRS = [
   path.join(ROOT, "bin"),
+  path.join(PROJECT_ROOT, ".render", "bin"),
+  path.join(process.cwd(), ".render", "media", "bin"),
   path.join(process.cwd(), ".render", "bin"),
   process.env.RENDER_MEDIA_BIN_DIR,
   "/opt/render/project/.render/media/bin",
@@ -17,6 +24,8 @@ const BIN_DIRS = [
 
 const PYTHON_DIRS = [
   path.join(ROOT, "python"),
+  path.join(PROJECT_ROOT, ".render", "python"),
+  path.join(process.cwd(), ".render", "media", "python"),
   path.join(process.cwd(), ".render", "python"),
   process.env.RENDER_MEDIA_PYTHON_DIR,
 ].filter(Boolean);
@@ -39,6 +48,12 @@ function which(name) {
   }
 }
 
+function runtimeEnv(extra = {}) {
+  const currentPath = process.env.PATH || "";
+  const prefix = [...new Set(BIN_DIRS)].join(path.delimiter);
+  return { ...process.env, PATH: `${prefix}${path.delimiter}${currentPath}`, ...extra };
+}
+
 function pythonCandidates() {
   const explicit = process.env.ARIA_PYTHON_BIN || process.env.PYTHON_BIN;
   const candidates = [
@@ -53,7 +68,7 @@ function pythonCandidates() {
 
 function moduleEnv(pythonDir) {
   const current = process.env.PYTHONPATH ? `${pythonDir}${path.delimiter}${process.env.PYTHONPATH}` : pythonDir;
-  return { ...process.env, PYTHONPATH: current };
+  return runtimeEnv({ PYTHONPATH: current });
 }
 
 function hasPythonModule(python, pythonDir) {
@@ -78,7 +93,7 @@ function resolveYtDlp() {
   ].filter(Boolean);
   for (const file of [...new Set(directCandidates)]) {
     if (isExecutable(file)) {
-      return { file, prefix: [], env: process.env, display: file };
+      return { file, prefix: [], env: runtimeEnv(), display: file };
     }
   }
 
@@ -106,4 +121,20 @@ function describeYtDlp() {
   return command ? command.display : null;
 }
 
-module.exports = { ROOT, resolveYtDlp, commandArgs, describeYtDlp };
+function inspectYtDlp() {
+  const command = resolveYtDlp();
+  if (!command) return { available: false, command: null, version: null, error: "yt-dlp was not found in the configured runtime paths" };
+  try {
+    const version = execFileSync(command.file, commandArgs(command, ["--version"]), {
+      env: command.env,
+      encoding: "utf8",
+      timeout: 8000,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    return { available: true, command: command.display, version: version || null, error: null };
+  } catch (err) {
+    return { available: false, command: command.display, version: null, error: String(err?.message || err).slice(0, 240) };
+  }
+}
+
+module.exports = { PROJECT_ROOT, ROOT, resolveYtDlp, commandArgs, describeYtDlp, inspectYtDlp };

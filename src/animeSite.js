@@ -222,6 +222,25 @@ async function watchPage(req) {
   return layout("Watch", `<div class="watch-head"><div><div class="eyebrow">Now playing</div><h1>${esc(details.title || source.title || "Anime")} · episode ${episode}</h1><p>${esc(providerLabel(source.provider))}${source.height ? ` · ${esc(source.height)}p` : ""} · requested ${esc(qualityLabel(quality))}${source.quality && source.quality !== "unknown" ? ` · source ${esc(source.quality)}` : ""}</p></div>${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Episodes", "secondary")}</div><div class="player-shell"><video id="player" controls playsinline preload="metadata"></video></div><div class="quality-strip"><span class="quality-label">Playback quality</span>${qualityLinks(`/anime/watch/${encodeURIComponent(id)}`, { prov: provider, ep: episode }, quality)}</div><div class="source-card"><h3>Resolved source</h3><div class="source-row"><span>Provider</span><span class="source-state ok">${esc(providerLabel(source.provider))}</span></div><div class="source-row"><span>Validation</span><span class="source-state ok">Playable source verified</span></div></div>${playerScript}`);
 }
 
+function downloadErrorPanel(job, id, provider, episode, quality) {
+  const code = String(job?.error?.code || "DOWNLOAD_FAILED");
+  const detail = String(job?.error?.message || "The source could not be downloaded.");
+  let heading = "Download temporarily unavailable";
+  let message = "ARIA could not prepare a validated media file for this episode. No incomplete file was offered.";
+  if (code === "DEPENDENCY_MISSING") {
+    heading = "Media runtime is not ready";
+    message = "The deployment has not passed its media-runtime check yet. The operator must finish the runtime build, then this download can be retried safely.";
+  } else if (code === "SOURCE_NOT_FOUND") {
+    heading = "No playable source passed validation";
+    message = "ARIA found the catalog entry, but no configured authorized source is currently safe and playable for this episode. Try another quality or return later.";
+  } else if (code === "MEDIA_TOO_LARGE") {
+    heading = "File is too large to deliver here";
+    message = "The selected source exceeds the configured delivery limit. Try a lower quality or use the browser download when an eligible source is available.";
+  }
+  const retry = button(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&quality=${encodeURIComponent(quality)}&job=${encodeURIComponent(job.id)}&retry=1`, "Retry download", "primary");
+  return `<div class="empty download-error"><h2>${esc(heading)}</h2><p>${esc(message)}</p><div class="detail-actions">${retry}${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Back to episodes", "secondary")}</div><details><summary>Technical details</summary><code>${esc(code)}: ${esc(detail)}</code></details></div>`;
+}
+
 async function downloadPage(req, res) {
   const id = String(req.params.id);
   const provider = String(req.query.prov || "anilist");
@@ -259,7 +278,7 @@ async function downloadPage(req, res) {
   const fileReady = isDone && job.result?.filePath && fs.existsSync(job.result.filePath);
   const fileToken = fileReady ? issueFileToken(job.id, undefined, ownerId) : null;
   const result = fileReady && fileToken ? `<div class="download-actions">${button(`/anime/file/${encodeURIComponent(job.id)}?t=${encodeURIComponent(fileToken)}`, "Download file", "primary")}${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Back to episodes", "secondary")}</div>` : "";
-  const error = isFailed ? `<div class="empty"><p>${esc(job.error?.code || "DOWNLOAD_FAILED")}: ${esc(job.error?.message || "The source could not be downloaded.")}</p>${button(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&job=${encodeURIComponent(job.id)}&retry=1`, "Retry", "primary")}</div>` : "";
+  const error = isFailed ? downloadErrorPanel(job, id, provider, episode, quality) : "";
   const refresh = isPending ? `<script>setTimeout(()=>location.reload(),5000)</script>` : "";
   return layout("Download", `<div class="job"><div class="eyebrow">Episode delivery</div><h1>${esc(details.title || "Anime")} · episode ${episode}</h1><div class="job-row"><span class="job-label">Requested quality</span><span>${esc(qualityLabel(job.quality || quality))}</span></div><div class="job-row"><span class="job-label">Status</span><span class="status ${statusClass}">${esc(status)}</span></div><div class="job-row"><span class="job-label">Job</span><span>${esc(job.id)}</span></div>${progress}</div>${result}${error}${!result && !error ? `<div class="empty">This page refreshes while a validated authorized source is prepared. A download link appears only after the file passes media validation.</div>` : ""}${refresh}`);
 }

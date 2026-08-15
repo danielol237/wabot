@@ -153,7 +153,7 @@ router.get("/api/system", async (req, res) => {
     let runtimeDeps = null;
     try {
       const ajm = tryLoad("./tools/animeJobManager");
-      if (ajm && ajm.getRuntimeDeps) runtimeDeps = await ajm.getRuntimeDeps();
+      if (ajm && ajm.getRuntimeDeps) runtimeDeps = await ajm.getRuntimeDeps({ refresh: req.query.refresh === "1" });
     } catch (_) {}
     let build = "unknown";
     try {

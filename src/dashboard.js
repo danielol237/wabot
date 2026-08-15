@@ -333,10 +333,18 @@ function renderHealthPane() {
   let src = [], prov = [], srcChecked = null, provChecked = null;
   try { const s = require("./tools/sourceHealth").getHealth(); src = s.results || []; srcChecked = s.lastCheckedAt; } catch (_) {}
   try { const p = require("./tools/providerHealth").getHealth(); prov = p.results || []; provChecked = p.lastCheckedAt; } catch (_) {}
+  let media = { available: false, command: null, version: null, error: "runtime diagnostics unavailable" };
+  try { media = require("./utils/mediaRuntime").inspectYtDlp(); } catch (err) { media.error = String(err?.message || err); }
   const ts = (t) => (t ? new Date(t).toLocaleTimeString() : "not checked");
+  const mediaBadge = media.available ? '<span class="badge b-green">ready</span>' : '<span class="badge b-red">not ready</span>';
   return `
-    <div class="pane" id="pane-health"><div class="page-title">Health</div><div class="page-sub">sources & AI providers · live probes</div>
-      <div class="card"><div class="h">Anime Sources <span class="badge b-accent">checked ${ts(srcChecked)}</span></div>
+    <div class="pane" id="pane-health"><div class="page-title">Health</div><div class="page-sub">sources, media runtime & AI providers · live probes</div>
+      <div class="card"><div class="h">Media Runtime ${mediaBadge}</div>
+        <div class="row"><span class="k">yt-dlp</span><span class="v">${media.available ? `${esc(media.version || "available")} · ${esc(media.command || "configured")}` : esc(media.error || "not found")}</span></div>
+        <div class="row"><span class="k">readiness</span><span class="v">${media.available ? "Anime download preflight can run" : "Anime downloads will be blocked until the deployment build installs the runtime"}</span></div>
+        <a class="qbtn" style="display:inline-block;margin-top:12px;text-decoration:none" href="/healthz?refresh=1" target="_blank" rel="noreferrer">↻ Open readiness check</a>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="h">Anime Sources <span class="badge b-accent">checked ${ts(srcChecked)}</span></div>
         ${src.length ? src.map(healthRow).join("") : `<div class="empty">Not checked yet. Click "Re-check sources".</div>`}
         <button class="qbtn" style="margin-top:12px" onclick="checkSources()">↻ Re-check sources</button>
       </div>

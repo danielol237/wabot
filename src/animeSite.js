@@ -160,7 +160,7 @@ async function homePage() {
   ]);
   const hero = trending[0];
   const heroHtml = hero ? `<section class="hero"><div class="hero-art">${hero.cover ? `<img src="${esc(hero.cover)}" alt="" loading="eager">` : ""}</div><div class="hero-copy"><div class="eyebrow">Featured this week · ${esc(providerLabel(hero.provider))}</div><h1>${esc(hero.title)}</h1><p>${esc(hero.overview || hero.description || "Open a title to see available episodes and authorized media options.")}</p><div class="hero-meta"><span class="meta-pill score">${hero.rating ? `★ ${esc(hero.rating)}` : "Featured"}</span>${hero.year ? `<span class="meta-pill">${esc(hero.year)}</span>` : ""}${hero.type ? `<span class="meta-pill">${esc(hero.type)}</span>` : ""}</div><div class="hero-actions">${button(titleHref(hero), "Open title", "primary")}${button("/anime/browse", "Browse catalog", "secondary")}</div></div></section>` : `<section class="hero"><div class="hero-copy"><div class="eyebrow">ARIA Anime</div><h1>Find your next series.</h1><p>Search the catalog or browse the latest metadata.</p></div></section>`;
-  const quickStart = `<section class="quick-start"><div><span class="eyebrow">Your next watch</span><h2>Find it fast. Keep your place.</h2><p>Search by title, browse what is airing, or open a series and choose an episode. Playback is validated before ARIA exposes it, and downloads offer explicit 360p, 480p, and 720p requests when the source supports them.</p></div><div class="quick-actions">${button("/anime/browse", "Browse the catalog", "primary")}${button("/anime/trending", "See what is trending", "secondary")}${button("/anime/latest", "Latest episodes", "secondary")}</div></section>`;
+  const quickStart = `<section class="quick-start"><div><span class="eyebrow">Your next watch</span><h2>Find it fast. Keep your place.</h2><p>Search by title, browse what is airing, or open a series and choose an episode. Playback is validated before ARIA exposes it, and downloads offer explicit 360p, 480p, and 720p requests when the source supports them.</p></div><div class="quick-actions">${button("/anime/browse", "Browse catalog", "primary")}${button("/anime/trending", "See what is trending", "secondary")}${button("/anime/latest", "Latest episodes", "secondary")}</div></section>`;
   return layout("Home", `${heroHtml}${quickStart}<div class="section-head"><h2 class="section-title">Trending now</h2><span class="section-sub">Popular titles</span></div>${cardGrid(trending.slice(0, 18))}<div class="section-head"><h2 class="section-title">Recently updated</h2><span class="section-sub">New catalog entries</span></div>${cardGrid(latest.slice(0, 18))}`);
 }
 
@@ -246,11 +246,20 @@ async function downloadPage(req, res) {
   const provider = String(req.query.prov || "anilist");
   const episode = Math.max(1, Number(req.query.ep) || 1);
   const quality = normalizeQuality(req.query.quality);
-  const details = await detailsFast({ id, provider, title: "" });
-  if (details.blocked || !service.isCatalogSafe(details)) return layout("Title unavailable", `<div class="empty"><h1>Title unavailable</h1><p>This title is not included in the public catalog.</p>${button("/anime", "Back to home", "primary")}</div>`);
   const ownerId = publicOwnerId(req, res);
   let job = req.query.job ? getJob(String(req.query.job)) : null;
   if (job && job.ownerId && !publicJobAllowed(job, ownerId)) return res.status(403).send("This download job belongs to another session.");
+  const details = await detailsFast({ id, provider, title: "" });
+  const catalogSafe = !details.blocked && service.isCatalogSafe(details);
+  // Establish the signed public session and a tracked job before provider metadata
+  // can fail. The worker will later report SOURCE_NOT_FOUND instead of returning a
+  // session-less HTML dead end during an upstream outage.
+  if (!catalogSafe && !job) {
+    const quota = publicDownloadQuota(req, ownerId);
+    if (!quota.ok) return res.status(quota.status).send(quota.message);
+    job = enqueueAnimeJob({ name: details.title || `Anime ${id}`, episode, preferred: provider === "anilist" ? null : provider, quality, sock: null, chatId: null, quotedMsg: null, ownerId, sessionId: ownerId, createdBy: "public-anime" });
+    return res.redirect(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&quality=${encodeURIComponent(quality)}&job=${encodeURIComponent(job.id)}`);
+  }
   if (req.query.retry === "1" && job?.status === "failed") {
     const quota = publicDownloadQuota(req, ownerId);
     if (!quota.ok) return res.status(quota.status).send(quota.message);

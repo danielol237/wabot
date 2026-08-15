@@ -72,6 +72,11 @@ router.get("/overview", handle((req) => {
     subscription,
     business: crm.summary(context),
     usage: platform.usage.summary({ tenantId: context.tenantId, limit: 2000 }),
+    jobs: {
+      pending: platform.jobs.list({ tenantId: context.tenantId, status: "pending", limit: 500 }).length,
+      processing: platform.jobs.list({ tenantId: context.tenantId, status: "processing", limit: 500 }).length,
+      failed: platform.jobs.list({ tenantId: context.tenantId, status: "failed", limit: 500 }).length,
+    },
     events: platform.events.list({ tenantId: context.tenantId, limit: 20 }),
     payments: ["manual", "mtn", "orange"].map((provider) => platform.billing.providerStatus(provider)),
   };

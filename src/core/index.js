@@ -4,6 +4,7 @@ const permissions = require("./permissions");
 const events = require("./events");
 const audit = require("./events/audit");
 const usage = require("./usage");
+const jobs = require("./jobs");
 const billing = require("./billing");
 
 function ownerJid(value = process.env.OWNER_NUMBER || "") {
@@ -48,4 +49,4 @@ function recordAction({ context, action, outcome = "success", resourceType = nul
   return { event, auditEvent };
 }
 
-module.exports = { identity, tenants, permissions, events, audit, usage, billing, ownerJid, bootstrapOwnerWorkspace, contextFor, assertContext, recordAction };
+module.exports = { identity, tenants, permissions, events, audit, usage, jobs, billing, ownerJid, bootstrapOwnerWorkspace, contextFor, assertContext, recordAction };

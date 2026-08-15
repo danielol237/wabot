@@ -3,6 +3,7 @@ const path = require("path");
 const { createJsonRepository } = require("../storage/jsonRepository");
 const { assertCan } = require("../permissions");
 const { publish } = require("../events");
+const jobs = require("../jobs");
 
 const DATA_DIR = process.env.ARIA_PLATFORM_DATA_DIR || path.join(__dirname, "../../../data");
 const STORE = createJsonRepository(path.join(DATA_DIR, "platformBusiness.json"), () => ({
@@ -116,6 +117,10 @@ function scheduleFollowup(context, { leadId, customerId, message, scheduledAt, c
   if (leadId && !belongs(state.leads[leadId], tenantId)) throw new Error("lead not found in tenant");
   if (customerId && !belongs(state.customers[customerId], tenantId)) throw new Error("customer not found in tenant");
   const followup = { id: id("fup"), tenantId, leadId: leadId || null, customerId: customerId || state.leads[leadId]?.customerId || null, message: text(message, 4000), scheduledAt: new Date(scheduledAt || Date.now()).toISOString(), channel: text(channel || "whatsapp", 40), status: text(status || "pending", 20), metadata: metadata || {}, createdAt: now(), updatedAt: now() };
+  try {
+    const job = jobs.enqueue({ tenantId, type: "business.followup.due", payload: { followupId: followup.id }, runAt: followup.scheduledAt, idempotencyKey: `followup:${followup.id}` });
+    followup.jobId = job.id;
+  } catch (_) {}
   state.followups[followup.id] = followup;
   STORE.write(state);
   publish({ type: "business.followup.scheduled", tenantId, actorId: context.userId, aggregateType: "followup", aggregateId: followup.id, payload: { leadId: followup.leadId, customerId: followup.customerId, scheduledAt: followup.scheduledAt, channel: followup.channel } });

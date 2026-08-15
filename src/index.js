@@ -92,7 +92,9 @@ app.use("/webhooks/payments", require("./paymentWebhooks"));
 // Mount web dashboard
 const dashboardRouter = require("./dashboard");
 app.use("/dashboard", dashboardRouter);
-// Platform core and Revenue Engine APIs reuse the dashboard owner session and CSRF boundary.
+// Platform account/session routes are separate from the legacy dashboard login.
+app.use("/api/platform", require("./platformAuthRouter"));
+// Platform core and Revenue Engine APIs accept tenant sessions or the dashboard owner session.
 app.use("/api/platform", require("./platformRouter"));
 
 // ARIA Learner Portal — per-learner accounts (Google OAuth / email), each

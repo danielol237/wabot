@@ -31,7 +31,7 @@ Business Autopilot is approval-first. It can qualify leads and recommend next ac
 
 ## Security boundary
 
-The existing dashboard password/session remains the owner entrypoint during the migration. Platform mutations are protected by the dashboard CSRF token. The Android Companion bridge is disabled unless `COMPANION_API_KEY` is explicitly configured and uses a separate key from GitHub, AI providers, and session encryption.
+The legacy dashboard password/session remains available for the owner during the migration, but customer workspaces now have a separate platform account boundary. `POST /api/platform/auth/register` and `POST /api/platform/auth/login` issue signed `aria_platform_session` cookies, and platform mutations require the matching platform CSRF token. Set a dedicated `PLATFORM_SESSION_SECRET`; do not reuse GitHub, payment, or provider secrets. The Android Companion bridge is disabled unless `COMPANION_API_KEY` is explicitly configured and uses a separate key from GitHub, AI providers, and session encryption.
 
 Payment providers are not live by default. `ARIA_LIVE_PAYMENTS=false` is the safe default, and non-manual payment intents cannot transition to a successful state while live payments are disabled. Provider adapters must be added only after their official API, callback, signature, sandbox, and merchant onboarding requirements are verified.
 
@@ -44,6 +44,9 @@ The existing Express application now exposes:
 | `GET /healthz/live` | Process liveness; does not require media tooling. |
 | `GET /healthz` | Readiness; verifies `yt-dlp`, `ffmpeg`, and `ffprobe` and returns HTTP 503 when media is not ready. |
 | `GET /healthz?refresh=1` | Re-runs the runtime check instead of relying on cached preflight state. |
+| `POST /api/platform/auth/register` | Create a tenant owner account and workspace session. |
+| `POST /api/platform/auth/login` | Sign a tenant owner into the platform. |
+| `GET /api/platform/auth/session` | Read the current tenant session and CSRF token. |
 | `POST /api/companion/chat` | Android Companion chat; requires `COMPANION_API_KEY`. |
 | `GET /api/platform/overview` | Authenticated tenant, plan, usage, event, payment-mode, and Revenue Engine summary. |
 | `GET /api/platform/plans` | Authenticated plan catalog. |

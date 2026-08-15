@@ -76,6 +76,8 @@ app.get("/healthz", async (req, res) => {
   }
 });
 app.get("/aria-mark.png", (req, res) => res.sendFile(path.join(__dirname, "../assets/aria-mark-icon.png")));
+// Public commercial platform entry point; authenticated visitors receive the workspace console.
+app.use("/platform", require("./platformWeb"));
 const websiteRouter = require("./website");
 app.use("/", websiteRouter);
 // Android Companion API; remains disabled until COMPANION_API_KEY is configured.

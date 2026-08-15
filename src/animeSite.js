@@ -24,7 +24,7 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-const PROVIDER_LABEL = { jikan: "MAL", anilist: "AniList", consumet: "Consumet", animepahe: "AnimePahe", gogoanime: "Gogoanime", omnisave: "OmniSave", curated: "Featured" };
+const PROVIDER_LABEL = { authorized: "Authorized media", jikan: "MAL", anilist: "AniList", consumet: "Unverified fallback", animepahe: "Deprecated provider", gogoanime: "Unverified fallback", omnisave: "Unverified fallback", curated: "Featured" };
 const QUALITY_OPTIONS = ["best", "360", "480", "720", "1080"];
 function normalizeQuality(value) { const q = String(value || "best").toLowerCase(); return QUALITY_OPTIONS.includes(q) ? q : "best"; }
 function qualityLabel(q) { return q === "best" ? "Auto" : `${q}p`; }
@@ -217,7 +217,7 @@ body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-ser
 </style></head><body>
 <header class="top"><div class="top-in">
 <a class="brand" href="/anime" aria-label="ARIA Anime home"><img class="brand-mark" src="/aria-mark.png" alt="ARIA mark" width="34" height="34" /><span class="brand-name">ARIA <b>ANIME</b></span></a>
-<nav class="nav" aria-label="Primary"><a href="/anime/browse">Browse</a><a href="/anime/trending">Trending</a><a href="/anime/latest">Latest</a></nav>
+<nav class="nav" aria-label="Primary"><a href="/anime/browse">Anime</a><a href="/anime/trending">Trending</a><a href="/anime/latest">Latest</a><a href="/movies">Movies</a></nav>
 <form class="search" action="/anime/search" method="get"><input name="q" aria-label="Search anime" placeholder="Search anime…" autocomplete="off"><button type="submit">Search</button></form>
 <a class="account-link" href="/portal/login">Learner sign in</a><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme"><span class="theme-icon" aria-hidden="true">☾</span><span class="theme-label">Theme</span></button>
 </div></header><main class="main">${inner}</main><footer class="footer">ARIA Anime · catalog metadata and media delivery are limited to configured authorized sources.</footer><script>(()=>{const key="aria-anime-theme";const root=document.documentElement;const button=document.getElementById("theme-toggle");const setTheme=(theme)=>{root.dataset.theme=theme;try{localStorage.setItem(key,theme)}catch(_){}};const current=()=>root.dataset.theme||"light";const sync=()=>{if(!button)return;const dark=current()==="dark";button.querySelector(".theme-icon").textContent=dark?"☀":"☾";button.querySelector(".theme-label").textContent=dark?"Light":"Dark";button.setAttribute("aria-label",dark?"Switch to light theme":"Switch to dark theme")};if(button){button.addEventListener("click",()=>{setTheme(current()==="dark"?"light":"dark");sync()});sync()}})();</script></body></html>`;
@@ -326,7 +326,7 @@ async function watchPage(req) {
   if (details.blocked || !service.isCatalogSafe(details)) return layout("Title unavailable", `<div class="empty"><h1>Title unavailable</h1><p>This title is not included in the public catalog.</p>${button("/anime", "Back to home", "primary")}</div>`);
   const report = await withTimeout(resolveEpisode(details.title || id, episode, { preference: provider === "anilist" ? null : provider, quality }), 30000, null);
   const source = report?.selected;
-  if (!source?.url) return layout("Watch unavailable", `<div class="empty"><h1>${esc(details.title || "Anime")} · episode ${episode}</h1><p>There is no validated playable source for <strong>${esc(qualityLabel(quality))}</strong> right now. The provider report below is live diagnostic data, not a promise that a source exists.</p><div class="quality-strip"><span class="quality-label">Try another quality</span>${qualityLinks(`/anime/watch/${encodeURIComponent(id)}`, contextQuery, quality)}</div><div class="source-card"><h3>Source status</h3>${providerDiagnostics(report) || `<div class="source-row"><span>Resolver</span><span class="source-state bad">No diagnostic data</span></div>`}</div><div class="detail-actions">${button(titleContextHref(id, provider, details), "Back to episodes", "secondary")}</div></div>`);
+  if (!source?.url) return layout("Watch unavailable", `<div class="empty"><h1>${esc(details.title || "Anime")} · episode ${episode}</h1><p>There is no validated playable source for <strong>${esc(qualityLabel(quality))}</strong> right now. A catalog match is metadata only; ARIA needs an operator-provided authorized media record before it can play or download an episode.</p><div class="quality-strip"><span class="quality-label">Try another quality</span>${qualityLinks(`/anime/watch/${encodeURIComponent(id)}`, contextQuery, quality)}</div><div class="source-card"><h3>Source status</h3>${providerDiagnostics(report) || `<div class="source-row"><span>Resolver</span><span class="source-state bad">No diagnostic data</span></div>`}</div><div class="detail-actions">${button(titleContextHref(id, provider, details), "Back to episodes", "secondary")}</div></div>`);
   const mediaToken = issueMediaToken({ url: source.url, headers: source.headers, provider: source.provider });
   if (!mediaToken) return layout("Watch unavailable", `<div class="empty"><h1>Playback is not configured</h1><p>The operator must set a media signing secret before playback can be served securely.</p>${button(titleContextHref(id, provider, details), "Back to episodes", "secondary")}</div>`);
   const mediaUrl = `/anime/proxy?t=${encodeURIComponent(mediaToken)}`;
@@ -345,7 +345,7 @@ function downloadErrorPanel(job, id, provider, episode, quality, details = {}) {
     message = "The deployment has not passed its media-runtime check yet. The operator must finish the runtime build, then this download can be retried safely.";
   } else if (code === "SOURCE_NOT_FOUND") {
     heading = "No playable source passed validation";
-    message = "ARIA found the catalog entry, but no configured authorized source is currently safe and playable for this episode. Try another quality or return later.";
+    message = "ARIA found the catalog entry, but no operator-provided authorized media record is currently available for this episode. A title match is not a playable file.";
   } else if (code === "MEDIA_TOO_LARGE") {
     heading = "File is too large to deliver here";
     message = "The selected source exceeds the configured delivery limit. Try a lower quality or use the browser download when an eligible source is available.";

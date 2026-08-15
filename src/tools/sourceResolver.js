@@ -53,7 +53,30 @@ function pickDownloadForQuality(downloads, requestedQuality = "best") {
   const pool = atOrBelow.length ? atOrBelow : available;
   return pool.sort((a, b) => Math.abs(a.resolution - target) - Math.abs(b.resolution - target) || b.resolution - a.resolution)[0];
 }
+
+function readAuthorizedManifest() {
+  const raw = String(process.env.ARIA_ANIME_AUTHORIZED_SOURCES_JSON || "").trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function pickAuthorizedDownload(title, episode, requestedQuality = "best") {
+  const manifest = readAuthorizedManifest();
+  const titleKey = Object.keys(manifest).find((key) => normalize(key) === normalize(title));
+  const titleEntry = titleKey ? manifest[titleKey] : null;
+  const episodeEntry = titleEntry?.episodes?.[String(episode)] || titleEntry?.[String(episode)];
+  if (!episodeEntry) return null;
+  const rawOptions = Array.isArray(episodeEntry) ? episodeEntry : episodeEntry.url ? [episodeEntry] : Object.entries(episodeEntry).map(([resolution, value]) => ({ ...(typeof value === "string" ? { url: value } : value), resolution }));
+  const options = rawOptions.map((value) => ({ ...value, resolution: Number(value.resolution) || Number(value.quality) || 0 })).filter((value) => /^https:\/\//i.test(String(value.url || "")) && value.resolution > 0);
+  return pickDownloadForQuality(options, requestedQuality);
+}
 const PROVIDER_TIMEOUT_MS = Math.max(5000, Number(process.env.ANIME_PROVIDER_TIMEOUT_MS || 18000));
+const UNVERIFIED_SOURCE_ACCESS = /^(1|true|yes)$/i.test(String(process.env.ARIA_ANIME_ENABLE_UNVERIFIED_SOURCES || ""));
 function bounded(promise, ms, fallback) {
   return Promise.race([
     Promise.resolve(promise).catch(() => fallback),
@@ -142,9 +165,18 @@ async function resolveCanonical(title, episode) {
 // Every candidate: { provider, url, type: 'hls'|'mp4', quality, headers, title }.
 const DISCOVERERS = [
   {
+    provider: "authorized",
+    enabled: () => Boolean(String(process.env.ARIA_ANIME_AUTHORIZED_SOURCES_JSON || "").trim()),
+    async discover(title, episode, season, quality) {
+      const chosen = pickAuthorizedDownload(title, episode || 1, quality);
+      if (!chosen) return { candidates: [], noResults: true };
+      return { candidates: [{ provider: "authorized", url: chosen.url, type: /\.m3u8(?:\?|$)/i.test(chosen.url) ? "hls" : "mp4", quality: String(chosen.resolution), height: chosen.resolution, headers: chosen.headers || { "User-Agent": "Mozilla/5.0" }, title }] };
+    },
+  },
+  {
     provider: "omnisave",
     // Circuit breaker: skip when open.
-    enabled: () => rep.usable("omnisave"),
+    enabled: () => UNVERIFIED_SOURCE_ACCESS && rep.usable("omnisave"),
     async discover(title, episode, season, quality) {
       const { searchOmniSave, searchOmniSaveById, getOmniSaveDownload } = require("./animeDownload");
       const list = await searchOmniSave(title);
@@ -166,7 +198,7 @@ const DISCOVERERS = [
   },
   {
     provider: "gogoanime",
-    enabled: () => rep.usable("gogoanime"),
+    enabled: () => UNVERIFIED_SOURCE_ACCESS && rep.usable("gogoanime"),
     async discover(title, episode) {
       const { searchGogo, gogoAnimeStream, HOSTS } = require("./animeGogo");
       const list = await searchGogo(title);
@@ -185,7 +217,7 @@ const DISCOVERERS = [
     // Consumet is a bundle of independent adapters. Do not let one grouped
     // reputation record suppress Hianime, KickAssAnime, AnimeSaturn, and the
     // remaining fallbacks together; animeConsumet bounds each provider call.
-    enabled: () => true,
+    enabled: () => UNVERIFIED_SOURCE_ACCESS,
     async discover(title, episode) {
       const { consumetSearch, consumetEpisodeStream } = require("./animeConsumet");
       const s = await consumetSearch(title);
@@ -201,21 +233,6 @@ const DISCOVERERS = [
       const got = await consumetEpisodeStream(lookup, episode, null);
       if (!got?.url) return { candidates: [], noResults: !got?.error, error: got?.error || "no stream" };
       return { candidates: [{ provider: "consumet", url: got.url, type: /m3u8/i.test(got.url) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0" }, title: anime?.title || title }] };
-    },
-  },
-  {
-    provider: "animepahe",
-    enabled: () => rep.usable("animepahe"),
-    async discover(title, episode) {
-      const { searchAnimePahe, animepaheGetStreamUrl } = require("./animeDownload");
-      const list = await searchAnimePahe(title);
-      if (!list.length) return { candidates: [], noResults: true };
-      const anime = pickBestResult(title, list);
-      if (!anime) return { candidates: [], noResults: true };
-      const got = await animepaheGetStreamUrl(anime.id, episode || 1);
-      const streamUrl = got?.url || got?.m3u8 || "";
-      if (!streamUrl) return { candidates: [], error: got?.error || "no stream url" };
-      return { candidates: [{ provider: "animepahe", url: streamUrl, type: /m3u8/i.test(streamUrl) ? "hls" : "mp4", quality: "unknown", headers: { "User-Agent": "Mozilla/5.0", Referer: "https://animepahetv.to/" }, title: got.title || anime.title }] };
     },
   },
 ];
@@ -406,4 +423,4 @@ function reputationReport() {
   return rep.all();
 }
 
-module.exports = { resolveEpisode, resolveCanonical, discoverCandidates, parseSeason, pickDownloadForQuality, reputationReport, DISCOVERERS, PROVIDER_TIMEOUT_MS };
+module.exports = { resolveEpisode, resolveCanonical, discoverCandidates, parseSeason, pickDownloadForQuality, pickAuthorizedDownload, reputationReport, DISCOVERERS, PROVIDER_TIMEOUT_MS };

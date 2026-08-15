@@ -33,7 +33,7 @@ Business Autopilot is approval-first. It can qualify leads and recommend next ac
 
 The legacy dashboard password/session remains available for the owner during the migration, but customer workspaces now have a separate platform account boundary. `POST /api/platform/auth/register` and `POST /api/platform/auth/login` issue signed `aria_platform_session` cookies, and platform mutations require the matching platform CSRF token. Set a dedicated `PLATFORM_SESSION_SECRET`; do not reuse GitHub, payment, or provider secrets. The Android Companion bridge is disabled unless `COMPANION_API_KEY` is explicitly configured and uses a separate key from GitHub, AI providers, and session encryption.
 
-Payment providers are not live by default. `ARIA_LIVE_PAYMENTS=false` is the safe default, and non-manual payment intents cannot transition to a successful state while live payments are disabled. Provider adapters must be added only after their official API, callback, signature, sandbox, and merchant onboarding requirements are verified.
+Payment providers are not live by default. `ARIA_LIVE_PAYMENTS=false` is the safe default, and non-manual payment intents cannot transition to a successful state while live payments are disabled. `POST /api/platform/billing/checkout` therefore creates a pending paid subscription and a provider-neutral intent; only an allowed reconciliation can activate the plan. Provider adapters must be added only after their official API, callback, signature, sandbox, and merchant onboarding requirements are verified.
 
 ## API surface
 
@@ -52,6 +52,8 @@ The existing Express application now exposes:
 | `GET /api/platform/plans` | Authenticated plan catalog. |
 | `GET /api/platform/business/:type` | Authenticated tenant-scoped business records. |
 | `POST/PATCH /api/platform/...` | Authenticated, CSRF-protected Revenue Engine mutations. |
+| `POST /api/platform/billing/checkout` | Creates a plan subscription/payment intent; paid provider requests remain pending while live payments are disabled. |
+| `POST /api/platform/billing/payment/:id/reconcile` | Reconciles a verified payment state and activates the linked plan only when the transition is allowed. |
 | `POST /webhooks/payments/mtn` | Signature-verified, idempotent MTN callback ingestion. |
 | `POST /webhooks/payments/orange` | Signature-verified, idempotent Orange callback ingestion. |
 

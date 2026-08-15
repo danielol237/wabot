@@ -58,6 +58,26 @@ test("anime public download status preserves the requested quality", async () =>
 });
 
 
+test("anime download: dependency failures explain recovery without exposing a raw-only error", async () => {
+  const { enqueueAnimeJob, getJob } = require("../src/tools/animeJobManager");
+  const { base, server } = await boot();
+  try {
+    const job = enqueueAnimeJob({ name: "One Piece", episode: 1, quality: "720", sock: null, chatId: null, quotedMsg: null });
+    const tracked = getJob(job.id);
+    tracked.status = "failed";
+    tracked.error = { code: "DEPENDENCY_MISSING", message: "Anime downloads are unavailable because yt-dlp is not installed." };
+    const response = await fetch(`${base}/dl/21?prov=anilist&ep=1&quality=720&job=${encodeURIComponent(job.id)}`);
+    const html = await response.text();
+    assert.strictEqual(response.status, 200);
+    assert.ok(html.includes("Media runtime is not ready"));
+    assert.ok(html.includes("The deployment has not passed its media-runtime check yet"));
+    assert.ok(html.includes("Retry download"));
+    assert.ok(html.includes("DEPENDENCY_MISSING"));
+  } finally {
+    server.close();
+  }
+});
+
 test("anime V11: home exposes persistent dark/light theme controls", async () => {
   const { base, server } = await boot();
   try {

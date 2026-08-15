@@ -21,7 +21,7 @@ const { execFile, spawn } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
 const { EventEmitter } = require("events");
 const { log, error, warn } = require("../utils/logger");
-const { resolveYtDlp, commandArgs } = require("../utils/mediaRuntime");
+const { resolveYtDlp, commandArgs, inspectYtDlp } = require("../utils/mediaRuntime");
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 const QUEUE_FILE = path.join(__dirname, "../../data/animeQueue.json");
@@ -29,12 +29,13 @@ const QUEUE_FILE = path.join(__dirname, "../../data/animeQueue.json");
 // yt-dlp is an external binary (not an npm dep). Cache the check so every
 // queued job fails quickly and consistently when deployment dependencies are missing.
 let ytDlpCheck = null;
-function checkYtDlp() {
+function checkYtDlp({ force = false } = {}) {
+  if (force) ytDlpCheck = null;
   if (ytDlpCheck) return ytDlpCheck;
   ytDlpCheck = new Promise((resolve) => {
     const command = resolveYtDlp();
     if (!command) {
-      error("yt-dlp is not available on PATH or in the configured Render media runtime.");
+      error("yt-dlp is not available in the project-local or configured media runtime.");
       return resolve(false);
     }
     execFile(command.file, commandArgs(command, ["--version"]), { env: command.env, timeout: 8000 }, (err, stdout) => {
@@ -49,6 +50,10 @@ function checkYtDlp() {
   return ytDlpCheck;
 }
 
+function resetRuntimeChecks() {
+  ytDlpCheck = null;
+}
+
 // Probe a single external binary and report availability. Used by the dashboard
 // health endpoint so missing runtime deps (yt-dlp/ffmpeg/docker/python) are
 // visible before a download or code-exec is attempted, not discovered after.
@@ -61,15 +66,25 @@ function checkBinary(cmd, versionArgs = ["--version"]) {
   });
 }
 
-async function getRuntimeDeps() {
-  const [ytDlp, ffmpeg, ffprobe, python, docker] = await Promise.all([
-    checkBinary("yt-dlp"),
+async function getRuntimeDeps({ refresh = false } = {}) {
+  if (refresh) resetRuntimeChecks();
+  const yt = inspectYtDlp();
+  const [ffmpeg, ffprobe, python, docker] = await Promise.all([
     checkBinary("ffmpeg", ["-version"]),
     checkBinary("ffprobe", ["-version"]),
     checkBinary("python3", ["--version"]),
     checkBinary("docker", ["--version"]),
   ]);
-  return { ytDlp, ffmpeg, ffprobe, python3: python, docker };
+  return {
+    ytDlp: yt.available,
+    ytDlpCommand: yt.command,
+    ytDlpVersion: yt.version,
+    ytDlpError: yt.error,
+    ffmpeg,
+    ffprobe,
+    python3: python,
+    docker,
+  };
 }
 
 // ── Configuration ─────────────────────────────────────────────────
@@ -547,6 +562,11 @@ async function runJob(job) {
       }
     }
 
+    try {
+      const platform = require("../core");
+      const workspace = platform.bootstrapOwnerWorkspace();
+      if (workspace) platform.usage.record({ tenantId: workspace.tenant.id, actorId: job.createdBy || workspace.user.id, category: "media", metric: "downloads", units: 1, provider: dlProvider, metadata: { quality: job.quality, source: job.source || "anime" }, idempotencyKey: `anime-download:${job.id}` });
+    } catch (_) {}
     job.status = "done";
     job.finishedAt = Date.now();
     emit(job);
@@ -654,6 +674,7 @@ module.exports = {
   snapshot,
   emitter,
   getRuntimeDeps,
+  resetRuntimeChecks,
 };
 
 // Recover queued jobs and warm the media runtime only in production. Tests can

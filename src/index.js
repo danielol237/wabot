@@ -51,9 +51,35 @@ app.use((req, res, next) => {
 // Public root: the deployed product entry point is the anime catalog. The
 // legacy ARIA control site remains available through its existing API routes.
 app.get("/", (req, res) => res.redirect(302, "/anime"));
+
+// Small, dependency-aware readiness contract for Render and external monitors.
+// It intentionally exposes only operational state, never environment values or
+// provider credentials. `/healthz/live` stays green when an optional media
+// dependency is unavailable; `/healthz` is ready only when core media tooling
+// can be verified.
+app.get("/healthz/live", (req, res) => res.json({ ok: true, service: "aria" }));
+app.get("/healthz", async (req, res) => {
+  try {
+    const ajm = require("./tools/animeJobManager");
+    const runtimeDeps = await ajm.getRuntimeDeps({ refresh: req.query.refresh === "1" });
+    const mediaReady = !!(runtimeDeps.ytDlp && runtimeDeps.ffmpeg && runtimeDeps.ffprobe);
+    const ready = mediaReady;
+    res.status(ready ? 200 : 503).json({
+      ok: ready,
+      service: "aria",
+      build: process.env.RENDER_GIT_COMMIT || process.env.RENDER_GIT_COMMIT_SHA || "unknown",
+      whatsappReady: !!isReady,
+      media: runtimeDeps,
+    });
+  } catch (err) {
+    res.status(503).json({ ok: false, service: "aria", error: "health check failed" });
+  }
+});
 app.get("/aria-mark.png", (req, res) => res.sendFile(path.join(__dirname, "../assets/aria-mark-icon.png")));
 const websiteRouter = require("./website");
 app.use("/", websiteRouter);
+// Android Companion API; remains disabled until COMPANION_API_KEY is configured.
+app.use("/api/companion", require("./companion"));
 
 // Signed Atlas Sentinel webhooks — provider payloads are verified before they
 // enter the durable project brain. They remain opt-in through environment secrets
@@ -63,6 +89,8 @@ app.use("/webhooks/atlas", require("./tools/atlasWebhooks"));
 // Mount web dashboard
 const dashboardRouter = require("./dashboard");
 app.use("/dashboard", dashboardRouter);
+// Platform core and Revenue Engine APIs reuse the dashboard owner session and CSRF boundary.
+app.use("/api/platform", require("./platformRouter"));
 
 // ARIA Learner Portal — per-learner accounts (Google OAuth / email), each
 // student's own Learner Space + competition leaderboard. Own session cookie

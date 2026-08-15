@@ -24,7 +24,14 @@ DASHBOARD_PASSWORD=<choose a strong one>
 CEREBRAS_API_KEY=   # or GEMINI_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY
 ```
 
+## Render deployment contract
+
+For the existing Render service, set the build command to `bash build.sh`, the start command to `bash start.sh`, and the health check path to `/healthz`. The committed `render.yaml` records this contract for Blueprint-based deployments. The build script installs project-local `yt-dlp`, the matching JavaScript solver package, and `ffmpeg`/`ffprobe`, then fails the build if the runtime cannot be invoked. After deployment, check `/healthz?refresh=1`; `/healthz/live` is the lightweight process liveness check.
+
+If `/healthz` returns `503`, the response identifies whether `yt-dlp`, `ffmpeg`, or `ffprobe` is unavailable. Do not treat a catalog page or an official-watch link as proof that download delivery is operational; download readiness requires the media runtime and a validated authorized source.
+
 ## Start command per host
+- **Render**: build command `bash build.sh`; start command `bash start.sh`; health check `/healthz`.
 - **Bot-Hosting** (buildpack): reads `Procfile` → `web: npm start`; or set start cmd to `bash start.sh`
 - **Monkey Network / Quaxly / Clustr** (panel console): start command = `bash start.sh` (or `npm start`)
 - **Docker host**: `docker build -t aria . && docker run -p 3001:3001 --env-file .env aria`

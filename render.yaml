@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: wabot-ytal
+    runtime: node
+    plan: free
+    autoDeploy: true
+    buildCommand: bash build.sh
+    startCommand: bash start.sh
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 22.13.0
+      - key: ANIME_DISABLE_WORKER
+        value: "false"
+      - key: YTDLP_VERSION
+        value: 2026.7.4
+      - key: YTDLP_EJS_VERSION
+        value: 0.8.0
+      - key: ANIME_WHATSAPP_MAX_MB
+        value: "150"
+      - key: ANIME_PUBLIC_DOWNLOADS_PER_HOUR
+        value: "10"
+      - key: ANIME_PUBLIC_ACTIVE_LIMIT
+        value: "3"
+      - key: ANIME_PUBLIC_QUEUE_LIMIT
+        value: "100"

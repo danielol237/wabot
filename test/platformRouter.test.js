@@ -30,6 +30,8 @@ test("platform router: authenticated owner can read the workspace overview", asy
     assert.equal(body.tenant.name, "ARIA Workspace");
     assert.ok(body.business);
     assert.ok(Array.isArray(body.payments));
+    assert.ok(Array.isArray(body.integrations));
+    assert.ok(body.integrations.some((item) => item.id === "anime-media"));
   } finally {
     server.close();
   }

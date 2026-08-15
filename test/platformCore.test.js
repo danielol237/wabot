@@ -74,6 +74,9 @@ test("platform core: Revenue Engine records tenant-scoped customers, leads, foll
   assert.equal(summary.leads, 1);
   assert.equal(summary.revenue, 450000);
   assert.equal(summary.byStage.qualified, 1);
+  assert.equal(summary.forecast.pipelineValue, 450000);
+  assert.equal(summary.forecast.weightedPipeline, 382500);
+  assert.equal(summary.forecast.openLeads, 1);
 });
 
 test.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));

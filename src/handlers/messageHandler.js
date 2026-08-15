@@ -45,23 +45,35 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // Contacts are normalized into platform identities, while message usage is
   // attributed to the owner workspace during the transitional single-tenant
   // phase. This does not grant contacts tenant membership or business access.
+  let platformContext = null;
+  let platformActor = null;
+  let revenueContext = null;
   try {
     const platform = require("../core");
-    const actor = platform.identity.ensureUser({
-      displayName: senderName || senderJid || "WhatsApp contact",
-      identity: { provider: "whatsapp", value: senderJid || chatId },
-      metadata: { lastChatId: chatId, lastSeenAt: new Date().toISOString() },
-    });
-    const workspace = platform.bootstrapOwnerWorkspace();
-    if (workspace && msg.key?.id) {
+    const bridge = require("../core/productBridge");
+    const revenue = bridge.revenueContextForWhatsApp({ senderJid: senderJid || chatId, senderName, chatId });
+    platformContext = revenue.context;
+    platformActor = revenue.actor;
+    revenueContext = revenue;
+    if (platformContext && platformActor && msg.key?.id) {
       platform.usage.record({
-        tenantId: workspace.tenant.id,
-        actorId: actor.id,
+        tenantId: platformContext.tenantId,
+        actorId: platformActor.id,
         category: "messages",
         metric: "inbound",
         units: 1,
         metadata: { chatId, isGroup, source: "whatsapp" },
         idempotencyKey: `whatsapp:${msg.key.id}`,
+      });
+      bridge.recordProductActivity({
+        product: "whatsapp",
+        action: "message.received",
+        context: platformContext,
+        actorId: platformActor.id,
+        aggregateType: "conversation",
+        aggregateId: chatId,
+        metadata: { isGroup, hasText: Boolean(text), messageId: msg.key.id },
+        idempotencyKey: `whatsapp-message:${msg.key.id}`,
       });
     }
   } catch (_) {}
@@ -69,12 +81,25 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // ── Revenue Engine observer ────────────────────────────────
   // Only clear private sales-intent messages are captured. This creates a
   // customer/lead/conversation record but never sends a sales message by itself.
+  let revenueObservation = null;
   try {
-    require("../core/business/observer").observeWhatsAppMessage({ text, senderJid, senderName, chatId, isGroup });
+    revenueObservation = require("../core/business/observer").observeWhatsAppMessage({ text, senderJid, senderName, chatId, isGroup });
+    if (revenueObservation?.observed && platformContext) {
+      require("../core/productBridge").recordProductActivity({
+        product: "revenue-engine",
+        action: "sales-intent.observed",
+        context: platformContext,
+        actorId: platformActor?.id,
+        aggregateType: "lead",
+        aggregateId: revenueObservation.lead?.id,
+        metadata: { customerId: revenueObservation.customer?.id, createdLead: revenueObservation.createdLead, channel: "whatsapp" },
+        idempotencyKey: msg.key?.id ? `revenue-observed:${msg.key.id}` : null,
+      });
+    }
   } catch (_) {}
 
   // ── Build context ──────────────────────────────────────────
-  const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins, msg };
+  const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins, msg, platformContext, platformActor, revenueContext, revenueObservation };
 
   if (isGroup) {
     const protection = checkGroupProtection({ text, msg, chatId, senderJid, isGroup });

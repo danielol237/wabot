@@ -359,6 +359,19 @@ function renderBusinessPane() {
   </div>`;
 }
 
+function renderIntegrationsPane(whatsappReady = false) {
+  let integrations = [];
+  try { integrations = require("./core").integrations.listIntegrations({ whatsappReady }); } catch (_) {}
+  const readyCount = integrations.filter((item) => item.ready).length;
+  const rows = integrations.map((item) => `<div class="row"><span class="k">${esc(item.label)}</span><span class="v"><span class="badge ${item.ready ? "b-green" : item.mode === "fallback" || item.mode === "sandbox" ? "b-amber" : "b-muted"}">${esc(item.mode)}</span></span></div>`).join("");
+  const details = integrations.map((item) => `<div class="feed-item"><div class="feed-ico">${item.ready ? "✓" : "·"}</div><div class="feed-body"><div class="t">${esc(item.label)}</div><div class="s">${esc(item.nextStep)}</div></div></div>`).join("");
+  return `<div class="pane" id="pane-integrations">
+    <div class="page-title">Integrations</div><div class="page-sub">cross-product readiness · safe defaults · next activation steps</div>
+    <div class="hero command-hero"><div class="hero-top"><div><div class="kicker">ARIA PLATFORM SURFACE MAP</div><h2>${readyCount}/${integrations.length} connections ready</h2><p class="sub">A single operational view of the products and connectors that feed identity, usage, events, Revenue Engine workflows, and delivery.</p></div><span class="badge b-accent">owner console</span></div></div>
+    <div class="grid2" style="margin-top:16px"><div class="card"><div class="h">Readiness</div>${rows || `<div class="empty">No integration data available.</div>`}</div><div class="card"><div class="h">What to do next</div>${details || `<div class="empty">No activation steps available.</div>`}</div></div>
+  </div>`;
+}
+
 function renderHealthPane() {
   let src = [], prov = [], srcChecked = null, provChecked = null;
   try { const s = require("./tools/sourceHealth").getHealth(); src = s.results || []; srcChecked = s.lastCheckedAt; } catch (_) {}
@@ -977,7 +990,8 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="sb-group">Workspace</div>
     ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">01</span><span>Command center</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">01</span><span>Command center</span></div>`}
     <div class="navitem" data-pane="business"><span class="ico">02</span><span>Business OS</span></div>
-    <a class="navitem" href="/dashboard/atlas"><span class="ico">03</span><span>Atlas projects</span></a>
+    <div class="navitem" data-pane="integrations"><span class="ico">03</span><span>Integrations</span></div>
+    <a class="navitem" href="/dashboard/atlas"><span class="ico">04</span><span>Atlas projects</span></a>
     <div class="navitem" data-pane="activity"><span class="ico">04</span><span>Activity</span></div>
     <div class="navitem" data-pane="analytics"><span class="ico">05</span><span>Analytics</span></div>
     <div class="sb-group">Intelligence</div>
@@ -1013,7 +1027,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 const CSRF=${JSON.stringify(csrf || "")};
 const STANDALONE_PANE=${JSON.stringify(standalonePane)};
 const INITIAL_PANE=${JSON.stringify(initialPane)};
-const titles={home:['Command',"ARIA core · live telemetry"],business:['Business OS','customers · pipeline · revenue'],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
+const titles={home:['Command',"ARIA core · live telemetry"],business:['Business OS','customers · pipeline · revenue'],integrations:['Integrations','cross-product readiness · safe defaults'],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 const htmlEscClient=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function showPane(p){
@@ -1684,6 +1698,7 @@ router.get("/", checkAuth, (req, res) => {
     const active = d.activeMissions[0] || d.missions[0];
     let content = renderLiveStrip(ls);
     content += renderBusinessPane();
+    content += renderIntegrationsPane(Boolean(req.app.locals.whatsappReady));
     content += renderAnalyticsPane(a);
     content += renderAcademyPane(ad, selfUid, profile);
     try {
@@ -1764,7 +1779,7 @@ router.get("/", checkAuth, (req, res) => {
     content += renderHealthPane();
     content += renderLogsPane();
 
-    const requestedPane = ["home","business","activity","analytics","brain","memory","media","academy","learnerspace","missions","downloads","sources","incidents","health","logs","system","household","admin"].includes(String(req.query.pane || "")) ? String(req.query.pane) : "home";
+    const requestedPane = ["home","business","integrations","activity","analytics","brain","memory","media","academy","learnerspace","missions","downloads","sources","incidents","health","logs","system","household","admin"].includes(String(req.query.pane || "")) ? String(req.query.pane) : "home";
     res.send(renderPage("Home", content, false, false, csrfFor(req), false, requestedPane));
   } catch (e) {
     res.send(renderPage("Error", `<div class="card"><div class="empty">${e.message}</div></div>`));

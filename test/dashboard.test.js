@@ -87,6 +87,8 @@ test("dashboard: authenticated GET / renders the cockpit", async () => {
   assert.strictEqual(r.status, 200);
   assert.ok(r.body.includes("Command"), "should render Command pane");
   assert.ok(r.body.includes("Business OS"), "should render Business OS nav and pane");
+  assert.ok(r.body.includes("Integrations"), "should render Integrations nav and pane");
+  assert.ok(r.body.includes("ARIA PLATFORM SURFACE MAP"), "should render integration readiness content");
   assert.ok(r.body.includes("Revenue Engine"), "should render Revenue Engine content");
   assert.ok(r.body.includes("Brain"), "should render Brain nav");
   assert.ok(r.body.includes("pane-sources"), "should render Sources pane");

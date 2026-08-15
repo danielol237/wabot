@@ -437,6 +437,19 @@ async function routeMessage(sock, msg, context) {
         try {
           try { require("../tools/dashboardTelemetry").record("command", { detail: cmd.name }); } catch (_) {}
           await cmd.handler(sock, msg, args, { ...context, pasquaCommand: cmd.name });
+          try {
+            require("../core/productBridge").recordProductActivity({
+              product: "whatsapp",
+              action: "command.executed",
+              context: context.platformContext,
+              actorId: context.platformActor?.id,
+              aggregateType: "command",
+              aggregateId: cmd.name,
+              metadata: { command: cmd.name, source: "prefix" },
+              usage: { category: "actions", metric: "commands", units: 1, metadata: { command: cmd.name } },
+              idempotencyKey: msg.key?.id ? `whatsapp-command:${msg.key.id}` : null,
+            });
+          } catch (_) {}
           try { require("./eventLog").track("command", cmd.name + (args ? " " + args.slice(0, 40) : "")); } catch (_) {}
         } catch (err) {
           // Report the real error so we (and the user) can see exactly what failed
@@ -502,6 +515,19 @@ async function routeMessage(sock, msg, context) {
       try { require("../tools/dashboardTelemetry").record("natural_action", { detail: natural.intent }); } catch (_) {}
       try { const selfModel = require("../tools/ariaSelfModel"); selfModel.observe(senderJid, text); selfModel.recordAction(natural.intent, natural.args || text); } catch (_) {}
       await natural.handler(sock, msg, natural.args || text, { ...context, pasquaCommand: natural.command?.name || natural.intent });
+      try {
+        require("../core/productBridge").recordProductActivity({
+          product: "whatsapp",
+          action: "natural-action.executed",
+          context: context.platformContext,
+          actorId: context.platformActor?.id,
+          aggregateType: "action",
+          aggregateId: natural.intent,
+          metadata: { intent: natural.intent, source: "natural-language" },
+          usage: { category: "actions", metric: "natural-language", units: 1, metadata: { intent: natural.intent } },
+          idempotencyKey: msg.key?.id ? `whatsapp-natural:${msg.key.id}` : null,
+        });
+      } catch (_) {}
       try { require("./eventLog").track("natural_action", natural.intent); } catch (_) {}
     } catch (err) {
       const { reply: _rp } = require("./baileysHelpers");
@@ -2258,14 +2284,29 @@ async function handleAIResponse(sock, msg, text, ctx) {
     }
   } catch (_) {}
   const personalizationContext = "\n\n[Personalization] Learn their name if they give it, match their communication style naturally, and remember important things they share.\n";
+  let revenueContextText = "";
+  try { revenueContextText = require("../core/productBridge").formatRevenueContext(ctx.revenueContext); } catch (_) {}
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: profileCtx.context + ownerContext + moodContext + personaContext + toneContext + mediaContext + personalizationContext + researchContext + selfModelContext,
+    userContext: profileCtx.context + ownerContext + moodContext + personaContext + toneContext + mediaContext + personalizationContext + researchContext + selfModelContext + revenueContextText,
     preferences: profileCtx.profile.preferences,
     facts: profileCtx.profile.facts,
   });
 
   if (response) {
+    try {
+      require("../core/productBridge").recordProductActivity({
+        product: "whatsapp",
+        action: "ai.responded",
+        context: ctx.platformContext,
+        actorId: ctx.platformActor?.id,
+        aggregateType: "conversation",
+        aggregateId: ctx.chatId,
+        metadata: { intent: intent || "conversation", providerResponse: true },
+        usage: { category: "ai", metric: "messages", units: 1, metadata: { intent: intent || "conversation" } },
+        idempotencyKey: msg.key?.id ? `whatsapp-ai:${msg.key.id}` : null,
+      });
+    } catch (_) {}
     // Remember callable facts (running jokes, likes) for future callbacks
     if (tone === "up" && text.length > 20) rememberCallable(ctx.senderJid, ctx.senderName + " said: \"" + text.slice(0, 60) + "\"");
     bleedMood(ctx.senderJid, moodData.mood);

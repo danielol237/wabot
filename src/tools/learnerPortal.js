@@ -18,6 +18,8 @@ const path = require("path");
 
 const router = express.Router();
 const linking = require("./portalLinking");
+const platform = require("../core");
+const { recordProductActivity } = require("../core/productBridge");
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -37,6 +39,32 @@ function linkedUid(accountId) {
 }
 function issuePortalToken(account) {
   return signToken({ sub: account.id, name: account.name, email: account.email, exp: Date.now() + 7 * 86400000 });
+}
+
+function learnerPlatformContext(account) {
+  if (!account?.id) return null;
+  const provider = account.googleSub ? "google" : "academy-email";
+  const value = account.googleSub || account.email || account.id;
+  const user = platform.identity.ensureUser({
+    displayName: account.name || account.email || "ARIA learner",
+    identity: { provider, value },
+    metadata: { academyAccountId: account.id, product: "academy" },
+  });
+  const tenant = platform.tenants.ensureTenant({
+    slug: `academy-${account.id}`,
+    name: `${account.name || account.email || "Learner"} Academy Space`,
+    ownerUserId: user.id,
+    metadata: { product: "academy", academyAccountId: account.id },
+  });
+  return platform.contextFor({ userId: user.id, tenantId: tenant.id, role: "owner", source: "academy-portal" });
+}
+
+function recordLearnerActivity(account, action, metadata = {}, usage = null) {
+  try {
+    return recordProductActivity({ product: "academy", action, context: learnerPlatformContext(account), aggregateType: "learner", aggregateId: account?.id, metadata, usage });
+  } catch (_) {
+    return { recorded: false };
+  }
 }
 
 // Cookie reader (populates req.cookies) — must run before any route uses it.
@@ -165,6 +193,8 @@ function portalAuth(req, res, next) {
   const account = payload?.sub ? accounts[payload.sub] : null;
   if (!payload || !account) return res.redirect("/portal/login?error=session-invalid");
   req.learner = { ...payload, uid: linkedUid(account.id), linked: !!linking.getLinkedUid(account.id) };
+  req.platformContext = learnerPlatformContext(account);
+  recordLearnerActivity(account, "page.viewed", { path: req.path }, { category: "academy", metric: "page-views", units: 1, metadata: { path: req.path } });
   next();
 }
 
@@ -229,6 +259,7 @@ router.get("/auth/google/callback", async (req, res) => {
     oauthStage = "session";
     const token = issuePortalToken(learner);
     res.cookie("aria_portal", token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
+    recordLearnerActivity(learner, "auth.signed-in", { provider: "google" }, { category: "academy", metric: "sign-ins", units: 1, metadata: { provider: "google" } });
     return res.redirect("/portal");
   } catch (e) {
     const detail = String(e?.response?.data?.error || e?.response?.data?.error_description || e?.message || "").toLowerCase();
@@ -262,6 +293,7 @@ router.post("/auth/email", express.json({ limit: "16kb" }), (req, res) => {
     const learner = accounts[id];
     const token = issuePortalToken(learner);
     res.cookie("aria_portal", token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
+    recordLearnerActivity(learner, "auth.registered", { provider: "email" }, { category: "academy", metric: "registrations", units: 1, metadata: { provider: "email" } });
     return res.json({ ok: true });
   }
   // login
@@ -269,6 +301,7 @@ router.post("/auth/email", express.json({ limit: "16kb" }), (req, res) => {
   if (!verifyPw(password, existing.passwordHash)) { recordAuthAttempt(req); return res.status(401).json({ error: "wrong password" }); }
   const token = issuePortalToken(existing);
   res.cookie("aria_portal", token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: "lax", maxAge: 7 * 86400000, path: "/portal" });
+  recordLearnerActivity(existing, "auth.signed-in", { provider: "email" }, { category: "academy", metric: "sign-ins", units: 1, metadata: { provider: "email" } });
   return res.json({ ok: true });
 });
 
@@ -277,6 +310,8 @@ router.post("/link", portalAuth, (req, res) => {
   const uid = linking.consumeCode(req.body.code, req.learner.sub, req.ip || req.socket?.remoteAddress || "unknown");
   if (!uid) return res.redirect("/portal?error=invalid-link-code");
   linking.linkAccount(req.learner.sub, uid);
+  const account = accounts[req.learner.sub];
+  recordLearnerActivity(account, "progress.linked", { learnerUid: uid }, { category: "academy", metric: "progress-links", units: 1 });
   res.redirect("/portal?linked=1");
 });
 

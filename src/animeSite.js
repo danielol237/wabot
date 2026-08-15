@@ -10,6 +10,8 @@ const { resolveEpisode } = require("./tools/sourceResolver");
 const { enqueueAnimeJob, retryJob, getJob, getOwnerStats, findActiveJob, snapshot: animeSnapshot } = require("./tools/animeJobManager");
 const { issueMediaToken, verifyMediaToken, issueFileToken, verifyFileToken, validateMediaTarget } = require("./utils/mediaAccess");
 const { error: logError } = require("./utils/logger");
+const { createHash } = require("crypto");
+const { recordProductActivity } = require("./core/productBridge");
 
 function safePageError(res, scope, err) {
   logError(`[${scope}]`, err?.stack || err?.message || err);
@@ -92,6 +94,24 @@ function publicDownloadQuota(req, ownerId) {
 
 function publicJobAllowed(job, ownerId) {
   return !!job && !!job.ownerId && job.ownerId === ownerId;
+}
+
+function recordAnimeActivity(req, action, metadata = {}, usage = null) {
+  try {
+    const session = publicOwnerId(req, null);
+    const sessionHash = createHash("sha256").update(session).digest("hex").slice(0, 16);
+    return recordProductActivity({
+      product: "anime",
+      action,
+      source: "anime-public",
+      aggregateType: "anime-session",
+      aggregateId: sessionHash,
+      metadata: { sessionHash, ...metadata },
+      usage: usage ? { ...usage, metadata: { sessionHash, ...(usage.metadata || {}) } } : null,
+    });
+  } catch (_) {
+    return { recorded: false };
+  }
 }
 
 function providerLabel(provider) {
@@ -293,6 +313,7 @@ async function downloadPage(req, res) {
 }
 
 router.get("/proxy", async (req, res) => {
+  recordAnimeActivity(req, "playback.requested", { route: "proxy" }, { category: "media", metric: "playback-requests", units: 1 });
   const payload = verifyMediaToken(req.query.t);
   if (!payload) return res.status(401).send("This playback link has expired. Open the episode again.");
   const target = await validateMediaTarget(payload.url);
@@ -312,14 +333,14 @@ router.get("/proxy", async (req, res) => {
   upstream.on("error", () => { if (!res.headersSent) res.status(502).send("Media source is temporarily unavailable."); else res.end(); });
 });
 
-router.get("/", async (req, res) => { try { res.send(await homePage()); } catch (e) { safePageError(res, "anime-home", e); } });
-router.get("/search", async (req, res) => { try { res.send(await searchPage(req.query.q || "")); } catch (e) { safePageError(res, "anime-search", e); } });
-router.get("/trending", async (req, res) => { try { res.send(await trendingPage()); } catch (e) { safePageError(res, "anime-trending", e); } });
-router.get("/latest", async (req, res) => { try { res.send(await latestPage()); } catch (e) { safePageError(res, "anime-latest", e); } });
-router.get("/browse", async (req, res) => { try { res.send(await browsePage(req)); } catch (e) { safePageError(res, "anime-browse", e); } });
-router.get("/title/:id", async (req, res) => { try { res.send(await titlePage(req)); } catch (e) { safePageError(res, "anime-title", e); } });
-router.get("/watch/:id", async (req, res) => { try { res.send(await watchPage(req)); } catch (e) { safePageError(res, "anime-watch", e); } });
-router.get("/dl/:id", async (req, res) => { try { const page = await downloadPage(req, res); if (!res.headersSent && page) res.send(page); } catch (e) { if (!res.headersSent) safePageError(res, "anime-download", e); } });
+router.get("/", async (req, res) => { recordAnimeActivity(req, "catalog.viewed", { route: "home" }, { category: "media", metric: "catalog-views", units: 1 }); try { res.send(await homePage()); } catch (e) { safePageError(res, "anime-home", e); } });
+router.get("/search", async (req, res) => { recordAnimeActivity(req, "catalog.searched", { route: "search", hasQuery: Boolean(String(req.query.q || "").trim()) }, { category: "media", metric: "searches", units: 1 }); try { res.send(await searchPage(req.query.q || "")); } catch (e) { safePageError(res, "anime-search", e); } });
+router.get("/trending", async (req, res) => { recordAnimeActivity(req, "catalog.viewed", { route: "trending" }, { category: "media", metric: "catalog-views", units: 1 }); try { res.send(await trendingPage()); } catch (e) { safePageError(res, "anime-trending", e); } });
+router.get("/latest", async (req, res) => { recordAnimeActivity(req, "catalog.viewed", { route: "latest" }, { category: "media", metric: "catalog-views", units: 1 }); try { res.send(await latestPage()); } catch (e) { safePageError(res, "anime-latest", e); } });
+router.get("/browse", async (req, res) => { recordAnimeActivity(req, "catalog.viewed", { route: "browse" }, { category: "media", metric: "catalog-views", units: 1 }); try { res.send(await browsePage(req)); } catch (e) { safePageError(res, "anime-browse", e); } });
+router.get("/title/:id", async (req, res) => { recordAnimeActivity(req, "title.viewed", { route: "title", titleId: String(req.params.id).slice(0, 120) }, { category: "media", metric: "title-views", units: 1 }); try { res.send(await titlePage(req)); } catch (e) { safePageError(res, "anime-title", e); } });
+router.get("/watch/:id", async (req, res) => { recordAnimeActivity(req, "watch.viewed", { route: "watch", titleId: String(req.params.id).slice(0, 120) }, { category: "media", metric: "watch-views", units: 1 }); try { res.send(await watchPage(req)); } catch (e) { safePageError(res, "anime-watch", e); } });
+router.get("/dl/:id", async (req, res) => { recordAnimeActivity(req, "download.requested", { route: "download", titleId: String(req.params.id).slice(0, 120), quality: normalizeQuality(req.query.quality) }, { category: "media", metric: "download-requests", units: 1 }); try { const page = await downloadPage(req, res); if (!res.headersSent && page) res.send(page); } catch (e) { if (!res.headersSent) safePageError(res, "anime-download", e); } });
 router.get("/file/:id", (req, res) => {
   try {
     const jobId = String(req.params.id);
@@ -330,7 +351,9 @@ router.get("/file/:id", (req, res) => {
     const filePath = job?.result?.filePath;
     if (!job || job.status !== "done" || !filePath || !fs.existsSync(filePath)) return res.status(404).send("File not found or no longer available.");
     const safe = `${job.name || "anime"}-ep${job.episode || ""}.mp4`.replace(/[^a-z0-9._-]+/gi, "_");
-    res.download(filePath, safe, { headers: { "Content-Type": "video/mp4" } });
+    res.download(filePath, safe, { headers: { "Content-Type": "video/mp4" } }, (err) => {
+      if (!err) recordAnimeActivity(req, "download.delivered", { route: "file", jobId: job.id }, { category: "media", metric: "download-deliveries", units: 1 });
+    });
   } catch (e) { safePageError(res, "anime-file", e); }
 });
 

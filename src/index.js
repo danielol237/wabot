@@ -413,9 +413,10 @@ async function startBot() {
     }
   });
 
-  // Welcome / leave messages when group membership changes
+  // Welcome / leave messages and PASQUA group protections when membership changes
   sock.ev.on("group-participants.update", async (update) => {
     try {
+      await require("./tools/groupProtection").handleParticipantUpdate(sock, update);
       const { getGroupSettings } = require("./utils/groupSettings");
       const settings = getGroupSettings(update.id);
 

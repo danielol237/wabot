@@ -3,6 +3,8 @@
 
 const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNote, downloadMediaFromMsg, isBotMentioned } = require("../utils/baileysHelpers");
 const { routeMessage, triggeredByName } = require("../utils/commandRouter");
+const { checkGroupProtection } = require("../tools/groupProtection");
+const { handleWcgReply } = require("../tools/pasquaCommands");
 const { isBanned, isMuted, isOwner: checkOwner } = require("../utils/permissions");
 const { trackInteraction } = require("../utils/userMemory");
 const { getMemory, saveMemory } = require("../utils/memory");
@@ -40,7 +42,21 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   try { require("../tools/dashboardTelemetry").record("message"); } catch (_) {}
 
   // ── Build context ──────────────────────────────────────────
-  const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins };
+  const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins, msg };
+
+  if (isGroup) {
+    const protection = checkGroupProtection({ text, msg, chatId, senderJid, isGroup });
+    if (protection) {
+      if (protection.action === "delete") {
+        try { await sock.sendMessage(chatId, { delete: msg.key }); } catch (_) {}
+      }
+      await reply(sock, msg, `🛡️ ${protection.reason}`);
+      return;
+    }
+    try {
+      if (await handleWcgReply(sock, msg, text, context)) return;
+    } catch (_) {}
+  }
 
   // ── Group message stats ────────────────────────────────────
   // Count every group message (persisted) so !top/!active/!inactive/!purge

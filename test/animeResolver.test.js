@@ -147,10 +147,26 @@ test("resolver: AniList unavailable must NOT block provider discovery (regressio
   assert.ok(!src.includes("if (!canon.ok) {\\n    report.error = \\\"canonical"),
     "removed the hard canonical gate that returned before discovery");
 
-  // AnimePahe must be in the unified DISCOVERERS pipeline.
+  // The resolver must expose the operator-controlled authorized manifest path.
   const sr = require("../src/tools/sourceResolver");
-  assert.ok(sr.DISCOVERERS.some((d) => d.provider === "animepahe"), "animepahe is a discoverer");
-  assert.ok(sr.DISCOVERERS.length >= 4, "all 4 providers in one pipeline");
+  assert.ok(sr.DISCOVERERS.some((d) => d.provider === "authorized"), "authorized manifest is a discoverer");
+  assert.ok(!sr.DISCOVERERS.some((d) => d.provider === "animepahe"), "deprecated AnimePahe path is not an active discoverer");
+  assert.ok(sr.DISCOVERERS.length >= 4, "authorized source plus maintained fallback providers are registered");
+});
+
+test("resolver: authorized manifest selects exact or closest configured quality", () => {
+  const sr = require("../src/tools/sourceResolver");
+  const previous = process.env.ARIA_ANIME_AUTHORIZED_SOURCES_JSON;
+  process.env.ARIA_ANIME_AUTHORIZED_SOURCES_JSON = JSON.stringify({
+    "One Piece": { episodes: { "1": { "360": { url: "https://media.example/one-piece-360.mp4" }, "480": { url: "https://media.example/one-piece-480.mp4" } } } },
+  });
+  try {
+    assert.strictEqual(sr.pickAuthorizedDownload("One Piece", 1, "360").url, "https://media.example/one-piece-360.mp4");
+    assert.strictEqual(sr.pickAuthorizedDownload("One Piece", 1, "720").url, "https://media.example/one-piece-480.mp4");
+  } finally {
+    if (previous === undefined) delete process.env.ARIA_ANIME_AUTHORIZED_SOURCES_JSON;
+    else process.env.ARIA_ANIME_AUTHORIZED_SOURCES_JSON = previous;
+  }
 });
 
 test("resolver: parseSeason extracts season from title (fixes omnisave hardcoded s1)", () => {

@@ -139,6 +139,8 @@ app.use("/dashboard/anime", checkAuth, animeBrowserRouter);
 // ARIA Anime — standalone PUBLIC streaming/download site (separate from dashboard).
 const animeSiteRouter = require("./animeSite");
 app.use("/anime", animeSiteRouter);
+// ARIA Movies — curated OTT-style movie discovery with official availability guidance.
+app.use("/movies", require("./movieSite"));
 
 app.get("/preview", checkAuth, (req, res) => {
   const projectsDir = path.join(__dirname, "../data/projects");

@@ -57,8 +57,14 @@ test("platform core: Revenue Engine records tenant-scoped customers, leads, foll
   const followup = crm.scheduleFollowup(context, { leadId: lead.id, message: "Following up on the iPhone 15.", scheduledAt: new Date(Date.now() + 3600000).toISOString() });
   const dueFollowup = crm.scheduleFollowup(context, { leadId: lead.id, message: "A due proposal.", scheduledAt: new Date(Date.now() - 60000).toISOString() });
   const order = crm.createOrder(context, { customerId: customer.id, leadId: lead.id, total: 450000, status: "paid" });
-  const summary = crm.summary(context);
   const autopilot = require("../src/core/business/autopilot");
+  const proposal = autopilot.proposeReply(context, { customerId: customer.id, leadId: lead.id, question: "What is your installment finance policy?" });
+  assert.equal(proposal.approvalRequired, true);
+  assert.equal(proposal.outboundSent, false);
+  assert.ok(proposal.sources.some((source) => source.id === knowledge.id));
+  const approvedDraft = autopilot.approveReply(context, proposal.draft.id);
+  assert.equal(approvedDraft.status, "approved");
+  const summary = crm.summary(context);
   const recommendations = autopilot.recommendations(context);
   assert.ok(recommendations.dueFollowups.some((item) => item.followup.id === dueFollowup.id));
   const approved = autopilot.approveFollowup(context, dueFollowup.id);

@@ -19,7 +19,9 @@ The core currently provides normalized identities, tenants and memberships, role
 | `src/core/billing` | Plans, entitlements, subscriptions, payment intents, webhook signatures, and provider status. | Transitional atomic JSON repositories |
 | `src/core/business/crm.js` | Customers, conversations, leads, knowledge, follow-ups, orders, and revenue summary. | Transitional atomic JSON repository |
 | `src/core/business/autopilot.js` | Lead qualification, hot-lead recommendations, due-follow-up proposals, approval, and gated execution. | Shared CRM repository plus event backbone |
+| `src/core/business/observer.js` | Capture only clear private WhatsApp sales intent into customers, leads, and conversations. | Shared CRM repository |
 | `src/platformRouter.js` | Authenticated owner-facing overview and Revenue Engine APIs. | Existing dashboard session and CSRF contract |
+| `src/paymentWebhooks.js` | Verify and idempotently store MTN/Orange callbacks without guessing settlement semantics. | Shared payment/event repositories |
 
 ## Usage bridges
 
@@ -47,9 +49,13 @@ The existing Express application now exposes:
 | `GET /api/platform/plans` | Authenticated plan catalog. |
 | `GET /api/platform/business/:type` | Authenticated tenant-scoped business records. |
 | `POST/PATCH /api/platform/...` | Authenticated, CSRF-protected Revenue Engine mutations. |
+| `POST /webhooks/payments/mtn` | Signature-verified, idempotent MTN callback ingestion. |
+| `POST /webhooks/payments/orange` | Signature-verified, idempotent Orange callback ingestion. |
 
 ## Migration rule
 
 Existing product modules must not write platform data directly. New integrations should resolve a platform context, check a capability, perform a tenant-scoped operation, publish a domain event, and record usage where applicable. Existing JSON stores remain in place until repository adapters and migration checks prove that a durable database can take over without loss.
+
+The dashboard now exposes a first-class Business OS pane with plan, usage, customer, lead, pipeline, revenue, and attention-queue visibility. Clear private WhatsApp buying intent is observed conservatively; it creates or updates a lead and conversation but never sends an outbound sales message. Payment callbacks are accepted only with a configured provider secret, and duplicate event IDs are acknowledged without replaying side effects.
 
 The next infrastructure step is to replace the transitional repositories with PostgreSQL-backed repositories, add a shared job/event delivery mechanism, and keep the current JSON adapters for rollback and local development until the production migration is complete.

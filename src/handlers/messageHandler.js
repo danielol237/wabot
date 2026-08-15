@@ -66,6 +66,13 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     }
   } catch (_) {}
 
+  // ── Revenue Engine observer ────────────────────────────────
+  // Only clear private sales-intent messages are captured. This creates a
+  // customer/lead/conversation record but never sends a sales message by itself.
+  try {
+    require("../core/business/observer").observeWhatsAppMessage({ text, senderJid, senderName, chatId, isGroup });
+  } catch (_) {}
+
   // ── Build context ──────────────────────────────────────────
   const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins, msg };
 

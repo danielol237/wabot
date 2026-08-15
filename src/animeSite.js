@@ -24,7 +24,7 @@ function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-const PROVIDER_LABEL = { jikan: "MAL", anilist: "AniList", consumet: "Consumet", animepahe: "AnimePahe", gogoanime: "Gogoanime", omnisave: "OmniSave" };
+const PROVIDER_LABEL = { jikan: "MAL", anilist: "AniList", consumet: "Consumet", animepahe: "AnimePahe", gogoanime: "Gogoanime", omnisave: "OmniSave", curated: "Featured" };
 const QUALITY_OPTIONS = ["best", "360", "480", "720", "1080"];
 function normalizeQuality(value) { const q = String(value || "best").toLowerCase(); return QUALITY_OPTIONS.includes(q) ? q : "best"; }
 function qualityLabel(q) { return q === "best" ? "Auto" : `${q}p`; }
@@ -125,8 +125,34 @@ function officialWatchLinks(details) {
   return `<section class="official-links"><div><span class="eyebrow">Where to watch</span><h3>Official streaming options</h3><p>Availability depends on your region and subscription. ARIA sends you to the service instead of exposing an unverified mirror.</p></div><div class="official-link-grid">${unique.map((link) => `<a class="official-link" href="${esc(link.url)}" target="_blank" rel="noopener noreferrer"><span>${esc(link.site || "Official service")}</span><span aria-hidden="true">↗</span></a>`).join("")}</div></section>`;
 }
 
+function animeContext(provider, details = {}, extra = {}) {
+  const params = new URLSearchParams({ prov: provider || "anilist" });
+  if (provider === "omnisave" || provider === "curated") {
+    if (details.title) params.set("title", details.title);
+    if (details.cover) params.set("cover", details.cover);
+    if (details.year) params.set("year", details.year);
+    if (details.rating) params.set("rating", details.rating);
+    if (details.detailPath) params.set("detail", details.detailPath);
+  }
+  for (const [key, value] of Object.entries(extra)) if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
+  return params;
+}
+
 function titleHref(item) {
-  return `/anime/title/${encodeURIComponent(item.id)}?prov=${encodeURIComponent(item.provider || "anilist")}`;
+  const provider = item.provider || "anilist";
+  const params = new URLSearchParams({ prov: provider });
+  if (provider === "omnisave" || provider === "curated") {
+    if (item.title) params.set("title", item.title);
+    if (item.cover) params.set("cover", item.cover);
+    if (item.year) params.set("year", item.year);
+    if (item.rating) params.set("rating", item.rating);
+    if (item.detailPath) params.set("detail", item.detailPath);
+  }
+  return `/anime/title/${encodeURIComponent(item.id)}?${params.toString()}`;
+}
+
+function titleContextHref(id, provider, details = {}, extra = {}) {
+  return `/anime/title/${encodeURIComponent(id)}?${animeContext(provider, details, extra).toString()}`;
 }
 
 function button(href, label, tone = "primary", extra = "") {
@@ -156,20 +182,24 @@ html{background:var(--bg)}body{background:radial-gradient(circle at 90% 0%,#f3ea
 @media(max-width:680px){.quick-start{grid-template-columns:1fr;padding:18px}.quick-actions{justify-content:flex-start}.quick-actions .btn{flex:1}.quality-menu-pop{right:auto;left:0}.official-links{grid-template-columns:1fr;padding:16px}.official-link-grid{grid-template-columns:1fr 1fr}}
 .theme-toggle{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:8px 11px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--muted);font:inherit;font-size:11px;font-weight:850;cursor:pointer;white-space:nowrap}.theme-toggle:hover{border-color:var(--accent);color:var(--accent)}.theme-toggle .theme-icon{font-size:14px;line-height:1}
 :root[data-theme="dark"]{--bg:#0c0e13;--surface:#141821;--surface-2:#1a202b;--surface-3:#232b38;--line:#2b3544;--text:#f6f7fb;--muted:#aeb7c7;--subtle:#7f8a9d;--accent:#c9a7ff;--accent-2:#ff8b9a;--ok:#55d5b4;--warn:#f4c96a;--danger:#ff8798;--shadow:0 20px 60px rgba(0,0,0,.32)}:root[data-theme="dark"] body{background:radial-gradient(850px 480px at 90% 0,#222036,transparent 64%),radial-gradient(700px 400px at -10% 90%,#102a2a,transparent 58%),var(--bg)}:root[data-theme="dark"] .top{background:rgba(12,14,19,.9);border-color:rgba(43,53,68,.9)}:root[data-theme="dark"] .brand-mark{background:#1b1625;box-shadow:0 8px 24px rgba(201,167,255,.16)}:root[data-theme="dark"] .search input,:root[data-theme="dark"] .account-link,:root[data-theme="dark"] .theme-toggle{background:var(--surface);color:var(--text);border-color:var(--line)}:root[data-theme="dark"] .search button{background:var(--accent);color:#1d1325}:root[data-theme="dark"] .hero{background:linear-gradient(135deg,#141821 0%,#1e1a2d 100%);border-color:var(--line)}:root[data-theme="dark"] .hero-art{background:#1a202b}:root[data-theme="dark"] .hero-art img{mix-blend-mode:screen;opacity:.58}:root[data-theme="dark"] .hero-art:after{background:linear-gradient(90deg,#141821 0%,rgba(20,24,33,.95) 23%,rgba(20,24,33,.38) 74%,rgba(20,24,33,.04))}:root[data-theme="dark"] .btn-primary{background:var(--accent);color:#1d1325}:root[data-theme="dark"] .btn-primary:hover{background:#dfc9ff}:root[data-theme="dark"] .btn-secondary{background:var(--surface-2);border-color:var(--line);color:var(--text)}:root[data-theme="dark"] .meta-pill,:root[data-theme="dark"] .badge{background:rgba(26,32,43,.86);border-color:var(--line);color:var(--muted)}:root[data-theme="dark"] .card,:root[data-theme="dark"] .detail,:root[data-theme="dark"] .episode,:root[data-theme="dark"] .job{background:var(--surface);border-color:var(--line)}:root[data-theme="dark"] .card:hover,:root[data-theme="dark"] .episode:hover{border-color:#77619b;box-shadow:0 16px 34px rgba(0,0,0,.24)}:root[data-theme="dark"] .quick-start{background:linear-gradient(135deg,#141821,#201c2e);border-color:var(--line)}:root[data-theme="dark"] .quality-menu summary,:root[data-theme="dark"] .quality-menu-pop,:root[data-theme="dark"] .quality-chip{background:var(--surface);border-color:var(--line);color:var(--muted)}:root[data-theme="dark"] .quality-chip:hover,:root[data-theme="dark"] .quality-chip.active{background:var(--surface-2);border-color:#77619b;color:var(--accent)}:root[data-theme="dark"] .source-card{background:var(--surface-2);border-color:var(--line)}:root[data-theme="dark"] .empty{background:var(--surface);border-color:var(--line);color:var(--muted)}:root[data-theme="dark"] .footer{background:#11151d;border-color:var(--line);color:var(--muted)}@media(max-width:680px){:root[data-theme="dark"] .hero-art:after{background:linear-gradient(0deg,#141821 8%,rgba(20,24,33,.82) 58%,rgba(20,24,33,.08) 100%)}.theme-toggle{padding:8px 9px}.theme-toggle .theme-label{display:none}}
+/* ARIA Anime V12 mobile release system */
+:root{--font-ui:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}body{font-family:var(--font-ui)}.hero h1,.section-title,.quick-start h2,.detail h1,.watch-head h1,.job h1{font-family:var(--font-ui);font-weight:800;letter-spacing:-.045em}.hero{min-height:410px;padding:40px;border-radius:24px;background:linear-gradient(135deg,var(--surface) 0%,var(--surface-2) 100%)}.hero-copy{max-width:620px}.hero-art{inset:0 0 0 40%}.quick-start{grid-template-columns:minmax(0,1fr) auto;gap:28px;padding:24px;border-radius:20px}.quick-start h2{font-size:24px}.quick-start p{max-width:700px}.theme-toggle{min-width:42px}.empty-state{display:flex;min-height:220px;align-items:center;justify-content:center;gap:9px}.empty-state h3{margin:0;color:var(--text);font-size:20px}.empty-state p{max-width:470px;margin:0;color:var(--muted);line-height:1.65}.empty-icon{display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--line);border-radius:14px;color:var(--accent);font-size:25px}.empty-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:9px;margin-top:6px}.cover-missing{display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,var(--surface-2),var(--surface-3));color:var(--subtle);font-size:10px;font-weight:850;letter-spacing:.14em}.badge.year{background:var(--surface-2);color:var(--muted)}
+@media(max-width:680px){.top-in{grid-template-columns:minmax(0,1fr) auto;padding:12px 14px;gap:10px}.brand-name{font-size:13px}.account-link{max-width:112px;overflow:hidden;text-overflow:ellipsis}.theme-toggle{width:42px;padding:8px 9px}.search{grid-column:1/-1;grid-row:2;width:100%}.search input,.search button{min-height:44px}.main{padding:18px 14px 52px}.hero{min-height:420px;padding:22px;border-radius:18px;align-items:flex-end}.hero-art{inset:0 0 48% 0}.hero-art:after{background:linear-gradient(0deg,var(--surface) 8%,rgba(255,255,255,.82) 58%,transparent 100%)}.hero h1{font-size:clamp(34px,10vw,48px);line-height:1.04}.hero p{font-size:13px;line-height:1.6}.hero-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.hero-actions .btn{width:100%;min-height:44px}.quick-start{grid-template-columns:1fr;gap:16px;margin-top:16px;padding:18px;border-radius:17px}.quick-start h2{font-size:22px}.quick-start p{font-size:13px}.quick-actions{display:grid;grid-template-columns:1fr;justify-content:stretch}.quick-actions .btn{width:100%}.section-head{margin:34px 0 14px}.section-title{font-size:24px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.card{border-radius:14px}.card-body{padding:10px}.card-title{font-size:12px}.empty-state{min-height:250px;padding:24px 18px;flex-direction:column}.empty-state p{text-align:center}.empty-actions{width:100%;display:grid;grid-template-columns:1fr}.empty-actions .btn{width:100%}}
+@media(max-width:380px){.account-link{font-size:11px;padding:8px}.hero-actions{grid-template-columns:1fr}.hero{min-height:400px}.grid{gap:9px}}
 </style></head><body>
 <header class="top"><div class="top-in">
 <a class="brand" href="/anime" aria-label="ARIA Anime home"><img class="brand-mark" src="/aria-mark.png" alt="ARIA mark" width="34" height="34" /><span class="brand-name">ARIA <b>ANIME</b></span></a>
 <nav class="nav" aria-label="Primary"><a href="/anime/browse">Browse</a><a href="/anime/trending">Trending</a><a href="/anime/latest">Latest</a></nav>
 <form class="search" action="/anime/search" method="get"><input name="q" aria-label="Search anime" placeholder="Search anime…" autocomplete="off"><button type="submit">Search</button></form>
-<a class="account-link" href="/portal/login">Learner sign in</a><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch color theme"><span class="theme-icon" aria-hidden="true">◐</span><span class="theme-label">Theme</span></button>
-</div></header><main class="main">${inner}</main><footer class="footer">ARIA Anime · catalog metadata and media delivery are limited to configured authorized sources.</footer><script>(()=>{const key="aria-anime-theme";const root=document.documentElement;const button=document.getElementById("theme-toggle");const setTheme=(theme)=>{root.dataset.theme=theme;try{localStorage.setItem(key,theme)}catch(_){}};const current=()=>root.dataset.theme||"light";const sync=()=>{if(!button)return;const dark=current()==="dark";button.querySelector(".theme-icon").textContent=dark?"☼":"◐";button.querySelector(".theme-label").textContent=dark?"Light":"Dark";button.setAttribute("aria-label",dark?"Switch to light theme":"Switch to dark theme")};if(button){button.addEventListener("click",()=>{setTheme(current()==="dark"?"light":"dark");sync()});sync()}})();</script></body></html>`;
+<a class="account-link" href="/portal/login">Learner sign in</a><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme"><span class="theme-icon" aria-hidden="true">☾</span><span class="theme-label">Theme</span></button>
+</div></header><main class="main">${inner}</main><footer class="footer">ARIA Anime · catalog metadata and media delivery are limited to configured authorized sources.</footer><script>(()=>{const key="aria-anime-theme";const root=document.documentElement;const button=document.getElementById("theme-toggle");const setTheme=(theme)=>{root.dataset.theme=theme;try{localStorage.setItem(key,theme)}catch(_){}};const current=()=>root.dataset.theme||"light";const sync=()=>{if(!button)return;const dark=current()==="dark";button.querySelector(".theme-icon").textContent=dark?"☀":"☾";button.querySelector(".theme-label").textContent=dark?"Light":"Dark";button.setAttribute("aria-label",dark?"Switch to light theme":"Switch to dark theme")};if(button){button.addEventListener("click",()=>{setTheme(current()==="dark"?"light":"dark");sync()});sync()}})();</script></body></html>`;
 }
 
 function cardGrid(items) {
-  if (!items?.length) return `<div class="empty">No titles matched this view.</div>`;
+  if (!items?.length) return `<div class="empty empty-state"><div class="empty-icon" aria-hidden="true">⌁</div><h3>Nothing surfaced yet</h3><p>The provider did not return a safe catalog response. Try search, refresh the page, or come back when the source is available.</p><div class="empty-actions">${button("/anime/search?q=one%20piece", "Try a sample search", "primary")}${button("/anime", "Return home", "secondary")}</div></div>`;
   return `<div class="grid">${items.map((a) => `<a class="card" href="${esc(titleHref(a))}">
-    ${a.cover ? `<img class="cover" src="${esc(a.cover)}" alt="" loading="lazy" onerror="this.remove()">` : `<div class="cover"></div>`}
-    <div class="card-body"><div class="card-title">${esc(a.title)}</div><div class="card-meta"><span class="badge provider">${esc(providerLabel(a.provider))}</span>${a.rating ? `<span class="badge score">★ ${esc(a.rating)}</span>` : ""}</div></div>
+    ${a.cover ? `<img class="cover" src="${esc(a.cover)}" alt="${esc(a.title || "Anime poster")}" loading="lazy" onerror="this.closest('.card')?.classList.add('cover-missing');this.remove()">` : `<div class="cover cover-missing"><span>ARIA ANIME</span></div>`}
+    <div class="card-body"><div class="card-title">${esc(a.title)}</div><div class="card-meta"><span class="badge provider">${esc(providerLabel(a.provider))}</span>${a.rating ? `<span class="badge score">★ ${esc(a.rating)}</span>` : ""}${a.year ? `<span class="badge year">${esc(String(a.year).slice(0, 4))}</span>` : ""}</div></div>
   </a>`).join("")}</div>`;
 }
 
@@ -180,7 +210,7 @@ async function homePage() {
   ]);
   const hero = trending[0];
   const heroHtml = hero ? `<section class="hero"><div class="hero-art">${hero.cover ? `<img src="${esc(hero.cover)}" alt="" loading="eager">` : ""}</div><div class="hero-copy"><div class="eyebrow">Featured this week · ${esc(providerLabel(hero.provider))}</div><h1>${esc(hero.title)}</h1><p>${esc(hero.overview || hero.description || "Open a title to see available episodes and authorized media options.")}</p><div class="hero-meta"><span class="meta-pill score">${hero.rating ? `★ ${esc(hero.rating)}` : "Featured"}</span>${hero.year ? `<span class="meta-pill">${esc(hero.year)}</span>` : ""}${hero.type ? `<span class="meta-pill">${esc(hero.type)}</span>` : ""}</div><div class="hero-actions">${button(titleHref(hero), "Open title", "primary")}${button("/anime/browse", "Browse catalog", "secondary")}</div></div></section>` : `<section class="hero"><div class="hero-copy"><div class="eyebrow">ARIA Anime</div><h1>Find your next series.</h1><p>Search the catalog or browse the latest metadata.</p></div></section>`;
-  const quickStart = `<section class="quick-start"><div><span class="eyebrow">Your next watch</span><h2>Find it fast. Keep your place.</h2><p>Search by title, browse what is airing, or open a series and choose an episode. Playback is validated before ARIA exposes it, and downloads offer explicit 360p, 480p, and 720p requests when the source supports them.</p></div><div class="quick-actions">${button("/anime/browse", "Browse catalog", "primary")}${button("/anime/trending", "See what is trending", "secondary")}${button("/anime/latest", "Latest episodes", "secondary")}</div></section>`;
+  const quickStart = `<section class="quick-start"><div><span class="eyebrow">Start here</span><h2>Search, choose, watch.</h2><p>Open a title, choose an episode, then select Watch or a download quality. ARIA only exposes playback and files after the configured source passes validation.</p></div><div class="quick-actions">${button("/anime/browse", "Browse catalog", "primary")}${button("/anime/trending", "Trending picks", "secondary")}${button("/anime/latest", "Recently added", "secondary")}</div></section>`;
   return layout("Home", `${heroHtml}${quickStart}<div class="section-head"><h2 class="section-title">Trending now</h2><span class="section-sub">Popular titles</span></div>${cardGrid(trending.slice(0, 18))}<div class="section-head"><h2 class="section-title">Recently updated</h2><span class="section-sub">New catalog entries</span></div>${cardGrid(latest.slice(0, 18))}`);
 }
 
@@ -207,19 +237,28 @@ async function browsePage(req) {
   return layout("Browse", `<form class="filter-bar" method="get" action="/anime/browse"><select name="genre"><option value="">All genres</option>${genres.map((g) => `<option value="${esc(g)}" ${g === genre ? "selected" : ""}>${esc(g)}</option>`).join("")}</select><select name="year"><option value="">All years</option>${years.map((y) => `<option value="${y}" ${String(y) === year ? "selected" : ""}>${y}</option>`).join("")}</select><button class="btn btn-primary" type="submit">Apply filters</button></form><div class="section-head"><h1 class="section-title">Browse catalog</h1><span class="section-sub">Public metadata · safe titles only</span></div>${cardGrid(items)}`);
 }
 
-function episodeActions(id, provider, number) {
-  const base = `/anime/watch/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${encodeURIComponent(number)}`;
-  const downloadBase = `/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${encodeURIComponent(number)}`;
+function episodeActions(id, provider, number, details = {}) {
+  const context = animeContext(provider, details, { ep: number });
+  const base = `/anime/watch/${encodeURIComponent(id)}?${context.toString()}`;
+  const downloadBase = `/anime/dl/${encodeURIComponent(id)}?${context.toString()}`;
   return `<div class="episode-actions"><a class="btn btn-primary" href="${esc(base)}">Watch</a><details class="quality-menu"><summary>Download</summary><div class="quality-menu-pop">${["360", "480", "720"].map((q) => button(`${downloadBase}&quality=${q}`, `${q}p`, "secondary")).join("")}${button(`${downloadBase}&quality=best`, "Auto", "secondary")}</div></details></div>`;
 }
 
 async function titlePage(req) {
   const id = String(req.params.id);
   const provider = String(req.query.prov || "anilist");
-  const entry = { id, provider, title: "" };
+  const entry = {
+    id,
+    provider,
+    title: String(req.query.title || ""),
+    cover: String(req.query.cover || ""),
+    year: String(req.query.year || ""),
+    rating: String(req.query.rating || ""),
+    detailPath: String(req.query.detail || ""),
+  };
   const [details, episodes] = await Promise.all([detailsFast(entry), withTimeout(service.getEpisodes(entry), 10000, [])]);
   if (!service.isCatalogSafe(details) || details.blocked) return layout("Title unavailable", `<div class="empty"><h1>Title unavailable</h1><p>This title is not included in the public catalog.</p>${button("/anime", "Back to home", "primary")}</div>`);
-  const episodeHtml = episodes.length ? `<div class="episode-grid">${episodes.map((ep) => `<div class="episode"><div class="episode-number">Episode ${esc(ep.number)}</div><div class="episode-name">${esc(ep.title)}</div>${episodeActions(id, provider, ep.number)}</div>`).join("")}</div>` : `<div class="empty">Episode metadata is unavailable for this provider. Enter an episode number and choose a quality to try the configured authorized resolver.<div class="manual"><input id="manual-ep" type="number" min="1" value="1" aria-label="Episode number"><select id="manual-quality" aria-label="Download quality"><option value="best">Auto</option><option value="360">360p</option><option value="480">480p</option><option value="720">720p</option></select>${button(`/anime/watch/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=1`, "Watch", "primary", 'id="manual-watch"')}${button(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=1&quality=best`, "Download", "secondary", 'id="manual-dl"')}</div></div>`;
+  const episodeHtml = episodes.length ? `<div class="episode-grid">${episodes.map((ep) => `<div class="episode"><div class="episode-number">Episode ${esc(ep.number)}</div><div class="episode-name">${esc(ep.title)}</div>${episodeActions(id, provider, ep.number, details)}</div>`).join("")}</div>` : `<div class="empty">Episode metadata is unavailable for this provider. Enter an episode number and choose a quality to try the configured authorized resolver.<div class="manual"><input id="manual-ep" type="number" min="1" value="1" aria-label="Episode number"><select id="manual-quality" aria-label="Download quality"><option value="best">Auto</option><option value="360">360p</option><option value="480">480p</option><option value="720">720p</option></select>${button(`/anime/watch/${encodeURIComponent(id)}?${animeContext(provider, details, { ep: 1 }).toString()}`, "Watch", "primary", 'id="manual-watch"')}${button(`/anime/dl/${encodeURIComponent(id)}?${animeContext(provider, details, { ep: 1, quality: "best" }).toString()}`, "Download", "secondary", 'id="manual-dl"')}</div></div>`;
   const script = episodes.length ? "" : `<script>(function(){const i=document.getElementById('manual-ep'),q=document.getElementById('manual-quality'),w=document.getElementById('manual-watch'),d=document.getElementById('manual-dl');function sync(){const n=Math.max(1,parseInt(i.value||'1',10));const quality=q.value||'best';w.href=w.href.replace(/ep=\\d+/, 'ep='+n);d.href=d.href.replace(/ep=\\d+/, 'ep='+n).replace(/quality=[^&]+/, 'quality='+quality)}i.addEventListener('input',sync);q.addEventListener('change',sync)})();</script>`;
   return layout(details.title || "Anime", `<section class="detail">${details.cover ? `<img class="poster" src="${esc(details.cover)}" alt="" onerror="this.remove()">` : `<div class="poster"></div>`}<div><div class="eyebrow">${esc(providerLabel(provider))}</div><h1>${esc(details.title || "Untitled")}</h1><div class="metaline">${details.rating ? `<span>★ ${esc(details.rating)}</span>` : ""}${details.type ? `<span>${esc(details.type)}</span>` : ""}${details.year ? `<span>${esc(details.year)}</span>` : ""}${details.status ? `<span>${esc(details.status)}</span>` : ""}</div>${details.genres?.length ? `<div class="tags">${details.genres.slice(0, 8).map((g) => `<span class="tag">${esc(g)}</span>`).join("")}</div>` : ""}<p class="desc">${esc(details.description || "Episode availability depends on the configured authorized source.")}</p>${officialWatchLinks(details)}<div class="detail-actions">${button("/anime/browse", "Back to catalog", "secondary")}</div></div></section><div class="section-head"><h2 class="section-title">Episodes${details.episodes ? ` · ${esc(details.episodes)}` : ""}</h2></div>${episodeHtml}${script}`);
 }
@@ -229,20 +268,21 @@ async function watchPage(req) {
   const provider = String(req.query.prov || "anilist");
   const episode = Math.max(1, Number(req.query.ep) || 1);
   const quality = normalizeQuality(req.query.quality);
-  const details = await detailsFast({ id, provider, title: "" });
+  const details = await detailsFast({ id, provider, title: String(req.query.title || ""), cover: String(req.query.cover || ""), year: String(req.query.year || ""), rating: String(req.query.rating || ""), detailPath: String(req.query.detail || "") });
+  const contextQuery = Object.fromEntries(animeContext(provider, details, { ep: episode }).entries());
   if (details.blocked || !service.isCatalogSafe(details)) return layout("Title unavailable", `<div class="empty"><h1>Title unavailable</h1><p>This title is not included in the public catalog.</p>${button("/anime", "Back to home", "primary")}</div>`);
   const report = await withTimeout(resolveEpisode(details.title || id, episode, { preference: provider === "anilist" ? null : provider, quality }), 30000, null);
   const source = report?.selected;
-  if (!source?.url) return layout("Watch unavailable", `<div class="empty"><h1>${esc(details.title || "Anime")} · episode ${episode}</h1><p>There is no validated playable source for <strong>${esc(qualityLabel(quality))}</strong> right now. The provider report below is live diagnostic data, not a promise that a source exists.</p><div class="quality-strip"><span class="quality-label">Try another quality</span>${qualityLinks(`/anime/watch/${encodeURIComponent(id)}`, { prov: provider, ep: episode }, quality)}</div><div class="source-card"><h3>Source status</h3>${providerDiagnostics(report) || `<div class="source-row"><span>Resolver</span><span class="source-state bad">No diagnostic data</span></div>`}</div><div class="detail-actions">${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Back to episodes", "secondary")}</div></div>`);
+  if (!source?.url) return layout("Watch unavailable", `<div class="empty"><h1>${esc(details.title || "Anime")} · episode ${episode}</h1><p>There is no validated playable source for <strong>${esc(qualityLabel(quality))}</strong> right now. The provider report below is live diagnostic data, not a promise that a source exists.</p><div class="quality-strip"><span class="quality-label">Try another quality</span>${qualityLinks(`/anime/watch/${encodeURIComponent(id)}`, contextQuery, quality)}</div><div class="source-card"><h3>Source status</h3>${providerDiagnostics(report) || `<div class="source-row"><span>Resolver</span><span class="source-state bad">No diagnostic data</span></div>`}</div><div class="detail-actions">${button(titleContextHref(id, provider, details), "Back to episodes", "secondary")}</div></div>`);
   const mediaToken = issueMediaToken({ url: source.url, headers: source.headers, provider: source.provider });
-  if (!mediaToken) return layout("Watch unavailable", `<div class="empty"><h1>Playback is not configured</h1><p>The operator must set a media signing secret before playback can be served securely.</p>${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Back to episodes", "secondary")}</div>`);
+  if (!mediaToken) return layout("Watch unavailable", `<div class="empty"><h1>Playback is not configured</h1><p>The operator must set a media signing secret before playback can be served securely.</p>${button(titleContextHref(id, provider, details), "Back to episodes", "secondary")}</div>`);
   const mediaUrl = `/anime/proxy?t=${encodeURIComponent(mediaToken)}`;
   const isHls = source.type === "hls" || /\.m3u8(?:\?|$)/i.test(source.url);
   const playerScript = isHls ? `<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script><script>const v=document.getElementById('player'),u=${JSON.stringify(mediaUrl)};if(window.Hls&&Hls.isSupported()){const h=new Hls({enableWorker:true});h.loadSource(u);h.attachMedia(v)}else if(v.canPlayType('application/vnd.apple.mpegurl')){v.src=u}else{v.outerHTML='<div class="empty">This browser cannot play this HLS stream.</div>'}</script>` : `<script>document.getElementById('player').src=${JSON.stringify(mediaUrl)};</script>`;
-  return layout("Watch", `<div class="watch-head"><div><div class="eyebrow">Now playing</div><h1>${esc(details.title || source.title || "Anime")} · episode ${episode}</h1><p>${esc(providerLabel(source.provider))}${source.height ? ` · ${esc(source.height)}p` : ""} · requested ${esc(qualityLabel(quality))}${source.quality && source.quality !== "unknown" ? ` · source ${esc(source.quality)}` : ""}</p></div>${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Episodes", "secondary")}</div><div class="player-shell"><video id="player" controls playsinline preload="metadata"></video></div><div class="quality-strip"><span class="quality-label">Playback quality</span>${qualityLinks(`/anime/watch/${encodeURIComponent(id)}`, { prov: provider, ep: episode }, quality)}</div><div class="source-card"><h3>Resolved source</h3><div class="source-row"><span>Provider</span><span class="source-state ok">${esc(providerLabel(source.provider))}</span></div><div class="source-row"><span>Validation</span><span class="source-state ok">Playable source verified</span></div></div>${playerScript}`);
+  return layout("Watch", `<div class="watch-head"><div><div class="eyebrow">Now playing</div><h1>${esc(details.title || source.title || "Anime")} · episode ${episode}</h1><p>${esc(providerLabel(source.provider))}${source.height ? ` · ${esc(source.height)}p` : ""} · requested ${esc(qualityLabel(quality))}${source.quality && source.quality !== "unknown" ? ` · source ${esc(source.quality)}` : ""}</p></div>${button(titleContextHref(id, provider, details), "Episodes", "secondary")}</div><div class="player-shell"><video id="player" controls playsinline preload="metadata"></video></div><div class="quality-strip"><span class="quality-label">Playback quality</span>${qualityLinks(`/anime/watch/${encodeURIComponent(id)}`, contextQuery, quality)}</div><div class="source-card"><h3>Resolved source</h3><div class="source-row"><span>Provider</span><span class="source-state ok">${esc(providerLabel(source.provider))}</span></div><div class="source-row"><span>Validation</span><span class="source-state ok">Playable source verified</span></div></div>${playerScript}`);
 }
 
-function downloadErrorPanel(job, id, provider, episode, quality) {
+function downloadErrorPanel(job, id, provider, episode, quality, details = {}) {
   const code = String(job?.error?.code || "DOWNLOAD_FAILED");
   const detail = String(job?.error?.message || "The source could not be downloaded.");
   let heading = "Download temporarily unavailable";
@@ -257,8 +297,8 @@ function downloadErrorPanel(job, id, provider, episode, quality) {
     heading = "File is too large to deliver here";
     message = "The selected source exceeds the configured delivery limit. Try a lower quality or use the browser download when an eligible source is available.";
   }
-  const retry = button(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&quality=${encodeURIComponent(quality)}&job=${encodeURIComponent(job.id)}&retry=1`, "Retry download", "primary");
-  return `<div class="empty download-error"><h2>${esc(heading)}</h2><p>${esc(message)}</p><div class="detail-actions">${retry}${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Back to episodes", "secondary")}</div><details><summary>Technical details</summary><code>${esc(code)}: ${esc(detail)}</code></details></div>`;
+  const retry = button(`/anime/dl/${encodeURIComponent(id)}?${animeContext(provider, details, { ep: episode, quality, job: job.id, retry: "1" }).toString()}`, "Retry download", "primary");
+  return `<div class="empty download-error"><h2>${esc(heading)}</h2><p>${esc(message)}</p><div class="detail-actions">${retry}${button(titleContextHref(id, provider, details), "Back to episodes", "secondary")}</div><details><summary>Technical details</summary><code>${esc(code)}: ${esc(detail)}</code></details></div>`;
 }
 
 async function downloadPage(req, res) {
@@ -269,8 +309,9 @@ async function downloadPage(req, res) {
   const ownerId = publicOwnerId(req, res);
   let job = req.query.job ? getJob(String(req.query.job)) : null;
   if (job && job.ownerId && !publicJobAllowed(job, ownerId)) return res.status(403).send("This download job belongs to another session.");
-  const details = await detailsFast({ id, provider, title: "" });
+  const details = await detailsFast({ id, provider, title: String(req.query.title || ""), cover: String(req.query.cover || ""), year: String(req.query.year || ""), rating: String(req.query.rating || ""), detailPath: String(req.query.detail || "") });
   const catalogSafe = !details.blocked && service.isCatalogSafe(details);
+  const contextQuery = animeContext(provider, details, { ep: episode, quality }).toString();
   // Establish the signed public session and a tracked job before provider metadata
   // can fail. The worker will later report SOURCE_NOT_FOUND instead of returning a
   // session-less HTML dead end during an upstream outage.
@@ -278,13 +319,13 @@ async function downloadPage(req, res) {
     const quota = publicDownloadQuota(req, ownerId);
     if (!quota.ok) return res.status(quota.status).send(quota.message);
     job = enqueueAnimeJob({ name: details.title || `Anime ${id}`, episode, preferred: provider === "anilist" ? null : provider, quality, sock: null, chatId: null, quotedMsg: null, ownerId, sessionId: ownerId, createdBy: "public-anime" });
-    return res.redirect(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&quality=${encodeURIComponent(quality)}&job=${encodeURIComponent(job.id)}`);
+    return res.redirect(`/anime/dl/${encodeURIComponent(id)}?${contextQuery}&job=${encodeURIComponent(job.id)}`);
   }
   if (req.query.retry === "1" && job?.status === "failed") {
     const quota = publicDownloadQuota(req, ownerId);
     if (!quota.ok) return res.status(quota.status).send(quota.message);
     job = retryJob(job.id) || job;
-    return res.redirect(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&quality=${encodeURIComponent(quality)}&job=${encodeURIComponent(job.id)}`);
+    return res.redirect(`/anime/dl/${encodeURIComponent(id)}?${contextQuery}&job=${encodeURIComponent(job.id)}`);
   }
   if (!job) {
     const active = findActiveJob({ ownerId, name: details.title || `Anime ${id}`, episode, preferred: provider === "anilist" ? null : provider, quality });
@@ -295,7 +336,7 @@ async function downloadPage(req, res) {
       if (!quota.ok) return res.status(quota.status).send(quota.message);
       job = enqueueAnimeJob({ name: details.title || `Anime ${id}`, episode, preferred: provider === "anilist" ? null : provider, quality, sock: null, chatId: null, quotedMsg: null, ownerId, sessionId: ownerId, createdBy: "public-anime" });
     }
-    return res.redirect(`/anime/dl/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}&ep=${episode}&quality=${encodeURIComponent(quality)}&job=${encodeURIComponent(job.id)}`);
+    return res.redirect(`/anime/dl/${encodeURIComponent(id)}?${contextQuery}&job=${encodeURIComponent(job.id)}`);
   }
   const isFailed = job.status === "failed";
   const isDone = job.status === "done";
@@ -306,8 +347,8 @@ async function downloadPage(req, res) {
   const progress = percent == null ? "" : `<div class="job-row"><span class="job-label">Progress</span><span>${percent}%</span></div><div class="progress-track"><div class="progress-bar" style="width:${percent}%"></div></div>`;
   const fileReady = isDone && job.result?.filePath && fs.existsSync(job.result.filePath);
   const fileToken = fileReady ? issueFileToken(job.id, undefined, ownerId) : null;
-  const result = fileReady && fileToken ? `<div class="download-actions">${button(`/anime/file/${encodeURIComponent(job.id)}?t=${encodeURIComponent(fileToken)}`, "Download file", "primary")}${button(`/anime/title/${encodeURIComponent(id)}?prov=${encodeURIComponent(provider)}`, "Back to episodes", "secondary")}</div>` : "";
-  const error = isFailed ? downloadErrorPanel(job, id, provider, episode, quality) : "";
+  const result = fileReady && fileToken ? `<div class="download-actions">${button(`/anime/file/${encodeURIComponent(job.id)}?t=${encodeURIComponent(fileToken)}`, "Download file", "primary")}${button(titleContextHref(id, provider, details), "Back to episodes", "secondary")}</div>` : "";
+  const error = isFailed ? downloadErrorPanel(job, id, provider, episode, quality, details) : "";
   const refresh = isPending ? `<script>setTimeout(()=>location.reload(),5000)</script>` : "";
   return layout("Download", `<div class="job"><div class="eyebrow">Episode delivery</div><h1>${esc(details.title || "Anime")} · episode ${episode}</h1><div class="job-row"><span class="job-label">Requested quality</span><span>${esc(qualityLabel(job.quality || quality))}</span></div><div class="job-row"><span class="job-label">Status</span><span class="status ${statusClass}">${esc(status)}</span></div><div class="job-row"><span class="job-label">Job</span><span>${esc(job.id)}</span></div>${progress}</div>${result}${error}${!result && !error ? `<div class="empty">This page refreshes while a validated authorized source is prepared. A download link appears only after the file passes media validation.</div>` : ""}${refresh}`);
 }

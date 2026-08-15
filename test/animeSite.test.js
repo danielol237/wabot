@@ -78,6 +78,22 @@ test("anime download: dependency failures explain recovery without exposing a ra
   }
 });
 
+test("anime fallback title preserves metadata and manual media controls", async () => {
+  const { base, server } = await boot();
+  try {
+    const response = await fetch(`${base}/title/curated-one-piece?prov=curated&title=One%20Piece`);
+    const html = await response.text();
+    assert.strictEqual(response.status, 200);
+    assert.ok(html.includes("One Piece"));
+    assert.ok(html.includes("Featured"));
+    assert.ok(html.includes("manual-ep"));
+    assert.ok(html.includes("Download"));
+    assert.ok(!html.includes("Untitled"));
+  } finally {
+    server.close();
+  }
+});
+
 test("anime V11: home exposes persistent dark/light theme controls", async () => {
   const { base, server } = await boot();
   try {

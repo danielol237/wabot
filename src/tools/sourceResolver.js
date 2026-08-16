@@ -23,7 +23,7 @@ const rep = require("./sourceReputation");
 // AniList is the canonical identity source (stable IDs, seasons, episodes).
 const ANILIST_URL = "https://graphql.anilist.co";
 const axios = require("axios");
-
+const { searchPahe, paheGetStream } = require("./animePaheScraper");
 function normalize(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
 function titleMatchScore(query, item) {
   const target = normalize(query);
@@ -164,6 +164,54 @@ async function resolveCanonical(title, episode) {
 // Independent provider resolvers, each returning normalized candidates.
 // Every candidate: { provider, url, type: 'hls'|'mp4', quality, headers, title }.
 const DISCOVERERS = [
+
+{
+  provider: "animepahe",
+  enabled: () => UNVERIFIED_SOURCE_ACCESS && rep.usable("animepahe"),
+  async discover(title, episode, season, quality) {
+    const { searchPahe, paheGetStream } = require("./animePaheScraper");
+    
+    // Search for the anime
+    const list = await searchPahe(title);
+    if (!list.length) return { candidates: [], noResults: true };
+    
+    // Find best match
+    const normalize = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const target = normalize(title);
+    
+    const anime = list.find((a) => {
+      const titles = [a.title, a.titleEnglish].filter(Boolean).map(normalize);
+      return titles.some((t) => t === target || t.includes(target) || target.includes(t));
+    }) || list[0];
+    
+    if (!anime) return { candidates: [], noResults: true };
+    
+    // Get stream URL
+    const stream = await paheGetStream(anime.id, episode);
+    if (stream.error) return { candidates: [], error: stream.error };
+    
+    return {
+      candidates: [{
+        provider: "animepahe",
+        url: stream.url,
+        type: stream.type,
+        quality: stream.quality,
+        height: parseInt(stream.quality) || 720,
+        headers: stream.headers,
+        title: stream.title || anime.title,
+      }],
+    };
+  },
+},
+  {
+    provider: "authorized",
+    enabled: () => Boolean(String(process.env.ARIA_ANIME_AUTHORIZED_SOURCES_JSON || "").trim()),
+    async discover(title, episode, season, quality) {
+      const chosen = pickAuthorizedDownload(title, episode || 1, quality);
+      if (!chosen) return { candidates: [], noResults: true };
+      return { candidates: [{ provider: "authorized", url: chosen.url, type: /\.m3u8(?:\?|$)/i.test(chosen.url) ? "hls" : "mp4", quality: String(chosen.resolution), height: chosen.resolution, headers: chosen.headers || { "User-Agent": "Mozilla/5.0" }, title }] };
+    },
+  },
   {
     provider: "authorized",
     enabled: () => Boolean(String(process.env.ARIA_ANIME_AUTHORIZED_SOURCES_JSON || "").trim()),

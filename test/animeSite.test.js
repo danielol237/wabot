@@ -69,6 +69,24 @@ test("anime download status route returns a stable page for a tracked job", asyn
 });
 
 
+test("anime direct download rejects signed unverified provider media", async () => {
+  const previousSecret = process.env.MEDIA_PROXY_SECRET;
+  process.env.MEDIA_PROXY_SECRET = "anime-site-test-secret";
+  const { issueMediaToken } = require("../src/utils/mediaAccess");
+  const token = issueMediaToken({ url: "https://example.com/video.mp4", provider: "gogoanime" });
+  const { base, server } = await boot();
+  try {
+    const response = await fetch(`${base}/download?t=${encodeURIComponent(token)}`);
+    const body = await response.text();
+    assert.strictEqual(response.status, 403);
+    assert.match(body, /operator-authorized media/i);
+  } finally {
+    server.close();
+    if (previousSecret == null) delete process.env.MEDIA_PROXY_SECRET;
+    else process.env.MEDIA_PROXY_SECRET = previousSecret;
+  }
+});
+
 test("anime public download status preserves the requested quality", async () => {
   const { enqueueAnimeJob } = require("../src/tools/animeJobManager");
   const { base, server } = await boot();

@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const express = require("express");
 const router = express.Router();
 const { getAIResponse } = require("./tools/ai");
+const zaiMedia = require("./tools/zaiMedia");
 const platform = require("./core");
 const { ownerContext, recordProductActivity } = require("./core/productBridge");
 const {
@@ -126,6 +127,40 @@ router.post("/session", async (req, res) => {
   } catch (err) {
     const status = err.code === "SUPABASE_TOKEN_INVALID" || err.code === "SUPABASE_TOKEN_MISSING" ? 401 : 502;
     return res.status(status).json({ ok: false, error: err.message || "Companion authentication failed." });
+  }
+});
+
+router.post("/vision", async (req, res) => {
+  const configured = supabaseConfig().configured && !!process.env.COMPANION_SESSION_SECRET;
+  if (!configured && !process.env.COMPANION_API_KEY) return res.status(503).json({ ok: false, error: "Companion API is not configured." });
+  const auth = await resolveChatAuth(req);
+  if (!auth) return res.status(401).json({ ok: false, error: configured ? "Companion session exchange required." : "Invalid companion credentials." });
+  if (limited(req)) return res.status(429).json({ ok: false, error: "Too many companion requests. Try again shortly." });
+  const imageBase64 = clean(req.body?.imageBase64, 180000).replace(/^data:[^;]+;base64,/, "");
+  const mimeType = clean(req.body?.mimeType, 40).toLowerCase();
+  const question = clean(req.body?.question, 1000) || "Describe what you notice in this image and respond with warm, concise awareness. Do not identify a person or infer sensitive traits.";
+  if (!imageBase64) return res.status(400).json({ ok: false, error: "imageBase64 is required" });
+  if (imageBase64.length > 180000) return res.status(413).json({ ok: false, error: "image is too large" });
+  if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) return res.status(400).json({ ok: false, error: "mimeType must be image/jpeg, image/png, or image/webp" });
+  if (!zaiMedia.configured()) return res.status(503).json({ ok: false, error: "Vision is not configured on ARIA's server." });
+  try {
+    const result = await zaiMedia.analyzeImage(imageBase64, mimeType, question, { userId: auth.context.userId, maxTokens: 900 });
+    if (!result.success) return res.status(502).json({ ok: false, error: "ARIA could not interpret that image right now." });
+    const text = String(result.text || "I saw the image, but I could not form a response.").slice(0, 6000);
+    try {
+      recordProductActivity({
+        product: "companion",
+        action: "vision.completed",
+        context: auth.context,
+        aggregateType: "conversation",
+        aggregateId: clean(req.body?.conversationId, 120) || "vision",
+        metadata: { authType: auth.authType, provider: result.provider },
+        usage: { category: "ai", metric: "companion-vision", units: 1 },
+      });
+    } catch (_) {}
+    return res.json({ ok: true, text, provider: result.provider || "vision" });
+  } catch (_) {
+    return res.status(502).json({ ok: false, error: "ARIA could not interpret that image right now." });
   }
 });
 

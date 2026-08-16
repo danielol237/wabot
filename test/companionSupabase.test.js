@@ -79,6 +79,36 @@ test("companion Supabase exchange: rejects an invalid Supabase access token", as
   }
 });
 
+test("companion vision: requires auth and validates image MIME types", async () => {
+  mockUserStatus = 200;
+  const { base, server } = await boot();
+  try {
+    const unauthenticated = await fetch(`${base}/api/companion/vision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageBase64: "aGVsbG8=", mimeType: "image/jpeg" }),
+    });
+    assert.strictEqual(unauthenticated.status, 401);
+
+    const sessionResponse = await fetch(`${base}/api/companion/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer valid-supabase-access-token" },
+      body: JSON.stringify({ deviceId: "android-vision-device" }),
+    });
+    const session = await sessionResponse.json();
+    const invalidMime = await fetch(`${base}/api/companion/vision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.token}` },
+      body: JSON.stringify({ imageBase64: "aGVsbG8=", mimeType: "text/plain" }),
+    });
+    assert.strictEqual(invalidMime.status, 400);
+    const body = await invalidMime.json();
+    assert.match(body.error, /mimeType/i);
+  } finally {
+    server.close();
+  }
+});
+
 test("companion sessions: signed claims verify and tampered tokens fail", () => {
   const { issueCompanionSession, verifyCompanionSession } = require("../src/companionSupabase");
   const token = issueCompanionSession({ userId: "usr_test", tenantId: "tenant_test", supabaseSubject: "supabase-user-1", email: "companion@example.com" });

@@ -271,7 +271,7 @@ async function searchAnime(query) {
     })(),
     (async () => {
       try {
-        const { searchAnimePahe } = require("./animeDownload");
+        const { searchAnimePahe } = require("./animePaheScraper");
         buckets.animepahe = (await searchAnimePahe(query)).map((r) => ({
           id: r.id, title: r.title, cover: r.image, episodes: r.episodes, type: r.type,
           rating: r.score, provider: "animepahe",

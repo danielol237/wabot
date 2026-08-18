@@ -77,7 +77,7 @@ const INTENTS = {
   project: ["start a project", "create a learner project", "start a capstone"],
   mission: ["start a mission", "create a mission", "run a mission"],
   poll: ["create a poll", "make a poll"],
-  sticker: ["make this a sticker", "sticker this", "turn into sticker", "create sticker"],
+  sticker: ["make this a sticker", "sticker this", "turn into sticker", "turn this into a sticker", "convert this to a sticker", "make it a sticker", "create sticker"],
   voiceReply: ["say this", "voice note", "speak this", "read this out", "say it out loud"],
   translate: ["translate", "say this in", "how do you say"],
   weather: ["weather in", "weather for", "what's the weather"],
@@ -1131,14 +1131,12 @@ async function handleImageGen(sock, msg, args, ctx) {
 }
 
 async function handleStickerCommand(sock, msg, args, ctx) {
-  const { reply, react, hasMedia, downloadMediaFromMsg, downloadQuotedMedia } = require("./baileysHelpers");
+  const { reply, react } = require("./baileysHelpers");
+  const { downloadStickerMedia } = require("../tools/sticker");
   await react(sock, msg, "🎴");
-  // 1. Prefer media attached to the command message itself.
-  let media = hasMedia(msg) ? await downloadMediaFromMsg(sock, msg) : null;
-  // 2. Otherwise, grab media from the message this command is replying to.
-  if (!media) media = await downloadQuotedMedia(sock, msg);
-  if (!media) return reply(sock, msg, "❌ Could not download media.");
-  const result = await createSticker(media.buffer);
+  const media = await downloadStickerMedia(sock, msg);
+  if (!media) return reply(sock, msg, "❌ I couldn't find an attached or replied-to image, GIF, or video.");
+  const result = await createSticker(media.buffer, { mimetype: media.mimetype, filename: media.filename });
   if (result.success) {
     await sock.sendMessage(ctx.chatId, { sticker: result.buffer });
   } else {
@@ -1168,12 +1166,12 @@ async function handleWallpaper(sock, msg, args, ctx) {
 
 // Sticker intent handler
 async function handleStickerIntent(sock, msg, ctx) {
-  const { reply, react, hasMedia, downloadMediaFromMsg } = require("./baileysHelpers");
-  if (!hasMedia(msg)) return;
-  const media = await downloadMediaFromMsg(sock, msg);
-  if (!media) return;
+  const { reply, react } = require("./baileysHelpers");
+  const { downloadStickerMedia } = require("../tools/sticker");
+  const media = await downloadStickerMedia(sock, msg);
+  if (!media) return reply(sock, msg, "❌ Reply to or attach an image, GIF, or video and ask me to make it a sticker.");
   await react(sock, msg, "🎭");
-  const result = await createSticker(media.buffer);
+  const result = await createSticker(media.buffer, { mimetype: media.mimetype, filename: media.filename });
   if (result.success) {
     await sock.sendMessage(ctx.chatId, { sticker: result.buffer });
   } else {

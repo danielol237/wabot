@@ -173,6 +173,21 @@ function button(href, label, tone = "primary", extra = "") {
   return `<a class="btn btn-${tone}" href="${esc(href)}" ${extra}>${esc(label)}</a>`;
 }
 
+function mediaFilename(title, episode, quality = "best") {
+  const safeTitle = String(title || "anime").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 72) || "anime";
+  const safeEpisode = Math.max(1, Number(episode) || 1);
+  const safeQuality = String(quality || "best").replace(/[^a-z0-9]+/gi, "") || "best";
+  return `${safeTitle}-ep${safeEpisode}-${safeQuality}.mp4`;
+}
+
+function directAuthorizedDownload(source, mediaToken, title, episode, quality) {
+  const isHls = source?.type === "hls" || /\.m3u8(?:\?|$)/i.test(String(source?.url || ""));
+  if (!mediaToken || source?.provider !== "authorized" || isHls) return "";
+  const filename = mediaFilename(title, episode, quality);
+  const params = new URLSearchParams({ t: mediaToken, title: filename });
+  return `<div class="download-actions">${button(`/anime/download?${params.toString()}`, `Download ${qualityLabel(quality)}`, "primary")}<span class="source-note">Direct download is available because this is an operator-authorized MP4 source.</span></div>`;
+}
+
 function layout(title, inner) {
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -331,8 +346,9 @@ async function watchPage(req) {
   if (!mediaToken) return layout("Watch unavailable", `<div class="empty"><h1>Playback is not configured</h1><p>The operator must set a media signing secret before playback can be served securely.</p>${button(titleContextHref(id, provider, details), "Back to episodes", "secondary")}</div>`);
   const mediaUrl = `/anime/proxy?t=${encodeURIComponent(mediaToken)}`;
   const isHls = source.type === "hls" || /\.m3u8(?:\?|$)/i.test(source.url);
+  const directDownload = directAuthorizedDownload(source, mediaToken, details.title || source.title || "Anime", episode, quality);
   const playerScript = isHls ? `<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script><script>const v=document.getElementById('player'),u=${JSON.stringify(mediaUrl)};if(window.Hls&&Hls.isSupported()){const h=new Hls({enableWorker:true});h.loadSource(u);h.attachMedia(v)}else if(v.canPlayType('application/vnd.apple.mpegurl')){v.src=u}else{v.outerHTML='<div class="empty">This browser cannot play this HLS stream.</div>'}</script>` : `<script>document.getElementById('player').src=${JSON.stringify(mediaUrl)};</script>`;
-  return layout("Watch", `<div class="watch-head"><div><div class="eyebrow">Now playing</div><h1>${esc(details.title || source.title || "Anime")} · episode ${episode}</h1><p>${esc(providerLabel(source.provider))}${source.height ? ` · ${esc(source.height)}p` : ""} · requested ${esc(qualityLabel(quality))}${source.quality && source.quality !== "unknown" ? ` · source ${esc(source.quality)}` : ""}</p></div>${button(titleContextHref(id, provider, details), "Episodes", "secondary")}</div><div class="player-shell"><video id="player" controls playsinline preload="metadata"></video></div><div class="quality-strip"><span class="quality-label">Playback quality</span>${qualityLinks(`/anime/watch/${encodeURIComponent(id)}`, contextQuery, quality)}</div><div class="source-card"><h3>Resolved source</h3><div class="source-row"><span>Provider</span><span class="source-state ok">${esc(providerLabel(source.provider))}</span></div><div class="source-row"><span>Validation</span><span class="source-state ok">Playable source verified</span></div></div>${playerScript}`);
+  return layout("Watch", `<div class="watch-head"><div><div class="eyebrow">Now playing</div><h1>${esc(details.title || source.title || "Anime")} · episode ${episode}</h1><p>${esc(providerLabel(source.provider))}${source.height ? ` · ${esc(source.height)}p` : ""} · requested ${esc(qualityLabel(quality))}${source.quality && source.quality !== "unknown" ? ` · source ${esc(source.quality)}` : ""}</p></div>${button(titleContextHref(id, provider, details), "Episodes", "secondary")}</div><div class="player-shell"><video id="player" controls playsinline preload="metadata"></video></div><div class="quality-strip"><span class="quality-label">Playback quality</span>${qualityLinks(`/anime/watch/${encodeURIComponent(id)}`, contextQuery, quality)}</div><div class="source-card"><h3>Resolved source</h3><div class="source-row"><span>Provider</span><span class="source-state ok">${esc(providerLabel(source.provider))}</span></div><div class="source-row"><span>Validation</span><span class="source-state ok">Playable source verified</span></div></div>${directDownload}${playerScript}`);
 }
 
 function downloadErrorPanel(job, id, provider, episode, quality, details = {}) {
@@ -405,6 +421,38 @@ async function downloadPage(req, res) {
   const refresh = isPending ? `<script>setTimeout(()=>location.reload(),5000)</script>` : "";
   return layout("Download", `<div class="job"><div class="eyebrow">Episode delivery</div><h1>${esc(details.title || "Anime")} · episode ${episode}</h1><div class="job-row"><span class="job-label">Requested quality</span><span>${esc(qualityLabel(job.quality || quality))}</span></div><div class="job-row"><span class="job-label">Status</span><span class="status ${statusClass}">${esc(status)}</span></div><div class="job-row"><span class="job-label">Job</span><span>${esc(job.id)}</span></div>${progress}</div>${result}${error}${!result && !error ? `<div class="empty">This page refreshes while a validated authorized source is prepared. A download link appears only after the file passes media validation.</div>` : ""}${refresh}`);
 }
+
+router.get("/download", async (req, res) => {
+  recordAnimeActivity(req, "download.direct_requested", { route: "direct-download" }, { category: "media", metric: "direct-download-requests", units: 1 });
+  const payload = verifyMediaToken(req.query.t);
+  if (!payload) return res.status(401).send("This download link has expired. Open the authorized episode again.");
+  if (payload.provider !== "authorized") return res.status(403).send("Direct downloads are available only for operator-authorized media.");
+  if (/\.m3u8(?:\?|$)/i.test(String(payload.url || ""))) return res.status(400).send("HLS sources must use the server download flow.");
+  const target = await validateMediaTarget(payload.url);
+  if (!target.ok) return res.status(403).send("This media source is not authorized.");
+  const requestedName = String(req.query.title || "anime.mp4").replace(/[^a-z0-9._-]+/gi, "_").slice(0, 120) || "anime.mp4";
+  const filename = /\.mp4$/i.test(requestedName) ? requestedName : `${requestedName}.mp4`;
+  const headers = { "User-Agent": "ARIA-Anime/1.0", ...(payload.headers || {}) };
+  if (req.headers.range) headers.Range = req.headers.range;
+  const upstream = https.get(target.url, { headers, lookup: (_hostname, options, callback) => options?.all ? callback(null, [{ address: target.address, family: target.family }]) : callback(null, target.address, target.family) }, (response) => {
+    const status = response.statusCode || 200;
+    if (status < 200 || status >= 300) {
+      response.resume();
+      return res.status(status).send("Authorized media source is temporarily unavailable.");
+    }
+    res.status(status);
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", response.headers["content-type"] || "video/mp4");
+    for (const key of ["content-length", "content-range", "accept-ranges", "etag", "last-modified"]) if (response.headers[key]) res.setHeader(key, response.headers[key]);
+    res.setHeader("Cache-Control", "private, no-store");
+    response.pipe(res);
+  });
+  const closeUpstream = () => { if (!upstream.destroyed) upstream.destroy(); };
+  req.once("aborted", closeUpstream);
+  res.once("close", closeUpstream);
+  upstream.setTimeout(30000, () => upstream.destroy(new Error("authorized download timeout")));
+  upstream.on("error", () => { if (!res.headersSent) res.status(502).send("Authorized media source is temporarily unavailable."); else res.end(); });
+});
 
 router.get("/proxy", async (req, res) => {
   recordAnimeActivity(req, "playback.requested", { route: "proxy" }, { category: "media", metric: "playback-requests", units: 1 });

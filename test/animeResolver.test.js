@@ -150,8 +150,7 @@ test("resolver: AniList unavailable must NOT block provider discovery (regressio
   // The resolver must expose the operator-controlled authorized manifest path.
   const sr = require("../src/tools/sourceResolver");
   assert.ok(sr.DISCOVERERS.some((d) => d.provider === "authorized"), "authorized manifest is a discoverer");
-  const deprecatedAnimePahe = sr.DISCOVERERS.find((d) => d.provider === "animepahe");
-  assert.ok(!deprecatedAnimePahe || deprecatedAnimePahe.enabled() === false, "deprecated AnimePahe path is disabled by default");
+  assert.ok(!sr.DISCOVERERS.some((d) => d.provider === "animepahe"), "deprecated AnimePahe path is not an active discoverer");
   assert.ok(sr.DISCOVERERS.length >= 4, "authorized source plus maintained fallback providers are registered");
 });
 

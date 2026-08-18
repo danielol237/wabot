@@ -213,6 +213,15 @@ const DISCOVERERS = [
     },
   },
   {
+    provider: "authorized",
+    enabled: () => Boolean(String(process.env.ARIA_ANIME_AUTHORIZED_SOURCES_JSON || "").trim()),
+    async discover(title, episode, season, quality) {
+      const chosen = pickAuthorizedDownload(title, episode || 1, quality);
+      if (!chosen) return { candidates: [], noResults: true };
+      return { candidates: [{ provider: "authorized", url: chosen.url, type: /\.m3u8(?:\?|$)/i.test(chosen.url) ? "hls" : "mp4", quality: String(chosen.resolution), height: chosen.resolution, headers: chosen.headers || { "User-Agent": "Mozilla/5.0" }, title }] };
+    },
+  },
+  {
     provider: "omnisave",
     // Circuit breaker: skip when open.
     enabled: () => UNVERIFIED_SOURCE_ACCESS && rep.usable("omnisave"),

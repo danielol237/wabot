@@ -32,7 +32,10 @@ Pair WhatsApp from the owner dashboard. Open `/dashboard`, sign in with `DASHBOA
 | `GOOGLE_CLIENT_SECRET` | No | Google OAuth client secret |
 | `PORTAL_SESSION_SECRET` | Recommended | Long random signing secret for learner sessions |
 | `MEDIA_PROXY_SECRET` | Required for browser playback/download links | Long random secret for expiring media capabilities |
-| `SESSION_ENCRYPT_KEY` | Required for Git-backed session backup | Dedicated random key of at least 32 characters |
+| `SESSION_GIT_REPO` | Required for Git-backed session backup | Private repository for encrypted WhatsApp session files, for example `danielol237/aria-whatsapp-session` |
+| `SESSION_GITHUB_TOKEN` | Required for Git-backed session backup | Fine-grained GitHub token limited to **Contents: Read and write** on the private session repository only |
+| `SESSION_ENCRYPT_KEY` | Required for Git-backed session backup | Dedicated random key of at least 32 characters; never reuse a GitHub token or commit it |
+| `SESSION_SYNC_INTERVAL` | No | Session backup interval in seconds; default 60 and minimum 30 |
 | `GITHUB_WEBHOOK_SECRET` | No | Optional HMAC secret for signed GitHub Sentinel deliveries |
 | `RENDER_WEBHOOK_SECRET` | No | Optional Standard Webhooks signing secret for Render Sentinel deliveries |
 | `ANIME_WHATSAPP_MAX_MB` | No | WhatsApp delivery ceiling; default 150 MB |

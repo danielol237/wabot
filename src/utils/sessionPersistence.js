@@ -5,8 +5,9 @@
 // WhatsApp link survives restarts — no more scanning QR codes repeatedly.
 //
 // Env vars:
-//   SESSION_GIT_REPO   — e.g. "gh_username/aria-session" (private repo)
-//   GITHUB_TOKEN       — a PAT with repo scope
+//   SESSION_GIT_REPO      — e.g. "gh_username/aria-session" (private repo)
+//   SESSION_GITHUB_TOKEN  — a fine-grained PAT with Contents read/write access
+//                            limited to that private session repository
 //   SESSION_SYNC_INTERVAL — seconds between auto-sync (default 60)
 
 const { execFile } = require("child_process");
@@ -20,7 +21,10 @@ const SESSIONS_DIR = path.join(HOME, "sessions");
 const GIT_DIR = path.join(HOME, ".session-sync");
 
 const REPO = process.env.SESSION_GIT_REPO || "";
-const TOKEN = process.env.GITHUB_TOKEN || "";
+// Keep the session backup credential separate from any general GitHub token
+// used by other ARIA features. This token should be limited to the private
+// session repository only.
+const TOKEN = process.env.SESSION_GITHUB_TOKEN || "";
 
 // Static askpass helper — reads the token from its own environment, so the
 // secret never appears in the git process argv (which other users/processes
@@ -218,7 +222,7 @@ async function restoreSession() {
 let syncInterval = null;
 function startAutoSync() {
   if (!syncEnabled()) {
-    warn("⚠️ Session persistence not configured — set SESSION_GIT_REPO + GITHUB_TOKEN + SESSION_ENCRYPT_KEY to avoid re-scanning QR on every restart.");
+    warn("⚠️ Session persistence not configured — set SESSION_GIT_REPO + SESSION_GITHUB_TOKEN + SESSION_ENCRYPT_KEY to avoid re-scanning QR on every restart.");
     return;
   }
   if (syncInterval) clearInterval(syncInterval);

@@ -25,14 +25,14 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   const senderJid = msg.key.participant || msg.key.remoteJid;
   const senderName = getSenderName(msg);
   const isGroup = chatId?.includes("g.us");
-  const botJid = sock?.user?.id;
+  const botJids = [sock?.user?.id, sock?.user?.jid, sock?.user?.lid, sock?.user?.phoneNumber].filter(Boolean);
   const text = getMessageText(msg);
   const lower = text.toLowerCase().trim();
 
   // ── BAN / MUTE check ───────────────────────────────────────
   if (isBanned(senderJid)) return;
   // Direct @mentions bypass mute so a muted group can still summon ARIA.
-  const directlyMentioned = isBotMentioned(msg, botJid) || triggeredByName(text);
+  const directlyMentioned = isBotMentioned(msg, botJids) || triggeredByName(text);
   if (isMuted(chatId) && !checkOwner(senderJid) && !directlyMentioned) return;
 
   // ── Ignore bot's own messages ──────────────────────────────
@@ -153,7 +153,7 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   const isCommand = (configuredPrefix && lower.startsWith(configuredPrefix)) || lower.startsWith("!");
   const hasNameTrigger = triggeredByName(text);
   const sessionActive = isSessionActive(chatId);
-  const mentioned = isBotMentioned(msg, botJid);
+  const mentioned = isBotMentioned(msg, botJids);
   // In groups, only act when actually addressed. In DMs, always act.
   const shouldReply = !isGroup || hasNameTrigger || isCommand || mentioned || sessionActive;
   if (!shouldReply) return;

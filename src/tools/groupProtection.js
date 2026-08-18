@@ -24,6 +24,7 @@ function checkGroupProtection({ text, msg, chatId, senderJid, isGroup }) {
 
   if (enabled(settings, "antimention") && mentions.length) return protectionResult("delete", "Mentions are disabled in this group.");
   if (enabled(settings, "antigroupmention") && mentions.length >= 3) return protectionResult("delete", "Mass mentions are disabled in this group.");
+  if (enabled(settings, "antisticker") && msg?.message?.stickerMessage) return protectionResult("delete", "Stickers are disabled in this group.");
 
   if (enabled(settings, "antihijack") && /(give|make|promote|add)\s+(me|\w+)\s+(admin|owner)|take\s+over\s+(this|the)\s+group|group\s+hijack/i.test(value)) {
     return protectionResult("delete", "Group-hijack bait is disabled in this group.");
@@ -70,6 +71,19 @@ async function handleParticipantUpdate(sock, update) {
       await sock.groupParticipantsUpdate(chatId, [actorJid.includes("@") ? actorJid : `${actorJid}@s.whatsapp.net`], "demote").catch(() => {});
     }
     await sock.sendMessage(chatId, { text: "🛡️ Owner protection restored the owner and reversed the removal attempt." }).catch(() => {});
+  }
+
+  if (update.action === "remove" && enabled(settings, "antileave")) {
+    const returning = (update.participants || []).filter((participant) =>
+      !participantMatches(participant, [...botIdentities])
+    );
+    if (returning.length) {
+      const jids = returning.map((participant) => participantJids(participant)[0] || participant).filter(Boolean);
+      if (jids.length) {
+        await sock.groupParticipantsUpdate(chatId, jids, "add").catch(() => {});
+        await sock.sendMessage(chatId, { text: `🛡️ Anti-leave restored ${jids.length} member${jids.length === 1 ? "" : "s"} after removal.` }).catch(() => {});
+      }
+    }
   }
   for (const participant of update.participants || []) {
     const mentionJid = participantJids(participant)[0] || participant;

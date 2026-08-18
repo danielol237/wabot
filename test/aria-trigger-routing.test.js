@@ -31,6 +31,7 @@ test("new group commands are registered once", () => {
 
 test("natural-language protection toggles resolve to the correct commands", () => {
   assert.equal(resolveNaturalAction("Aria enable antispam")?.intent, "antispam");
+  assert.equal(resolveNaturalAction("Aria turn on antispam for this GC")?.intent, "antispam");
   assert.equal(resolveNaturalAction("Aria turn on antiword")?.intent, "antiword");
 });
 

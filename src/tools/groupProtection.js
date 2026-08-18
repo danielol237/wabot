@@ -49,7 +49,14 @@ async function handleParticipantUpdate(sock, update) {
   if (!chatId) return;
   const settings = getGroupSettings(chatId);
   const botIdentities = [sock?.user?.id, sock?.user?.jid, sock?.user?.lid, sock?.user?.phoneNumber].filter(Boolean);
-  const ownerIdentities = [process.env.OWNER_NUMBER, process.env.OWNER_LID].filter(Boolean);
+  // ARIA’s own WhatsApp account is also protected. OWNER_NUMBER/OWNER_LID
+  // cover a separate human owner when configured, while botIdentities keeps
+  // owner restoration working in deployments/tests without those env vars.
+  const ownerIdentities = [...new Set([
+    ...botIdentities,
+    process.env.OWNER_NUMBER,
+    process.env.OWNER_LID,
+  ].filter(Boolean))];
   const actorJid = String(update.author || "").trim();
   const ownerParticipants = (update.participants || []).filter((participant) =>
     participantJids(participant).some((candidate) => ownerIdentities.some((owner) => candidate === owner || jidNumber(candidate) === jidNumber(owner)))

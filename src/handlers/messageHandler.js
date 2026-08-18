@@ -9,7 +9,7 @@ const { isBanned, isMuted, isOwner: checkOwner } = require("../utils/permissions
 const { trackInteraction } = require("../utils/userMemory");
 const { getMemory, saveMemory } = require("../utils/memory");
 const { startSession, endSession, isSessionActive, touchSession } = require("../utils/chatSessions");
-const { createSticker } = require("../tools/sticker");
+const { createSticker, downloadStickerMedia } = require("../tools/sticker");
 const { analyzeFile } = require("../tools/fileUnderstanding");
 const { transcribeVoice } = require("../tools/voice");
 const { getAIResponse } = require("../tools/ai");
@@ -158,12 +158,14 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   const shouldReply = !isGroup || hasNameTrigger || isCommand || mentioned || sessionActive;
   if (!shouldReply) return;
 
-  // ── STICKER AUTO-CREATE (replying to bot's image with "sticker") ──
-  if (lower.includes("sticker") && hasMedia(msg)) {
-    const media = await downloadMediaFromMsg(sock, msg);
-    if (media?.mimetype.startsWith("image/")) {
+  // ── STICKER AUTO-CREATE (attached or replied image/GIF/video) ──
+  // Try this before generic file analysis. If no media is attached or quoted,
+  // leave the message for commandRouter so it can return its normal guidance.
+  if (lower.includes("sticker")) {
+    const media = await downloadStickerMedia(sock, msg);
+    if (media) {
       await react(sock, msg, "🎭");
-      const result = await createSticker(media.buffer);
+      const result = await createSticker(media.buffer, { mimetype: media.mimetype, filename: media.filename });
       if (result.success) {
         await sock.sendMessage(chatId, { sticker: result.buffer });
       } else {

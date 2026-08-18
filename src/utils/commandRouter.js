@@ -164,7 +164,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "search", aliases: ["web", "google"], category: "utility", description: "Search the web", handler: handleSearch, ownerOnly: false });
   registerCommand({ name: "download", aliases: ["dl"], category: "utility", description: "Download media from URL", handler: handleDownload, ownerOnly: true });
   registerCommand({ name: "play", aliases: ["music", "song"], category: "utility", description: "Play a song: !play <song name>", handler: handlePlayMusic, ownerOnly: false });
-  registerCommand({ name: "yt", aliases: ["youtube", "ytdl"], category: "utility", description: "Download a video: !yt <url>", handler: handleYtDownload, ownerOnly: false });
+  registerCommand({ name: "yt", aliases: ["youtube", "ytdl", "video"], category: "utility", description: "Download a video: !yt <url>", handler: handleYtDownload, ownerOnly: false });
   registerCommand({ name: "tiktok", aliases: ["tok"], category: "utility", description: "Download a TikTok video: !tiktok <url>", handler: handleYtDownload, ownerOnly: false });
   registerCommand({ name: "ig", aliases: ["instagram", "igdl"], category: "utility", description: "Download an Instagram post/reel: !ig <url>", handler: handleYtDownload, ownerOnly: false });
   // NOTE: !run is claimed by the academy challenge runner (registered earlier).
@@ -293,8 +293,9 @@ function detectIntent(text) {
 }
 
 function triggeredByName(text) {
-  const lower = text.toLowerCase().trim();
-  return NAME_TRIGGERS.some(t => lower.startsWith(t) || lower.includes(t));
+  const lower = String(text || "").toLowerCase();
+  const escaped = BOT_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "i").test(lower);
 }
 
 function stripAriaAddress(text) {
@@ -342,10 +343,11 @@ function resolveExplicitNaturalCommand(cleaned) {
   if (/^(?:make|promote|appoint|give)\s+.+?\s+(?:an?\s+)?admin(?:\s+(?:in|of)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("promote");
   if (/^(?:remove|take|strip)\s+(?:his|her|their|the)\s+admin(?:\s+(?:rights?|role|status))?$/i.test(lower) || /^(?:demote|remove\s+admin)\s+.+$/i.test(lower)) return makeCommand("demote");
   if (/^(?:kick|remove|banish)\s+(?:him|her|them|this person|that person)$/i.test(lower)) return makeCommand("kick");
-  const directToggle = lower.match(/^(enable|disable)\s+(antibot|antidemote|antigroupmention|antigroupstatus|antihijack|antimention|antipromote|slowmode)$/i);
+  const scopeSuffix = String.raw`(?:\s+(?:for|in)\s+(?:this|the)\s+(?:gc|group))?`;
+  const directToggle = lower.match(new RegExp(String.raw`^(enable|disable)\s+(antibot|antidemote|antigroupmention|antigroupstatus|antihijack|antimention|antipromote|antispam|antisticker|antiword|antileave|slowmode)${scopeSuffix}$`, "i"));
   if (directToggle) return makeCommand(directToggle[2], directToggle[1].toLowerCase() === "enable" ? "on" : "off");
-  const turnToggle = lower.match(/^(?:turn|switch)\s+(on|off)\s+((?:anti[- ]?)?(?:bot|demote|groupmention|groupstatus|hijack|mention|promote)|slowmode)$/i);
-  const enableToggle = lower.match(/^(enable|disable)\s+((?:anti[- ]?)?(?:bot|demote|groupmention|groupstatus|hijack|mention|promote)|slowmode)$/i);
+  const turnToggle = lower.match(new RegExp(String.raw`^(?:turn|switch)\s+(on|off)\s+((?:anti[- ]?)?(?:bot|demote|groupmention|groupstatus|hijack|mention|promote|spam|sticker|word|leave)|slowmode)${scopeSuffix}$`, "i"));
+  const enableToggle = lower.match(new RegExp(String.raw`^(enable|disable)\s+((?:anti[- ]?)?(?:bot|demote|groupmention|groupstatus|hijack|mention|promote|spam|sticker|word|leave)|slowmode)${scopeSuffix}$`, "i"));
   const protectionToggle = turnToggle || enableToggle;
   if (protectionToggle) {
     const enabled = turnToggle ? protectionToggle[1] === "on" : protectionToggle[1] === "enable";

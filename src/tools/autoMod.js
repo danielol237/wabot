@@ -87,8 +87,10 @@ function checkMessage(text, senderName, chatId) {
     if (scam) return { action: settings.autoKick ? "kick" : "warn", reason: scam.reason };
   }
 
-  // 1. Banned words
-  if (settings.bannedWords.length > 0) {
+  // 1. Banned words. The antiword toggle is on by default for backwards
+  // compatibility, and can be disabled by an admin with antiword off.
+  const antiWordEnabled = gs.protections?.antiword !== false;
+  if (antiWordEnabled && settings.bannedWords.length > 0) {
     const found = settings.bannedWords.find((w) => lower.includes(w.toLowerCase()));
     if (found) {
       return { action: settings.autoKick ? "kick" : "warn", reason: `Banned word: "${found}"` };
@@ -106,7 +108,9 @@ function checkMessage(text, senderName, chatId) {
     }
   }
 
-  // 3. Flood / spam detection
+  // 3. Flood / spam detection. Existing behavior remains enabled unless an
+  // admin explicitly runs antispam off.
+  if (gs.protections?.antispam === false) return null;
   const chatFlood = floodTracker.get(chatId) || { lastMsg: "", count: 0, timestamps: [] };
   
   // Repeated same message

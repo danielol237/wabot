@@ -61,6 +61,18 @@ async function handleProtection(sock, msg, args, ctx) {
   return reply(sock, msg, `${value ? "✅ Enabled" : "⏸️ Disabled"} *${name}* for this group.`);
 }
 
+async function handleGroupInfo(sock, msg, args, ctx) {
+  if (!(await requireGroup(sock, msg, ctx))) return;
+  try {
+    const metadata = await sock.groupMetadata(ctx.chatId);
+    const owner = metadata.owner || metadata.subjectOwner || "unknown";
+    const description = metadata.desc || metadata.description || "No group description.";
+    return reply(sock, msg, `╭── *GROUP INFO* ──╮\n│ Name: ${metadata.subject || "Unknown"}\n│ Members: ${metadata.participants?.length || 0}\n│ Owner: @${jidNumber(owner)}\n│ ID: ${ctx.chatId}\n│ Description: ${String(description).slice(0, 500)}\n╰──────────────────╯`, { mentions: owner && owner !== "unknown" ? [owner] : [] });
+  } catch (error) {
+    return reply(sock, msg, `❌ I couldn't read this group's metadata: ${error.message}`);
+  }
+}
+
 async function handleSlowmode(sock, msg, args, ctx) {
   if (!ctx.isGroup) return reply(sock, msg, "Slowmode only works inside a group.");
   const value = String(args || "").trim().toLowerCase();
@@ -504,9 +516,11 @@ function makeDefinition(name, aliases, category, handler, ownerOnly = false) {
 
 function getPasquaCommands() {
   const defs = [];
-  const protections = ["antibot", "antidemote", "antigroupmention", "antigroupstatus", "antihijack", "antimention", "antipromote"];
+  const protections = ["antibot", "antidemote", "antigroupmention", "antigroupstatus", "antihijack", "antimention", "antipromote", "antispam", "antisticker", "antiword"];
   for (const name of protections) defs.push(makeDefinition(name, [], "group", handleProtection));
   defs.push(makeDefinition("slowmode", [], "group", handleSlowmode));
+  defs.push(makeDefinition("groupinfo", ["gcinfo", "group-info"], "group", handleGroupInfo));
+  defs.push(makeDefinition("antileave", [], "group", handleProtection));
   defs.push(makeDefinition("antiadmin", ["neveradmin", "blockadmin", "denyadmin"], "group", handleAntiAdmin, true));
   defs.push(makeDefinition("kickall", [], "group", handleKickAll, true));
   defs.push(makeDefinition("membercount", ["members"], "group", handleMemberCount));

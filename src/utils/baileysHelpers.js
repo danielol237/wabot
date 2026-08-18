@@ -25,22 +25,32 @@ function getTargetJid(msg) {
   return null;
 }
 
-// True if the bot's own JID appears in the message's @mention list, OR the
-// message is a reply to one of the bot's messages. Used to decide whether a
-// group message is actually addressing ARIA.
+// True if ARIA is directly @mentioned in any supported WhatsApp message
+// container, or the message replies to one of ARIA's tracked messages.
 function isBotMentioned(msg, botJid) {
   try {
-    const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
-    if (Array.isArray(mentioned) && botJid) {
-      const botNum = String(botJid).split(":")[0].split("@")[0];
-      if (mentioned.some((m) => String(m).split(":")[0].split("@")[0] === botNum)) return true;
-    }
-    // Reply-to-our-message detection via tracked sent message ids.
+    const containers = [
+      msg?.message?.extendedTextMessage?.contextInfo,
+      msg?.message?.imageMessage?.contextInfo,
+      msg?.message?.videoMessage?.contextInfo,
+      msg?.message?.documentMessage?.contextInfo,
+      msg?.message?.buttonsResponseMessage?.contextInfo,
+      msg?.message?.listResponseMessage?.contextInfo,
+    ].filter(Boolean);
+    const mentioned = containers.flatMap((info) => Array.isArray(info.mentionedJid) ? info.mentionedJid : []);
+    const botIds = (Array.isArray(botJid) ? botJid : [botJid]).filter(Boolean).map(normalizeJid);
+    if (mentioned.length && botIds.length && mentioned.some((jid) => botIds.includes(normalizeJid(jid)))) return true;
+
     const { wasSentByBot } = require("./botMessages");
-    const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
-    if (quotedId && wasSentByBot(quotedId)) return true;
+    if (containers.some((info) => info.stanzaId && wasSentByBot(info.stanzaId))) return true;
   } catch (_) {}
   return false;
+}
+
+function normalizeJid(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  const bare = raw.split(":")[0].split("@")[0];
+  return bare || raw;
 }
 
 async function reply(sock, msg, text, options = {}) {

@@ -12,35 +12,60 @@ async function attachImageBuffer(result) {
       maxBodyLength: 15 * 1024 * 1024,
       validateStatus: (status) => status >= 200 && status < 300,
     });
-    const contentType = String(response.headers["content-type"] || "image/jpeg").split(";")[0];
+    const contentType = String(response.headers["content-type"] || "image/jpeg").split(";")[0].toLowerCase();
     if (!contentType.startsWith("image/")) throw new Error("provider returned a non-image response");
-    return { ...result, buffer: Buffer.from(response.data), mimetype: contentType };
+    const buffer = Buffer.from(response.data);
+    if (!buffer.length) throw new Error("provider returned an empty image");
+    return { ...result, buffer, mimetype: contentType };
   } catch (error) {
-    return { ...result, fetchError: error.message };
+    return {
+      ...result,
+      success: false,
+      error: `image download failed: ${String(error?.message || error).slice(0, 300)}`,
+      fetchError: String(error?.message || error).slice(0, 300),
+    };
   }
 }
 
 async function generateImage(prompt) {
+  const failures = [];
   if (minimax.configured() && process.env.MINIMAX_IMAGE_ENABLED !== "0") {
     const generated = await minimax.generateImage(prompt);
-    if (generated.success) return attachImageBuffer(generated);
+    if (generated.success) {
+      const hydrated = await attachImageBuffer(generated);
+      if (hydrated.success && (hydrated.buffer || hydrated.url)) return hydrated;
+      failures.push(`MiniMax: ${hydrated.error || hydrated.fetchError || "no usable image"}`);
+    } else {
+      failures.push(`MiniMax: ${generated.error || "request failed"}`);
+    }
     console.warn("MiniMax image generation failed; trying Z.AI/Pollinations fallback:", generated.error);
   }
   if (zai.configured() && process.env.ZHIPU_IMAGE_ENABLED !== "0") {
     const generated = await zai.generateImage(prompt, { userId: "aria-image" });
-    if (generated.success) return attachImageBuffer(generated);
+    if (generated.success) {
+      const hydrated = await attachImageBuffer(generated);
+      if (hydrated.success && (hydrated.buffer || hydrated.url)) return hydrated;
+      failures.push(`Z.AI: ${hydrated.error || hydrated.fetchError || "no usable image"}`);
+    } else {
+      failures.push(`Z.AI: ${generated.error || "request failed"}`);
+    }
     console.warn("Z.AI image generation failed; using Pollinations fallback:", generated.error);
   }
   try {
-    // Pollinations.ai — free fallback when Z.AI is not configured.
+    // Pollinations.ai — free fallback when paid providers are not configured.
+    // Use a real GET because some CDN edges reject HEAD even when the image is
+    // available. Returning the downloaded bytes also avoids a second transient
+    // provider fetch inside WhatsApp.
     const encodedPrompt = encodeURIComponent(prompt);
     const seed = Math.floor(Math.random() * 999999);
     const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&nologo=true&enhance=true`;
-    await axios.head(url, { timeout: 15000 });
-    return attachImageBuffer({ success: true, provider: "pollinations", url });
+    const fetched = await attachImageBuffer({ success: true, provider: "pollinations", url });
+    if (!fetched.buffer) throw new Error(fetched.fetchError || "Pollinations returned no usable image");
+    return fetched;
   } catch (err) {
-    console.error("Image gen error:", err.message);
-    return { success: false, error: err.message };
+    failures.push(`Pollinations: ${String(err?.message || err).slice(0, 300)}`);
+    console.error("Image gen error:", failures.join(" | "));
+    return { success: false, error: failures.join(" | ") || "No image provider is available" };
   }
 }
 

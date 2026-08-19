@@ -47,6 +47,7 @@ const { setReminder } = require("../tools/reminders");
 const { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
 const { handleAriaLifeFeature } = require("../tools/ariaLifeFeatures");
+const businessMode = require("../tools/businessMode");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 // Natural-language routing is the default. The legacy prefix remains accepted
@@ -289,6 +290,10 @@ function registerBuiltinCommands() {
   registerCommand({ name: "grant", aliases: [], category: "admin", description: "Grant a capability to a user", handler: handleGrant, ownerOnly: true });
   registerCommand({ name: "revoke", aliases: [], category: "admin", description: "Revoke a capability", handler: handleRevoke, ownerOnly: true });
   registerCommand({ name: "caps", aliases: ["permissions"], category: "admin", description: "View granted capabilities", handler: handleCaps, ownerOnly: true });
+  // Business Mode is deliberately owner-only. It drafts professional replies but
+  // never sends a customer message from this conversational surface.
+  registerCommand({ name: "businessmode", aliases: ["business", "salesmode", "clientmode"], category: "owner", description: "Configure owner-only business reply drafting", handler: handleBusinessMode, ownerOnly: true });
+
   // 'teach' belongs to !explain (teach-it-back). Removing it here avoids the
   // ambiguous alias collision between explain.teach and learn.teach.
   registerCommand({ name: "learn", aliases: [], category: "dev", description: "Teach a fact: !learn <fact>", handler: handleLearn, ownerOnly: false });
@@ -426,6 +431,11 @@ function resolveExplicitNaturalCommand(cleaned) {
 
   const pins = lower.match(/^(?:give|send|show|get)(?:\s+me)?\s+(?:(\d{1,2})\s+)?(?:pics?|pictures?|images?|photos?)\s+(?:of|for)\s+(.+)$/i);
   if (pins) return makeCommand("pinterest", `${pins[1] || 5} pics of ${pins[2]}`);
+
+  const businessStart = lower.match(/^business\s+mode(?:\s+(on|start|off|stop|exit))?$/i);
+  if (businessStart) return makeCommand("businessmode", businessStart[1] || "start");
+  const businessSetup = lower.match(/^business\s+mode\s+(?:setup|configure|about|selling)\s*[:=-]?\s*(.+)$/i);
+  if (businessSetup) return makeCommand("businessmode", `setup ${businessSetup[1].trim()}`);
 
   const releaseRequest = lower.match(/^(?:search|look\s+up|find)\s+(?:on\s+)?github\s+(?:about\s+)?(.+?)\s+(?:and\s+)?(?:bring|give|show|find)\s+(?:me\s+)?(?:the\s+)?(?:(?:release(?:s)?\s+links?)|(?:links?\s+to\s+release(?:s)?))$/i);
   if (releaseRequest) return makeCommand("releases", releaseRequest[1].trim());
@@ -600,6 +610,18 @@ async function routeMessage(sock, msg, context) {
       const { reply: _rp } = require("./baileysHelpers");
       await _rp(sock, msg, `⚠️ I couldn't complete that action: ${err.message}`).catch(() => {});
       try { require("./eventLog").track("error", `Natural action ${natural.intent} failed: ${err.message.slice(0, 80)}`); } catch (_) {}
+    }
+    return;
+  }
+
+  // Once the owner has enabled Business Mode, plain pasted customer messages
+  // become drafts instead of being answered in ARIA's casual companion voice.
+  if (isOwner(senderJid) && businessMode.isActive(senderJid, chatId)) {
+    try {
+      await handleBusinessMode(sock, msg, text, context);
+    } catch (err) {
+      const { reply: _rp } = require("./baileysHelpers");
+      await _rp(sock, msg, `⚠️ Business Mode could not draft that reply: ${String(err?.message || err).slice(0, 300)}`);
     }
     return;
   }
@@ -1177,6 +1199,53 @@ async function handleSell(sock, msg, args, ctx) {
 async function handleCardLeaderboard(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   await reply(sock, msg, getLeaderboard());
+}
+
+// Owner-only Business Mode. It is intentionally approval-first: ARIA drafts text
+// for the owner to copy into a customer chat and never sends it to the customer.
+async function handleBusinessMode(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const raw = String(args || "").trim();
+  const operation = raw.toLowerCase();
+  if (["off", "stop", "exit", "disable"].includes(operation)) {
+    businessMode.stop(ctx.senderJid, ctx.chatId);
+    return reply(sock, msg, "Business Mode is off. ARIA is back to normal companion mode.");
+  }
+
+  if (!raw || ["on", "start", "enable"].includes(operation)) {
+    const existing = businessMode.profile(ctx.senderJid);
+    businessMode.start(ctx.senderJid, ctx.chatId);
+    await react(sock, msg, "💼");
+    if (existing) {
+      return reply(sock, msg, "💼 Business Mode is on. Paste a customer’s message and I’ll return a professional reply marked *COPY THIS TO CUSTOMER*. Say *first reply* for the opening message, or *business mode off* to leave.");
+    }
+    return reply(sock, msg, "💼 Business Mode is on. Tell me what the business sells, who it serves, prices or packages, delivery/location, contact details, policies, and the tone you want. I will use only that information and will draft replies for you to copy — I will not send to customers automatically.");
+  }
+
+  const setup = raw.match(/^setup\s+([\s\S]+)$/i);
+  if (setup) {
+    const profile = businessMode.configure(ctx.senderJid, ctx.chatId, setup[1]);
+    await react(sock, msg, "💼");
+    const opening = businessMode.openingReply(profile);
+    return reply(sock, msg, `✅ Business profile saved.\n\n*FIRST REPLY — COPY THIS TO CUSTOMER:*\n${opening}\n\nNow paste the customer’s next message here and I’ll draft the corresponding reply. Nothing will be sent automatically.`);
+  }
+
+  const profile = businessMode.profile(ctx.senderJid);
+  if (!profile) {
+    businessMode.start(ctx.senderJid, ctx.chatId);
+    return reply(sock, msg, "I need the business details first. Tell me what you sell, your prices or packages, delivery/location, contact details, policies, and preferred tone. You can send it naturally or use `!businessmode setup ...`.");
+  }
+  if (/^(first\s+reply|opening\s+reply|intro(?:duction)?|hello)$/i.test(raw)) {
+    return reply(sock, msg, `*FIRST REPLY — COPY THIS TO CUSTOMER:*\n${businessMode.openingReply(profile)}`);
+  }
+
+  let draft = "";
+  try {
+    const businessPrompt = `You are ARIA Business Mode, a professional business owner and customer-reply writer. Use only the business information below. Never invent prices, stock, delivery promises, guarantees, policies, addresses, or timelines. If a detail is missing, say that it needs confirmation. Write one concise, warm, clear customer-facing reply. Do not include analysis, headings, emojis, or quotation marks.\n\nBUSINESS INFORMATION:\n${profile.brief}\n\nCUSTOMER MESSAGE:\n${raw}`;
+    draft = await getAIResponse(businessPrompt, ctx.senderName, [], "You are ARIA Business Mode. You produce accurate, professional customer replies for the owner to review and copy. Never claim a message was sent.", "", { userContext: `Business profile: ${profile.brief}` });
+  } catch (_) {}
+  if (!draft || /^❌/u.test(String(draft).trim())) draft = businessMode.fallbackReply(profile, raw);
+  return reply(sock, msg, `*COPY THIS TO CUSTOMER:*\n${String(draft).trim()}\n\n*Internal note:* Review the details before sending. ARIA has not contacted the customer.`);
 }
 
 // Creative handlers

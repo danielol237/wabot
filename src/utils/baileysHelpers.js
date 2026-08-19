@@ -2,7 +2,7 @@ const { downloadMediaMessage, normalizeMessageContent } = require("@whiskeysocke
 const { wasSentByBot } = require("./botMessages");
 const { log, error, warn } = require("./logger");
 
-const MEDIA_MESSAGE_TYPES = ["imageMessage", "videoMessage", "documentMessage", "audioMessage"];
+const MEDIA_MESSAGE_TYPES = ["imageMessage", "videoMessage", "documentMessage", "audioMessage", "stickerMessage"];
 const MAX_QUOTED_MEDIA_DEPTH = 6;
 
 /**

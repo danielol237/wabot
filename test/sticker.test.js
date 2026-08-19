@@ -92,6 +92,11 @@ test("sticker: wrapped current video counts as media", () => {
   assert.equal(hasMedia(msg), true);
 });
 
+test("sticker: a direct WhatsApp sticker counts as visual media for addressed analysis", () => {
+  const msg = { message: { stickerMessage: { mimetype: "image/webp", fileName: "reaction.webp" } } };
+  assert.equal(hasMedia(msg), true);
+});
+
 test("sticker: voice notes remain separate from visual media", () => {
   const msg = { message: { audioMessage: { mimetype: "audio/ogg; codecs=opus" } } };
   assert.equal(hasMedia(msg), false);

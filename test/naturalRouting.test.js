@@ -49,6 +49,29 @@ test("natural routing resolves capability discovery, memory recall, and website 
   assert.equal(router.resolveNaturalAction("approve brief brief_test").intent, "atlas");
 });
 
+test("natural routing understands generation prompts without a prefix", () => {
+  const image = router.resolveNaturalAction("ARIA generate the image of a dog running through a field");
+  assert.equal(image.intent, "image");
+  assert.equal(image.args, "a dog running through a field");
+
+  const video = router.resolveNaturalAction("ARIA generate my damn video of a dog on the beach");
+  assert.equal(video.intent, "video");
+  assert.equal(video.args, "a dog on the beach");
+
+  const music = router.resolveNaturalAction("ARIA make me a dark afrobeats song for a night drive");
+  assert.equal(music.intent, "music");
+  assert.equal(music.args, "dark afrobeats song for a night drive");
+
+  const voice = router.resolveNaturalAction("ARIA generate a voice saying I am on my way");
+  assert.equal(voice.intent, "voiceGenerate");
+  assert.equal(voice.args, "saying I am on my way");
+});
+
+test("natural routing does not mistake ordinary conversation for generation", () => {
+  assert.equal(router.resolveNaturalAction("I watched a video of a dog today"), null);
+  assert.equal(router.resolveNaturalAction("the song was good"), null);
+});
+
 test("legacy prefix commands remain resolvable during migration", () => {
   const action = router.resolveNaturalAction("!help");
   assert.equal(action, null);

@@ -1,4 +1,5 @@
 const axios = require("axios");
+const minimax = require("./minimaxMedia");
 const zai = require("./zaiMedia");
 
 async function attachImageBuffer(result) {
@@ -20,6 +21,11 @@ async function attachImageBuffer(result) {
 }
 
 async function generateImage(prompt) {
+  if (minimax.configured() && process.env.MINIMAX_IMAGE_ENABLED !== "0") {
+    const generated = await minimax.generateImage(prompt);
+    if (generated.success) return attachImageBuffer(generated);
+    console.warn("MiniMax image generation failed; trying Z.AI/Pollinations fallback:", generated.error);
+  }
   if (zai.configured() && process.env.ZHIPU_IMAGE_ENABLED !== "0") {
     const generated = await zai.generateImage(prompt, { userId: "aria-image" });
     if (generated.success) return attachImageBuffer(generated);

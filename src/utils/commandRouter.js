@@ -66,6 +66,8 @@ const NAME_TRIGGERS = [
 // ── Intent patterns ──────────────────────────────────────────
 const INTENTS = {
   image: ["generate an image", "generate a picture", "generate a pic", "create an image", "create a picture", "create a pic", "make an image", "make a picture", "make a pic", "draw me", "draw a", "imagine a", "imagine an", "paint a", "paint me", "design an image", "give me an image", "show me a picture"],
+  video: ["generate a video", "generate me a video", "generate my video", "create a video", "create me a video", "make a video", "make me a video", "animate this", "create an animation"],
+  music: ["generate music", "generate a song", "make music", "make a song", "create music", "create a song", "compose music", "compose a song", "make a beat", "make me a beat", "create a soundtrack"],
   search: ["search for", "look up", "google", "search the web", "find info on"],
   download: ["download", "dl this", "get this video", "save this"],
   scrape: ["read this link", "open this link", "check this site", "visit", "browse", "summarize this link", "what's on this site"],
@@ -87,6 +89,7 @@ const INTENTS = {
     "turn this gif into a sticker", "make this gif a sticker", "make this video a sticker", "make this image a sticker",
     "create sticker", "create a sticker", "make whatsapp sticker",
   ],
+  voiceGenerate: ["generate a voice", "generate voice", "generate speech", "create a voice", "create speech", "make a voice", "make audio", "generate audio", "create audio", "narrate this"],
   voiceReply: ["say this", "voice note", "speak this", "read this out", "say it out loud"],
   translate: ["translate", "say this in", "how do you say"],
   weather: ["weather in", "weather for", "what's the weather"],
@@ -322,6 +325,16 @@ function detectIntent(text) {
       }
     }
   }
+
+  // Accept natural phrasing such as “generate my damn video of a dog”, but
+  // keep the match anchored to an explicit generation verb so ordinary chat
+  // is never hijacked into a media request.
+  if (/^(?:please\s+)?(?:generate|create|make|produce|render|animate|draw|paint|imagine|design|give me|show me)\b/i.test(lower)) {
+    if (/\b(video|clip|film|animation|movie)\b/i.test(lower)) return "video";
+    if (/\b(music|song|beat|soundtrack|instrumental)\b/i.test(lower)) return "music";
+    if (/\b(voice|speech|audio|narration|narrate)\b/i.test(lower)) return "voiceGenerate";
+    if (/\b(image|picture|pic|photo|drawing|illustration|art|portrait)\b/i.test(lower)) return "image";
+  }
   return null;
 }
 
@@ -342,7 +355,10 @@ function stripAriaAddress(text) {
 function naturalArgs(intent, text) {
   const value = stripAriaAddress(text);
   const patterns = {
-    image: /^(?:please\s+)?(?:generate|create|make|draw|paint|imagine|design|give me|show me)(?:\s+(?:a|an|me|some))?\s+(?:image|picture|pic|photo|drawing|illustration)\s*(?:of\s+)?/i,
+    image: /^(?:please\s+)?(?:generate|create|make|draw|paint|imagine|design|give me|show me)(?:\s+(?:a|an|me|my|the|this|that|some))*\s+(?:image|picture|pic|photo|drawing|illustration|art|portrait)\s*(?:of\s+)?/i,
+    video: /^(?:please\s+)?(?:generate|create|make|produce|render|animate|give me|show me)(?:\s+(?:a|an|me|my|the|this|that|some|damn|fucking))*\s+(?:video|clip|film|animation|movie)\s*(?:of\s+)?/i,
+    music: /^(?:please\s+)?(?:generate|create|make|produce|compose)(?:\s+(?:a|an|me|my|the|this|that|some|music))*\s+/i,
+    voiceGenerate: /^(?:please\s+)?(?:generate|create|make|produce|record|narrate)(?:\s+(?:a|an|me|my|the|this|that|some))*\s+(?:voice|speech|audio|narration)\s*/i,
     build: /^(?:please\s+)?(?:build|create|make)(?:\s+me)?(?:\s+(?:a|an))?\s*/i,
     deploy: /^(?:please\s+)?(?:deploy|host|publish)(?:\s+(?:it|this|the project|through vercel|on vercel))?\s*/i,
     delegate: /^(?:please\s+)?(?:delegate|orchestrate|hand this off)(?:\s+(?:this|that|task|mission))?\s*/i,
@@ -1181,6 +1197,62 @@ async function handleImageGen(sock, msg, args, ctx) {
     }
   } else {
     await reply(sock, msg, `❌ Image generation failed: ${result?.error || result?.fetchError || "the provider returned no usable image"}`);
+  }
+}
+
+async function handleVideoGen(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const prompt = String(args || "").trim();
+  if (!prompt) return reply(sock, msg, "Tell me what video to generate, for example: generate a cinematic video of a dog running on a beach.");
+  await react(sock, msg, "🎬");
+  await reply(sock, msg, "🎬 Generating it now — video generation can take a little while.");
+  const minimax = require("../tools/minimaxMedia");
+  let result = minimax.configured() ? await minimax.generateVideo(prompt) : { success: false, error: "MiniMax is not configured" };
+  if (!result.success) {
+    try {
+      const zai = require("../tools/zaiMedia");
+      if (zai.configured()) result = await zai.generateVideo(prompt, { userId: "aria-video" });
+    } catch (_) {}
+  }
+  if (!result?.success || !result.url) return reply(sock, msg, `❌ Video generation failed: ${result?.error || "the provider returned no video URL"}`);
+  try {
+    await sock.sendMessage(ctx.chatId, { video: { url: result.url }, mimetype: "video/mp4", caption: `🎬 ${prompt}` }, { quoted: msg });
+  } catch (error) {
+    await reply(sock, msg, `❌ I generated the video, but WhatsApp could not fetch it: ${error.message}`);
+  }
+}
+
+async function handleMusicGen(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const prompt = String(args || "").trim();
+  if (!prompt) return reply(sock, msg, "Tell me the style or mood, for example: make a dark afrobeats track for a night drive.");
+  await react(sock, msg, "🎵");
+  await reply(sock, msg, "🎵 Composing it now…");
+  const result = await require("../tools/minimaxMedia").generateMusic(prompt);
+  if (!result?.success) return reply(sock, msg, `❌ Music generation failed: ${result?.error || "the provider returned no audio"}`);
+  try {
+    const payload = result.buffer ? { audio: result.buffer, mimetype: result.mimetype || "audio/mpeg", ptt: false } : { audio: { url: result.url }, mimetype: result.mimetype || "audio/mpeg", ptt: false };
+    await sock.sendMessage(ctx.chatId, payload, { quoted: msg });
+  } catch (error) {
+    await reply(sock, msg, `❌ I generated the music, but WhatsApp could not fetch it: ${error.message}`);
+  }
+}
+
+async function handleVoiceGenerate(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const text = String(args || "").trim();
+  if (!text) return reply(sock, msg, "Tell me what you want ARIA to say, for example: generate a voice saying I am on my way.");
+  await react(sock, msg, "🔊");
+  let result = { success: false, error: "MiniMax is not configured" };
+  const minimax = require("../tools/minimaxMedia");
+  if (minimax.configured()) result = await minimax.generateSpeech(text);
+  if (!result.success) result = await textToSpeech(text);
+  if (!result?.success) return reply(sock, msg, `❌ Voice generation failed: ${result?.error || "no audio was returned"}`);
+  try {
+    const payload = result.buffer ? { audio: result.buffer, mimetype: result.mimetype || "audio/mpeg", ptt: false } : { audio: { url: result.url }, mimetype: result.mimetype || "audio/mpeg", ptt: false };
+    await sock.sendMessage(ctx.chatId, payload, { quoted: msg });
+  } catch (error) {
+    await reply(sock, msg, `❌ I generated the voice, but WhatsApp could not fetch it: ${error.message}`);
   }
 }
 
@@ -2063,6 +2135,9 @@ async function handleClear(sock, msg, args, ctx) {
 // ── Intent-based handlers ────────────────────────────────────
 const intentHandlers = {
   image: handleImageGen,
+  video: handleVideoGen,
+  music: handleMusicGen,
+  voiceGenerate: handleVoiceGenerate,
   search: handleSearch,
   download: handleDownload,
   scrape: async (sock, msg, text, ctx) => {

@@ -6,6 +6,7 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
+const minimax = require("./minimaxMedia");
 const { log, error, warn } = require("../utils/logger");
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
@@ -69,6 +70,11 @@ async function freeSpeechToText(audioBuffer, mimetype = "audio/ogg") {
 // ElevenLabs as primary, falls back to FreeTTS
 
 async function textToSpeech(text, voice = "en-US-JennyNeural") {
+  if (minimax.configured() && process.env.MINIMAX_VOICE_ENABLED !== "0") {
+    const result = await minimax.generateSpeech(text, { voiceId: process.env.MINIMAX_VOICE_ID });
+    if (result.success) return result;
+    error("MiniMax speech failed, falling back to ElevenLabs/FreeTTS:", result.error);
+  }
   if (process.env.ELEVENLABS_API_KEY) {
     const result = await elevenLabsTTS(text);
     if (result.success) return result;

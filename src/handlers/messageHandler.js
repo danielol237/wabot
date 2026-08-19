@@ -19,6 +19,26 @@ const { log, error, warn } = require("../utils/logger");
 const { updateMood, humanDelay, isSleeping, getStateMessage } = require("../tools/humanity");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
+const RECENT_MESSAGE_TTL_MS = 5 * 60 * 1000;
+const REPEATED_TEXT_WINDOW_MS = 5000;
+const recentMessageIds = new Map();
+const recentInboundTexts = new Map();
+
+function claimInboundMessage(messageId, chatId, senderJid, text) {
+  const now = Date.now();
+  for (const [key, at] of recentMessageIds) if (now - at > RECENT_MESSAGE_TTL_MS) recentMessageIds.delete(key);
+  for (const [key, at] of recentInboundTexts) if (now - at > REPEATED_TEXT_WINDOW_MS) recentInboundTexts.delete(key);
+  if (messageId) {
+    if (recentMessageIds.has(messageId)) return false;
+    recentMessageIds.set(messageId, now);
+  }
+  const normalizedText = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalizedText) return true;
+  const textKey = `${chatId || ""}:${senderJid || ""}:${normalizedText}`;
+  if (recentInboundTexts.has(textKey)) return false;
+  recentInboundTexts.set(textKey, now);
+  return true;
+}
 
 async function handleMessage(sock, msg, loadedPlugins = []) {
   const chatId = msg.key.remoteJid;
@@ -37,6 +57,9 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
 
   // ── Ignore bot's own messages ──────────────────────────────
   if (msg.key.fromMe) return;
+  // Baileys can redeliver the same event, and rapid case-only repeats such as
+  // "Aria"/"ARIA" should not start multiple AI calls in the same group.
+  if (!claimInboundMessage(msg.key?.id, chatId, senderJid, text)) return;
 
   // ── Dashboard telemetry (real inbound messages only) ────────
   try { require("../tools/dashboardTelemetry").record("message"); } catch (_) {}
@@ -145,9 +168,6 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     return;
   }
 
-  // Human-like typing delay before any response
-  await humanDelay(sock, chatId, senderJid, text.length + 1);
-
   // ── DECIDE WHETHER TO REPLY (checked for text AND media/voice) ──
   const configuredPrefix = String(process.env.BOT_PREFIX || "").trim().toLowerCase();
   const isCommand = (configuredPrefix && lower.startsWith(configuredPrefix)) || lower.startsWith("!");
@@ -157,6 +177,12 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // In groups, only act when actually addressed. In DMs, always act.
   const shouldReply = !isGroup || hasNameTrigger || isCommand || mentioned || sessionActive;
   if (!shouldReply) return;
+
+  // Direct commands, mentions, and named action requests should feel immediate.
+  // Keep the optional typing delay only for ordinary conversational messages.
+  if (!isCommand && !hasNameTrigger && !mentioned) {
+    await humanDelay(sock, chatId, senderJid, text.length + 1);
+  }
 
   // ── STICKER AUTO-CREATE (attached or replied image/GIF/video) ──
   // Try this before generic file analysis. If no media is attached or quoted,
@@ -271,4 +297,4 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   return routeMessage(sock, msg, context);
 }
 
-module.exports = { handleMessage };
+module.exports = { handleMessage, _test: { claimInboundMessage } };

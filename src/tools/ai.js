@@ -300,9 +300,10 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
     }
   }
 
-  // If we get here, every provider failed. Report the last error so it's not a
-  // mystery — this message goes straight to WhatsApp and makes debugging instant.
-  return "❌ AI request failed on all providers. Last error: " + (lastError || "unknown") + " (Cerebras/Gemini/Groq/OpenRouter all tried)";
+  // Keep provider names, model IDs, and quota/key details in server logs only.
+  // They are debugging data, not a professional WhatsApp response.
+  error("All configured AI chat providers failed:", lastError || "unknown");
+  return "❌ I couldn't reach ARIA's chat brain right now. Please try again shortly; the server has recorded the provider failure.";
 }
 
 // ── Dashboard telemetry ─────────────────────────────────────

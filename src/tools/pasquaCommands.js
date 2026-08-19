@@ -50,6 +50,7 @@ async function requireGroup(sock, msg, ctx) {
 async function handleProtection(sock, msg, args, ctx) {
   if (!ctx.isGroup) return reply(sock, msg, "Protection toggles only work inside a group.");
   const name = ctx.pasquaCommand;
+  if (name === "adminprotect" && !isOwnerJid(ctx.senderJid)) return reply(sock, msg, "❌ Only the owner can control admin protection.");
   const value = toggleValue(args);
   const settings = getGroupSettings(ctx.chatId);
   if (value === null) {
@@ -518,6 +519,7 @@ function getPasquaCommands() {
   const defs = [];
   const protections = ["antibot", "antidemote", "antigroupmention", "antigroupstatus", "antihijack", "antimention", "antipromote", "antispam", "antisticker", "antiword"];
   for (const name of protections) defs.push(makeDefinition(name, [], "group", handleProtection));
+  defs.push(makeDefinition("adminprotect", ["adminshield", "keepadmins", "antiadminremoval", "nonadminremoval"], "group", handleProtection, true));
   defs.push(makeDefinition("slowmode", [], "group", handleSlowmode));
   defs.push(makeDefinition("groupinfo", ["gcinfo", "group-info"], "group", handleGroupInfo));
   defs.push(makeDefinition("antileave", [], "group", handleProtection));

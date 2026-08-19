@@ -344,6 +344,17 @@ function resolveExplicitNaturalCommand(cleaned) {
   if (/^(?:remove|take|strip)\s+(?:his|her|their|the)\s+admin(?:\s+(?:rights?|role|status))?$/i.test(lower) || /^(?:demote|remove\s+admin)\s+.+$/i.test(lower)) return makeCommand("demote");
   if (/^(?:kick|remove|banish)\s+(?:him|her|them|this person|that person)$/i.test(lower)) return makeCommand("kick");
   const scopeSuffix = String.raw`(?:\s+(?:for|in)\s+(?:this|the)\s+(?:gc|group))?`;
+  const adminProtectionToggle = lower.match(new RegExp(String.raw`^(?:(?:turn|switch)\s+(on|off)|(?:enable|disable))\s+(?:the\s+)?(?:admin(?:s)?\s+(?:protection|shield|guard|non[- ]?removal)|(?:anti[- ]?admin[- ]?removal)|(?:non[- ]?admin[- ]?removal)|adminprotect|adminshield|keepadmins)${scopeSuffix}$`, "i"));
+  if (adminProtectionToggle) {
+    const enabled = adminProtectionToggle[1] === "on" || adminProtectionToggle[1] === "enable";
+    return makeCommand("adminprotect", enabled ? "on" : "off");
+  }
+  const adminProtectionPhrases = [
+    new RegExp(String.raw`^(?:protect|guard)\s+(?:me\s+and\s+aria|us|the\s+admins?)(?:\s+(?:from|against)\s+(?:being\s+)?(?:demoted|removed|kicked?))?${scopeSuffix}$`, "i"),
+    new RegExp(String.raw`^(?:keep|make\s+sure)\s+(?:me\s+and\s+aria|us|the\s+admins?)\s+(?:as\s+)?admins?(?:\s+safe)?${scopeSuffix}$`, "i"),
+    new RegExp(String.raw`^(?:don'?t|do\s+not)\s+let\s+anyone\s+(?:demote|remove|kick)\s+(?:me|us|the\s+admins?)${scopeSuffix}$`, "i"),
+  ];
+  if (adminProtectionPhrases.some((pattern) => pattern.test(lower))) return makeCommand("adminprotect", "on");
   const directToggle = lower.match(new RegExp(String.raw`^(enable|disable)\s+(antibot|antidemote|antigroupmention|antigroupstatus|antihijack|antimention|antipromote|antispam|antisticker|antiword|antileave|slowmode)${scopeSuffix}$`, "i"));
   if (directToggle) return makeCommand(directToggle[2], directToggle[1].toLowerCase() === "enable" ? "on" : "off");
   const turnToggle = lower.match(new RegExp(String.raw`^(?:turn|switch)\s+(on|off)\s+((?:anti[- ]?)?(?:bot|demote|groupmention|groupstatus|hijack|mention|promote|spam|sticker|word|leave)|slowmode)${scopeSuffix}$`, "i"));
@@ -668,6 +679,14 @@ async function handleKick(sock, msg, args, ctx) {
   if (!(await ensureBotGroupAdmin(sock, msg, ctx.chatId))) return;
   const target = getTargetJid(msg);
   if (!target) return reply(sock, msg, "Mention or quote the member, then say “ARIA, remove @member”. I will not guess who “him” is before removing someone.");
+  const ownerNumber = String(process.env.OWNER_NUMBER || "").replace(/\D/g, "");
+  const targetNumber = String(target).split("@")[0].replace(/\D/g, "");
+  const botIdentities = [sock?.user?.id, sock?.user?.jid, sock?.user?.lid, sock?.user?.phoneNumber].filter(Boolean);
+  const targetIsBot = botIdentities.some((identity) => identity === target || String(identity).split("@")[0].replace(/\D/g, "") === targetNumber);
+  const targetIsOwner = isOwner(target) || (!!ownerNumber && targetNumber === ownerNumber);
+  if (targetIsOwner || targetIsBot) {
+    return reply(sock, msg, "🤣 Absolutely not. Trying to kick a protected admin is a bold little mistake. Find a less embarrassing mission.");
+  }
   const result = await kickUser(sock, ctx.chatId, target);
   await react(sock, msg, "👢");
   if (result?.success === false) await reply(sock, msg, `❌ Kick failed: ${result.error}`);

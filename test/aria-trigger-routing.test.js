@@ -24,7 +24,7 @@ test("ARIA direct mention works in an image caption and normalizes device JIDs",
 
 test("new group commands are registered once", () => {
   const names = commands.map((command) => command.name);
-  for (const name of ["antispam", "antisticker", "antiword", "antileave", "groupinfo"]) {
+  for (const name of ["antispam", "antisticker", "antiword", "antileave", "groupinfo", "adminprotect"]) {
     assert.equal(names.filter((item) => item === name).length, 1, `${name} should be registered once`);
   }
 });
@@ -33,6 +33,15 @@ test("natural-language protection toggles resolve to the correct commands", () =
   assert.equal(resolveNaturalAction("Aria enable antispam")?.intent, "antispam");
   assert.equal(resolveNaturalAction("Aria turn on antispam for this GC")?.intent, "antispam");
   assert.equal(resolveNaturalAction("Aria turn on antiword")?.intent, "antiword");
+  for (const phrase of [
+    "Aria turn on admin protection for this GC",
+    "Aria turn on admin shield",
+    "Aria protect me and ARIA from being demoted",
+    "Aria keep us as admins",
+    "Aria don't let anyone kick me",
+  ]) assert.equal(resolveNaturalAction(phrase)?.intent, "adminprotect", phrase);
+  assert.equal(resolveNaturalAction("Aria turn off admin protection")?.args, "off");
+  assert.equal(resolveNaturalAction("Aria never make @23456000000 an admin")?.intent, "antiadmin");
 });
 
 test("anti-sticker protection deletes sticker messages when enabled", () => {

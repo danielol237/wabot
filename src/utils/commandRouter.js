@@ -442,6 +442,11 @@ function resolveExplicitNaturalCommand(cleaned) {
   return null;
 }
 
+function resolveBusinessModePhrase(text) {
+  const match = String(text || "").trim().match(/^(?:(?:hey|yo|ok)\s+)?aria\s*[,!:?-]?\s+business\s+mode(?:\s+(on|start|off|stop|exit))?\s*[.!?]*$/i);
+  return match ? { operation: match[1] || "start" } : null;
+}
+
 function resolveNaturalAction(text) {
   const cleaned = stripAriaAddress(text);
   if (!cleaned) return null;
@@ -564,6 +569,31 @@ async function routeMessage(sock, msg, context) {
     // gets feedback instead of a silent fall-through to AI chat.
     const { reply: _rp } = require("./baileysHelpers");
     await _rp(sock, msg, `🤔 *!${commandName}* isn't a command I know. Try *!help* to see what I can do.`);
+    return;
+  }
+
+  // ── OWNER BUSINESS MODE ────────────────────────────────────
+  // Handle this phrase before generic intent detection. It is an operational
+  // mode switch, not a chat prompt, so it must never reach the casual persona.
+  const businessPhrase = resolveBusinessModePhrase(text);
+  if (businessPhrase) {
+    const cmd = findRegisteredCommand("businessmode");
+    if (!cmd) {
+      const { reply: _rp } = require("./baileysHelpers");
+      await _rp(sock, msg, "⚠️ Business Mode is not installed in this deployment yet. Merge the main-targeted Business Mode PR and redeploy Render.");
+      return;
+    }
+    if (cmd.ownerOnly && !isOwner(senderJid)) {
+      const { reply: _rp } = require("./baileysHelpers");
+      await _rp(sock, msg, "❌ Business Mode is owner-only.");
+      return;
+    }
+    try {
+      await cmd.handler(sock, msg, businessPhrase.operation, { ...context, pasquaCommand: "businessmode" });
+    } catch (err) {
+      const { reply: _rp } = require("./baileysHelpers");
+      await _rp(sock, msg, `⚠️ Business Mode could not start: ${String(err?.message || err).slice(0, 300)}`);
+    }
     return;
   }
 
@@ -1242,7 +1272,11 @@ async function handleBusinessMode(sock, msg, args, ctx) {
   let draft = "";
   try {
     const businessPrompt = `You are ARIA Business Mode, a professional business owner and customer-reply writer. Use only the business information below. Never invent prices, stock, delivery promises, guarantees, policies, addresses, or timelines. If a detail is missing, say that it needs confirmation. Write one concise, warm, clear customer-facing reply. Do not include analysis, headings, emojis, or quotation marks.\n\nBUSINESS INFORMATION:\n${profile.brief}\n\nCUSTOMER MESSAGE:\n${raw}`;
-    draft = await getAIResponse(businessPrompt, ctx.senderName, [], "You are ARIA Business Mode. You produce accurate, professional customer replies for the owner to review and copy. Never claim a message was sent.", "", { userContext: `Business profile: ${profile.brief}` });
+    const aiPromise = getAIResponse(businessPrompt, ctx.senderName, [], "You are ARIA Business Mode. You produce accurate, professional customer replies for the owner to review and copy. Never claim a message was sent.", "", { userContext: `Business profile: ${profile.brief}` });
+    draft = await Promise.race([
+      aiPromise,
+      new Promise((resolve) => setTimeout(() => resolve(""), 12000)),
+    ]);
   } catch (_) {}
   if (!draft || /^❌/u.test(String(draft).trim())) draft = businessMode.fallbackReply(profile, raw);
   return reply(sock, msg, `*COPY THIS TO CUSTOMER:*\n${String(draft).trim()}\n\n*Internal note:* Review the details before sending. ARIA has not contacted the customer.`);
@@ -2626,4 +2660,5 @@ module.exports = {
   resolveNaturalAction,
   naturalArgs,
   detectCommandCollisions,
+  _test: { resolveBusinessModePhrase },
 };

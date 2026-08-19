@@ -1,5 +1,6 @@
 const Groq = require("groq-sdk");
 const axios = require("axios");
+const minimax = require("./minimax");
 const { log, error, warn } = require("../utils/logger");
 
 // Tracks which provider ACTUALLY answered the last AI call (set right before each
@@ -151,6 +152,26 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
   const systemPrompt = (systemOverride || SYSTEM_PROMPT) + extra;
   const requestNeedsLargeOutput = needsLargeOutput(String(userMessage || ""));
   const maxTokens = requestNeedsLargeOutput ? 12000 : 2048;
+  let lastError = null;
+
+  // MiniMax is the configured primary when MINIMAX_API_KEY is present. Set
+  // MINIMAX_PRIMARY=false to keep the existing provider order while retaining
+  // MiniMax as an available fallback in a future provider policy.
+  if (minimax.configured() && minimax.getConfig().primary) {
+    try {
+      const result = await minimax.chat(
+        [{ role: "system", content: systemPrompt }, ...messages],
+        { maxTokens, temperature: 0.7 }
+      );
+      const content = withTruncationNotice(result.text, result.finishReason, "length", requestNeedsLargeOutput);
+      lastProvider = "minimax";
+      return content;
+    } catch (err) {
+      const errMsg = err.response?.data?.error?.message || err.response?.data?.message || err.message || "unknown MiniMax error";
+      lastError = errMsg;
+      error("MiniMax error:", errMsg);
+    }
+  }
 
   // Try Cerebras first — 1M tokens/day free, the highest ceiling of any free
   // provider we've found, added after Gemini's daily quota kept getting hit
@@ -243,7 +264,6 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
   // Groq's free tier caps total tokens-per-minute at 8000 for some models, so it
   // gets a safer, lower cap than Gemini, which has much more headroom.
   const groqMaxTokens = Math.min(maxTokens, 6000);
-  let lastError = null;
 
   if (groq) {
     for (const model of GROQ_MODELS) {

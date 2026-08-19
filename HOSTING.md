@@ -48,6 +48,8 @@ Set secrets in Render’s Environment page. Never commit real values to GitHub, 
 | `ARIA_AUTOPILOT_LIVE` | Keep `false` initially | Must remain `false` until an outbound sender, consent policy, and approval operations are verified. |
 | `ANIME_DISABLE_WORKER` | No | Use `1` only for CI or local test runs; leave unset in production. |
 | `BASE_URL` | Yes for OAuth and links | Public origin, for example `https://wabot-ytal.onrender.com`. Do not add a trailing slash. |
+| `ARIA_CAPSULE_KEY` | Recommended | Dedicated random secret used to encrypt Time Capsule text at rest. Keep it separate from provider keys. |
+| `ARIA_OBSIDIAN_VAULT_DIR` | Optional | Local path for private Second Brain Markdown export. Leave unset if Obsidian is not mounted on the host. |
 
 At least one text AI provider must be configured for conversational replies. The exact provider variables remain in `.env.example`; Z.AI variables are intentionally limited to image, video, and vision generation and do not replace the existing text-provider chain.
 
@@ -61,7 +63,14 @@ After the first successful pairing, ARIA encrypts and backs up the session autom
 
 The owner is protected through both normalized phone identity and modern WhatsApp LID handling. Group-admin protection and the anti-admin denylist remain WhatsApp-side controls; the commercial platform layer does not grant a CRM user group-admin powers.
 
-## 4. Tenant workspace launch
+## 4. ARIA private life features
+
+The owner-only life-feature commands are now available without a legacy prefix. They use ARIA’s existing memory/profile store and a bounded private feature store. `Echo Location` searches the recent stored chat buffers and semantic memories that exist on the deployed instance; it is not an unlimited historical archive because older conversations are not retroactively recoverable from the current 30-message chat buffer. `Time Capsule` encrypts message text before it is persisted and delivers it through the boot-once poller after a restart. `Second Brain` stores private notes locally and can optionally write Markdown files to `ARIA_OBSIDIAN_VAULT_DIR`; no Notion credentials are required or stored by default.
+
+The available owner-only features are `echolocation`, `timecapsule`, `mirrorreport`, `memorypalace`, `secondbrain`, `dreamcatcher`, `paralleluniverse`, `soulsearch`, `emotiontimeline`, and `oracle`. Personality, biography, emotion, and oracle outputs are framed as interpretations or hypotheses rather than diagnoses, certainties, or supernatural predictions. Do not enable these features for another person’s account without their consent.
+
+
+## 5. Tenant workspace launch
 
 Open `/platform` and register a tenant workspace. Registration creates a platform user, tenant, owner membership, signed session, and CSRF token. The authenticated console exposes the workspace overview, Revenue Engine metrics, plans, billing checkout lifecycle, integrations, and Business OS resources.
 

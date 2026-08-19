@@ -222,6 +222,13 @@ async function startBot() {
       isReady = true;
       latestQrDataUrl = null;
       lastError = null;
+      // Rebind socket-dependent delivery to the newest live connection on every reconnect.
+      try {
+        const { startTimeCapsulePoller } = require("./tools/ariaLifeFeatures");
+        startTimeCapsulePoller(sock);
+      } catch (e) {
+        error("Time Capsule poller init error:", e.message);
+      }
       // ── Boot-once services (socket-independent) ──────────────────────────
       // These don't need a socket and must NOT re-run on every reconnect.
       if (!servicesStarted) {
@@ -233,7 +240,6 @@ async function startBot() {
         sessionPersistence.startAutoSync();
         sessionPersistence.backupSession().catch((e) => warn("Initial session backup:", e.message));
         startTaskPoller(sock);
-
         // Start periodic memory curation (keeps long-term memory clean)
         try {
           const { startCurator } = require("./tools/memoryCurator");

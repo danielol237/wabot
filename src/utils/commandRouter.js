@@ -46,6 +46,7 @@ const { getAIResponse, needsLargeOutput } = require("../tools/ai");
 const { setReminder } = require("../tools/reminders");
 const { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
+const { handleAriaLifeFeature } = require("../tools/ariaLifeFeatures");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 // Natural-language routing is the default. The legacy prefix remains accepted
@@ -91,6 +92,16 @@ const INTENTS = {
   reddit: ["on reddit", "look on reddit", "reddit search", "search reddit", "find it on reddit"],
   wikipedia: ["on wikipedia", "wikipedia search", "search wikipedia", "on wiki", "wikipedia about"],
   deathBattle: ["who would win", "who wins", "death battle", "deathbattle", "would beat", "in a fight", "fight between"],
+  echolocation: ["echo location", "search all my conversations", "search my past conversations", "find in my conversations"],
+  timecapsule: ["time capsule", "send this to me later", "remind future me", "save this for later"],
+  mirrorreport: ["the mirror", "mirror report", "analyze my personality", "write my personality report"],
+  memorypalace: ["memory palace", "show my conversation graph", "show my memory graph"],
+  secondbrain: ["second brain", "save a note", "show my notes", "connect my notes"],
+  dreamcatcher: ["dream catcher", "log my dream", "record my dream", "show my dreams"],
+  paralleluniverse: ["parallel universe", "what if i", "imagine my life if"],
+  soulsearch: ["soul search", "write my biography", "tell my life story"],
+  emotiontimeline: ["emotion timeline", "show my mood timeline", "track my emotions"],
+  oracle: ["the oracle", "predict my next move", "what will i do next"],
 };
 
 // ── Command registry ─────────────────────────────────────────
@@ -99,6 +110,10 @@ const commands = [];
 
 function registerCommand(cmd) {
   commands.push(cmd);
+}
+
+function lifeFeatureHandler(feature) {
+  return (sock, msg, args, ctx) => handleAriaLifeFeature(sock, msg, args, { ...ctx, ariaFeature: feature });
 }
 
 // Built-in commands - these are the standard prefix commands
@@ -247,6 +262,16 @@ function registerBuiltinCommands() {
   registerCommand({ name: "clearprefs", aliases: ["resetprefs"], category: "dev", description: "Clear preferences", handler: handleClearPrefs, ownerOnly: false });
   registerCommand({ name: "voicemode", aliases: ["voice", "vm"], category: "dev", description: "Toggle voice replies", handler: handleVoiceMode, ownerOnly: false });
   registerCommand({ name: "memories", aliases: ["remembered", "mymemory"], category: "dev", description: "See what I remember about you", handler: handleMemories, ownerOnly: false });
+  registerCommand({ name: "echolocation", aliases: ["echo", "searchmemory"], category: "owner", description: "Search stored conversation memory", handler: lifeFeatureHandler("echolocation"), ownerOnly: true });
+  registerCommand({ name: "timecapsule", aliases: ["capsule", "timecaps"], category: "owner", description: "Seal an encrypted future message", handler: lifeFeatureHandler("timecapsule"), ownerOnly: true });
+  registerCommand({ name: "mirrorreport", aliases: ["themirror"], category: "owner", description: "Write a private personality report", handler: lifeFeatureHandler("mirrorreport"), ownerOnly: true });
+  registerCommand({ name: "memorypalace", aliases: ["palace", "memorygraph"], category: "owner", description: "Show a private conversation graph", handler: lifeFeatureHandler("memorypalace"), ownerOnly: true });
+  registerCommand({ name: "secondbrain", aliases: ["notespace"], category: "owner", description: "Save and retrieve private notes", handler: lifeFeatureHandler("secondbrain"), ownerOnly: true });
+  registerCommand({ name: "dreamcatcher", aliases: ["dreamlog", "dreams"], category: "owner", description: "Record private dreams", handler: lifeFeatureHandler("dreamcatcher"), ownerOnly: true });
+  registerCommand({ name: "paralleluniverse", aliases: ["whatif", "alternatefuture"], category: "owner", description: "Explore a grounded alternate scenario", handler: lifeFeatureHandler("paralleluniverse"), ownerOnly: true });
+  registerCommand({ name: "soulsearch", aliases: ["biography", "mybiography"], category: "owner", description: "Write a private grounded biography", handler: lifeFeatureHandler("soulsearch"), ownerOnly: true });
+  registerCommand({ name: "emotiontimeline", aliases: ["moodtimeline", "emotionlog"], category: "owner", description: "View private logged mood signals", handler: lifeFeatureHandler("emotiontimeline"), ownerOnly: true });
+  registerCommand({ name: "oracle", aliases: ["nextmove", "behaviororacle"], category: "owner", description: "Generate cautious behavior hypotheses", handler: lifeFeatureHandler("oracle"), ownerOnly: true });
   registerCommand({ name: "mission", aliases: ["missions", "msn"], category: "dev", description: "Create/resume durable background missions", handler: handleMission, ownerOnly: true });
   registerCommand({ name: "world", aliases: ["worldmodel", "model"], category: "dev", description: "View ARIA's world model", handler: handleWorld, ownerOnly: true });
   registerCommand({ name: "delegate", aliases: ["orbit", "orchestrate"], category: "dev", description: "Run the agent-team mission orchestrator", handler: handleDelegate, ownerOnly: true });
@@ -2051,6 +2076,16 @@ const intentHandlers = {
   clear: handleClear,
   help: handleHelp,
   memories: handleMemories,
+  echolocation: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "echolocation" }),
+  timecapsule: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "timecapsule" }),
+  mirrorreport: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "mirrorreport" }),
+  memorypalace: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "memorypalace" }),
+  secondbrain: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "secondbrain" }),
+  dreamcatcher: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "dreamcatcher" }),
+  paralleluniverse: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "paralleluniverse" }),
+  soulsearch: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "soulsearch" }),
+  emotiontimeline: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "emotiontimeline" }),
+  oracle: (sock, msg, text, ctx) => handleAriaLifeFeature(sock, msg, text, { ...ctx, ariaFeature: "oracle" }),
   atlas: async (sock, msg, text, ctx) => {
     const { reply, react } = require("./baileysHelpers");
     const { handleAtlas, formatCreated } = require("../tools/atlasBrain");
@@ -2328,8 +2363,8 @@ async function handleAIResponse(sock, msg, text, ctx) {
     } catch (_) {}
     // Remember callable facts (running jokes, likes) for future callbacks
     if (tone === "up" && text.length > 20) rememberCallable(ctx.senderJid, ctx.senderName + " said: \"" + text.slice(0, 60) + "\"");
-    bleedMood(ctx.senderJid, moodData.mood);
-
+        bleedMood(ctx.senderJid, moodData.mood);
+    try { require("../tools/ariaLifeFeatures").recordMoodSnapshot(ctx.senderJid, moodData.mood, tone); } catch (_) {}
     // Auto-extract important memories + learn communication style (personalization)
     try {
       autoExtractMemory(ctx.senderJid, ctx.senderName, text);

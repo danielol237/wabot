@@ -29,9 +29,22 @@ test("business mode: natural trigger resolves to a non-owner-only command", () =
   assert.equal(stop?.args, "off");
 });
 
-test("business mode: fallback remains copy-only and does not promise automatic sending", () => {
+test("business mode: non-owner-safe fallback never promises automatic sending", () => {
   const profile = businessMode._test.parseBrief("Business name: AutoParts Hub\nSelling: car spare parts\nLocation: Douala");
   const draft = businessMode.fallbackReply(profile, "I need brake pads");
   assert.match(draft, /AutoParts Hub|confirm/i);
-  assert.doesNotMatch(draft, /sent automatically|message sent/i);
+  assert.doesNotMatch(draft, /sent automatically|message sent/);
+});
+
+test("business mode: reports completion and identifies customer intent safely", () => {
+  const profile = businessMode._test.parseBrief("Business name: AutoParts Hub\nSelling: car spare parts\nContact: WhatsApp\nLocation: Douala");
+  const completion = businessMode.completion({ ...profile, fields: { ...profile.fields, contact: "WhatsApp" } });
+  assert.equal(completion.percent, 100);
+  assert.equal(businessMode.classifyCustomerMessage("Do you have brake pads and how much are they?").intent, "pricing");
+  assert.deepEqual(businessMode.missingInfo(profile, { intent: "pricing" }), ["current pricing or quote rules"]);
+});
+
+test("business mode: exposes modern controls and bounded styles", () => {
+  assert.match(businessMode.helpText(), /status|style|language|copy-only/i);
+  assert.equal(typeof businessMode._test.normalizeFieldKey, "function");
 });

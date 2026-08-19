@@ -432,6 +432,8 @@ function resolveExplicitNaturalCommand(cleaned) {
   const pins = lower.match(/^(?:give|send|show|get)(?:\s+me)?\s+(?:(\d{1,2})\s+)?(?:pics?|pictures?|images?|photos?)\s+(?:of|for)\s+(.+)$/i);
   if (pins) return makeCommand("pinterest", `${pins[1] || 5} pics of ${pins[2]}`);
 
+  const businessControl = lower.match(/^business\s+mode\s+(help|commands|status|profile|dashboard|first\s+reply|opening\s+reply|reset|clear|style\s+\w+|tone\s+\w+|language\s+.+)$/i);
+  if (businessControl) return makeCommand("businessmode", businessControl[1]);
   const businessStart = lower.match(/^business\s+mode(?:\s+(on|start|off|stop|exit))?$/i);
   if (businessStart) return makeCommand("businessmode", businessStart[1] || "start");
   const businessSetup = lower.match(/^business\s+mode\s+(?:setup|configure|about|selling)\s*[:=-]?\s*(.+)$/i);
@@ -1239,6 +1241,7 @@ async function handleBusinessMode(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   const raw = String(args || "").trim();
   const operation = raw.toLowerCase();
+  if (["help", "commands"].includes(operation)) return reply(sock, msg, businessMode.helpText());
   if (["off", "stop", "exit", "disable"].includes(operation)) {
     businessMode.stop(ctx.senderJid, ctx.chatId);
     return reply(sock, msg, "Business Mode is off. ARIA is back to normal companion mode.");
@@ -1249,17 +1252,41 @@ async function handleBusinessMode(sock, msg, args, ctx) {
     businessMode.start(ctx.senderJid, ctx.chatId);
     await react(sock, msg, "💼");
     if (existing) {
-      return reply(sock, msg, "💼 Business Mode is on. Paste a customer’s message and I’ll return a professional reply marked *COPY THIS TO CUSTOMER*. Say *first reply* for the opening message, or *business mode off* to leave.");
+      const summary = businessMode.status(ctx.senderJid, ctx.chatId);
+      return reply(sock, msg, `💼 Business Mode is active — ${summary.completion.percent}% profile complete. Style: ${summary.style}. Language: ${summary.language}. Say *business mode help* for controls, *first reply* for the opening message, or paste a customer message.`);
     }
-    return reply(sock, msg, "💼 Business Mode is on. Tell me what the business sells, who it serves, prices or packages, delivery/location, contact details, policies, and the tone you want. I will use only that information and will draft replies for you to copy — I will not send to customers automatically.");
+    return reply(sock, msg, "💼 *Business Workspace started.* Send `business mode setup` with your business details, then use `business mode status` to check readiness. I draft replies for you to copy; I never send to customers automatically.");
   }
 
-  const setup = raw.match(/^setup\s+([\s\S]+)$/i);
+  const statusRequest = /^(status|profile|dashboard)$/i.test(raw);
+  if (statusRequest) {
+    const summary = businessMode.status(ctx.senderJid, ctx.chatId);
+    if (!summary.profile) return reply(sock, msg, "💼 No business profile exists yet. Start with `business mode setup` and send the guided brief.");
+    const missing = summary.completion.missing.length ? `\nMissing: ${summary.completion.missing.join(", ")}.` : "\n✅ Profile is ready for customer drafting.";
+    return reply(sock, msg, `💼 *Business Workspace*\nStatus: ${summary.active ? "active" : "paused"}\nProfile completion: ${summary.completion.percent}%\nReply style: ${summary.style}\nLanguage: ${summary.language}${missing}\nDraft policy: copy-only; ARIA never sends automatically.`);
+  }
+  if (/^(reset|clear)$/i.test(raw)) {
+    businessMode.reset(ctx.senderJid, ctx.chatId);
+    return reply(sock, msg, "🧹 Business Workspace reset. The saved business profile and draft history for this sender/chat were deleted.");
+  }
+  const styleRequest = raw.match(/^(?:style|tone)\s+(.+)$/i);
+  if (styleRequest) {
+    const profile = businessMode.setSetting(ctx.senderJid, ctx.chatId, "style", styleRequest[1]);
+    return reply(sock, msg, profile ? `✅ Reply style set to *${profile.settings.style}*.` : "Set up the business profile first, then choose professional, warm, premium, concise, or casual.");
+  }
+  const languageRequest = raw.match(/^language\s+(.+)$/i);
+  if (languageRequest) {
+    const profile = businessMode.setSetting(ctx.senderJid, ctx.chatId, "language", languageRequest[1]);
+    return reply(sock, msg, profile ? `✅ Draft language set to *${profile.settings.language}*.` : "Set up the business profile first, then choose English, French, or Pidgin English.");
+  }
+  const setup = raw.match(/^setup\s*[:=-]?\s*([\s\S]+)$/i);
   if (setup) {
     const profile = businessMode.configure(ctx.senderJid, ctx.chatId, setup[1]);
+    const readiness = businessMode.completion(profile);
     await react(sock, msg, "💼");
+    if (readiness.missing.length) return reply(sock, msg, `✅ Business profile saved at ${readiness.percent}%. Still needed: ${readiness.missing.join(", ")}. Add them with another *business mode setup* message. I will not invent missing facts.`);
     const opening = businessMode.openingReply(profile);
-    return reply(sock, msg, `✅ Business profile saved.\n\n*FIRST REPLY — COPY THIS TO CUSTOMER:*\n${opening}\n\nNow paste the customer’s next message here and I’ll draft the corresponding reply. Nothing will be sent automatically.`);
+    return reply(sock, msg, `✅ Business Workspace ready — ${readiness.percent}% complete.\n\n*FIRST REPLY — COPY THIS TO CUSTOMER:*\n${opening}\n\nNow paste the customer’s next message and I’ll classify it and draft the corresponding reply. Nothing will be sent automatically.`);
   }
 
   const profile = businessMode.profile(ctx.senderJid);
@@ -1268,20 +1295,24 @@ async function handleBusinessMode(sock, msg, args, ctx) {
     return reply(sock, msg, "I need the full business brief first. You only gave me a category. Send it like this:\n\n!businessmode setup\nBusiness name: AutoParts Hub\nSelling: car spare parts for Toyota, Honda, and Mercedes\nPrices: genuine and aftermarket options; confirm current price\nLocation: Douala\nDelivery: Douala delivery available; confirm fee\nContact: WhatsApp or phone number\nPolicies: confirm availability before payment\nTone: professional and warm\n\nYou can also send the same details naturally in one message. Then I’ll generate the first copy-ready customer reply.");
   }
   if (/^(first\s+reply|opening\s+reply|intro(?:duction)?|hello)$/i.test(raw)) {
+    const readiness = businessMode.completion(profile);
+    if (readiness.missing.length) return reply(sock, msg, `⚠️ The profile is ${readiness.percent}% complete. Add: ${readiness.missing.join(", ")}. I will not invent those details.`);
     return reply(sock, msg, `*FIRST REPLY — COPY THIS TO CUSTOMER:*\n${businessMode.openingReply(profile)}`);
   }
 
+  const classification = businessMode.classifyCustomerMessage(raw);
+  const missing = businessMode.missingInfo(profile, classification);
   let draft = "";
   try {
-    const businessPrompt = `You are ARIA Business Mode, a professional business owner and customer-reply writer. Use only the business information below. Never invent prices, stock, delivery promises, guarantees, policies, addresses, or timelines. If a detail is missing, say that it needs confirmation. Write one concise, warm, clear customer-facing reply. Do not include analysis, headings, emojis, or quotation marks.\n\nBUSINESS INFORMATION:\n${profile.brief}\n\nCUSTOMER MESSAGE:\n${raw}`;
-    const aiPromise = getAIResponse(businessPrompt, ctx.senderName, [], "You are ARIA Business Mode. You produce accurate, professional customer replies for the owner to review and copy. Never claim a message was sent.", "", { userContext: `Business profile: ${profile.brief}` });
-    draft = await Promise.race([
-      aiPromise,
-      new Promise((resolve) => setTimeout(() => resolve(""), 12000)),
-    ]);
+    const settings = profile.settings || { style: "professional", language: "English" };
+    const businessPrompt = `You are ARIA Business Workspace. Draft one customer-facing reply using only the verified business profile. Never invent prices, stock, delivery promises, guarantees, policies, addresses, or timelines. If information is missing, state that it must be confirmed. Reply in ${settings.language}, with a ${settings.style} tone. Do not include analysis or claim that anything was sent.\n\nVERIFIED BUSINESS PROFILE:\n${profile.brief}\n\nCUSTOMER INTENT: ${classification.label} (${classification.confidence} confidence)\nMISSING FACTS THAT MUST NOT BE INVENTED: ${missing.join(", ") || "none identified"}\n\nCUSTOMER MESSAGE:\n${raw}`;
+    const aiPromise = getAIResponse(businessPrompt, ctx.senderName, [], "You are ARIA Business Workspace. Produce accurate, professional, copy-ready drafts only.", "", { userContext: `Business profile: ${profile.brief}` });
+    draft = await Promise.race([aiPromise, new Promise((resolve) => setTimeout(() => resolve(""), 12000))]);
   } catch (_) {}
-  if (!draft || /^❌/u.test(String(draft).trim())) draft = businessMode.fallbackReply(profile, raw);
-  return reply(sock, msg, `*COPY THIS TO CUSTOMER:*\n${String(draft).trim()}\n\n*Internal note:* Review the details before sending. ARIA has not contacted the customer.`);
+  if (!draft || /^❌/u.test(String(draft).trim())) draft = businessMode.fallbackReply(profile, raw, classification);
+  const draftRecord = businessMode.recordDraft(ctx.senderJid, ctx.chatId, { intent: classification.intent, label: classification.label, confidence: classification.confidence, customerMessage: raw, missing, text: String(draft).trim() });
+  const warning = missing.length ? `\n⚠️ Needs confirmation: ${missing.join(", ")}.` : "";
+  return reply(sock, msg, `*COPY THIS TO CUSTOMER — ${classification.label.toUpperCase()}:*\n${draftRecord.text}\n${warning}\n\n*Internal note:* Review the details before sending. ARIA has not contacted the customer.`);
 }
 
 // Creative handlers

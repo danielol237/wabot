@@ -290,9 +290,9 @@ function registerBuiltinCommands() {
   registerCommand({ name: "grant", aliases: [], category: "admin", description: "Grant a capability to a user", handler: handleGrant, ownerOnly: true });
   registerCommand({ name: "revoke", aliases: [], category: "admin", description: "Revoke a capability", handler: handleRevoke, ownerOnly: true });
   registerCommand({ name: "caps", aliases: ["permissions"], category: "admin", description: "View granted capabilities", handler: handleCaps, ownerOnly: true });
-  // Business Mode is deliberately owner-only. It drafts professional replies but
-  // never sends a customer message from this conversational surface.
-  registerCommand({ name: "businessmode", aliases: ["business", "salesmode", "clientmode"], category: "owner", description: "Configure owner-only business reply drafting", handler: handleBusinessMode, ownerOnly: true });
+  // Business Mode is available to every sender. It drafts professional replies
+  // but never sends a customer message from this conversational surface.
+  registerCommand({ name: "businessmode", aliases: ["business", "salesmode", "clientmode"], category: "business", description: "Configure copy-only business reply drafting", handler: handleBusinessMode, ownerOnly: false });
 
   // 'teach' belongs to !explain (teach-it-back). Removing it here avoids the
   // ambiguous alias collision between explain.teach and learn.teach.
@@ -644,9 +644,10 @@ async function routeMessage(sock, msg, context) {
     return;
   }
 
-  // Once the owner has enabled Business Mode, plain pasted customer messages
+  // Once this sender has enabled Business Mode, plain pasted customer messages
   // become drafts instead of being answered in ARIA's casual companion voice.
-  if (isOwner(senderJid) && businessMode.isActive(senderJid, chatId)) {
+  // Profiles and sessions are keyed by sender JID + chat.
+  if (businessMode.isActive(senderJid, chatId)) {
     try {
       await handleBusinessMode(sock, msg, text, context);
     } catch (err) {
@@ -1231,8 +1232,9 @@ async function handleCardLeaderboard(sock, msg, args, ctx) {
   await reply(sock, msg, getLeaderboard());
 }
 
-// Owner-only Business Mode. It is intentionally approval-first: ARIA drafts text
-// for the owner to copy into a customer chat and never sends it to the customer.
+// Business Mode is available to any sender. It is intentionally approval-first:
+// ARIA drafts text for that sender to copy into a customer chat and never sends
+// it to the customer.
 async function handleBusinessMode(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   const raw = String(args || "").trim();
@@ -1263,7 +1265,7 @@ async function handleBusinessMode(sock, msg, args, ctx) {
   const profile = businessMode.profile(ctx.senderJid);
   if (!profile) {
     businessMode.start(ctx.senderJid, ctx.chatId);
-    return reply(sock, msg, "I need the business details first. Tell me what you sell, your prices or packages, delivery/location, contact details, policies, and preferred tone. You can send it naturally or use `!businessmode setup ...`.");
+    return reply(sock, msg, "I need the full business brief first. You only gave me a category. Send it like this:\n\n!businessmode setup\nBusiness name: AutoParts Hub\nSelling: car spare parts for Toyota, Honda, and Mercedes\nPrices: genuine and aftermarket options; confirm current price\nLocation: Douala\nDelivery: Douala delivery available; confirm fee\nContact: WhatsApp or phone number\nPolicies: confirm availability before payment\nTone: professional and warm\n\nYou can also send the same details naturally in one message. Then I’ll generate the first copy-ready customer reply.");
   }
   if (/^(first\s+reply|opening\s+reply|intro(?:duction)?|hello)$/i.test(raw)) {
     return reply(sock, msg, `*FIRST REPLY — COPY THIS TO CUSTOMER:*\n${businessMode.openingReply(profile)}`);

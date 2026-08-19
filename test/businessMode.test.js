@@ -19,12 +19,19 @@ test("business mode: drafts a safe fallback instead of inventing a price", () =>
   assert.doesNotMatch(draft, /25,000/);
 });
 
-test("business mode: natural trigger resolves to an owner-only command", () => {
+test("business mode: natural trigger resolves to a non-owner-only command", () => {
   const start = router.resolveNaturalAction("ARIA business mode");
   const stop = router.resolveNaturalAction("ARIA business mode off");
   assert.equal(start?.command?.name, "businessmode");
-  assert.equal(start?.command?.ownerOnly, true);
+  assert.equal(start?.command?.ownerOnly, false);
   assert.equal(start?.args, "start");
   assert.equal(stop?.command?.name, "businessmode");
   assert.equal(stop?.args, "off");
+});
+
+test("business mode: fallback remains copy-only and does not promise automatic sending", () => {
+  const profile = businessMode._test.parseBrief("Business name: AutoParts Hub\nSelling: car spare parts\nLocation: Douala");
+  const draft = businessMode.fallbackReply(profile, "I need brake pads");
+  assert.match(draft, /AutoParts Hub|confirm/i);
+  assert.doesNotMatch(draft, /sent automatically|message sent/i);
 });

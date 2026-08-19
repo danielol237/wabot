@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
-const { exec } = require("child_process");
+const { execFileSync } = require("child_process");
 const crypto = require("crypto");
 
 const PLUGINS_DIR = path.join(__dirname, "../../plugins");
@@ -99,7 +99,7 @@ async function downloadVerifiedPlugin(pluginId) {
   const filePath = path.join(PLUGINS_DIR, pluginId + ".js");
   fs.writeFileSync(filePath, res.data);
   try {
-    require("child_process").execSync(`node --check "${filePath}"`, { stdio: "pipe" });
+    execFileSync(process.execPath, ["--check", filePath], { stdio: "pipe" });
   } catch (e) {
     fs.unlinkSync(filePath);
     return { success: false, error: "Plugin has syntax errors. Not installed." };

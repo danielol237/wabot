@@ -58,15 +58,44 @@ function loadPlugins() {
   return loaded;
 }
 
-// Checks if a command (without prefix) matches any loaded plugin, returns the
-// handler function if so, otherwise null.
+// Plugin commands that execute code, mutate server state, expose private data,
+// or alter integrations must remain owner-only even though plugins are loaded
+// through the general command path.
+const OWNER_ONLY_COMMANDS = new Set([
+  "agent", "team", "run", "generateplugin", "backup", "restore", "githubadmin",
+  "plugins", "vpn", "job", "workspace", "resume", "evolve", "analytics",
+]);
+
+function resolvePluginHandler(commands, name) {
+  let current = String(name || "").toLowerCase();
+  const visited = new Set();
+  for (let depth = 0; depth < 8 && !visited.has(current); depth += 1) {
+    visited.add(current);
+    const value = commands?.[current];
+    if (typeof value === "function") return { handler: value, canonicalName: current };
+    if (typeof value !== "string") return null;
+    current = value.toLowerCase();
+  }
+  return null;
+}
+
+// Checks if a command (without prefix) matches any loaded plugin, resolves
+// string aliases, and returns null instead of a non-callable handler.
 function findPluginCommand(loadedPlugins, commandName) {
-  for (const plugin of loadedPlugins) {
-    if (plugin.commands[commandName]) {
-      return { plugin, handler: plugin.commands[commandName] };
+  const requested = String(commandName || "").toLowerCase();
+  for (const plugin of loadedPlugins || []) {
+    const resolved = resolvePluginHandler(plugin.commands, requested);
+    if (resolved) {
+      return {
+        plugin,
+        handler: resolved.handler,
+        commandName: requested,
+        canonicalName: resolved.canonicalName,
+        ownerOnly: Boolean(plugin.ownerOnly || OWNER_ONLY_COMMANDS.has(resolved.canonicalName)),
+      };
     }
   }
   return null;
 }
 
-module.exports = { loadPlugins, findPluginCommand, PLUGINS_DIR };
+module.exports = { loadPlugins, findPluginCommand, resolvePluginHandler, OWNER_ONLY_COMMANDS, PLUGINS_DIR };

@@ -6,8 +6,27 @@ const { scheduleMessage, cancelSchedule, listSchedules, formatSchedules } = requ
 const { trackAction, popLastAction, getHistory } = require("../src/tools/commandHistory");
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
+const { execFile } = require("child_process");
 const { v4: uuidv4 } = require("uuid");
+const { resolveYtDlp, commandArgs } = require("../src/utils/mediaRuntime");
+const { validateOutboundUrl } = require("../src/utils/outboundUrlPolicy");
+
+const TEMP_DIR = path.join(__dirname, "../temp");
+
+function runYtDlp(args, callback) {
+  const command = resolveYtDlp();
+  if (!command) return callback(new Error("yt-dlp is not installed on this server."));
+  execFile(command.file, commandArgs(command, args), {
+    env: command.env,
+    timeout: 120000,
+    maxBuffer: 4 * 1024 * 1024,
+  }, callback);
+}
+
+async function validatePublicMediaUrl(rawUrl) {
+  const target = await validateOutboundUrl(rawUrl);
+  return target.ok ? target.url.toString() : null;
+}
 
 module.exports = {
   name: "enhanced",
@@ -15,16 +34,17 @@ module.exports = {
     // !tiktok <url> — download TikTok
     tiktok: async (sock, msg, args, ctx) => {
       const url = args[0];
-      if (url && url.includes("tiktok.com")) {
+      const safeUrl = url ? await validatePublicMediaUrl(url) : null;
+      if (safeUrl && /tiktok\.com$/i.test(new URL(safeUrl).hostname.replace(/^www\./i, ""))) {
         await ctx.react("⬇️");
         await ctx.reply("Downloading TikTok...");
         const id = uuidv4();
-        const out = path.join(__dirname, "../temp", id + ".%(ext)s");
-        exec('yt-dlp -f "best[filesize<50M]/best" --max-filesize 50M -o "' + out + '" "' + url + '"', { timeout: 120000 }, async (err) => {
+        const out = path.join(TEMP_DIR, id + ".%(ext)s");
+        runYtDlp(["-f", "best[filesize<50M]/best", "--max-filesize", "50M", "-o", out, safeUrl], async (err) => {
           try {
-            const files = fs.readdirSync(path.join(__dirname, "../temp")).filter((f) => f.startsWith(id));
+            const files = fs.readdirSync(TEMP_DIR).filter((f) => f.startsWith(id));
             if (files.length === 0) return ctx.reply("Download failed.");
-            const fp = path.join(__dirname, "../temp", files[0]);
+            const fp = path.join(TEMP_DIR, files[0]);
             const buf = fs.readFileSync(fp);
             await sock.sendMessage(msg.key.remoteJid, { video: buf, caption: "TikTok downloaded" });
             try { fs.unlinkSync(fp); } catch (_) {}
@@ -53,12 +73,12 @@ module.exports = {
       await ctx.react("🎵");
       await ctx.reply('Searching for "' + q + '"...');
       const id = uuidv4();
-      const out = path.join(__dirname, "../temp", id + ".%(ext)s");
-      exec('yt-dlp -f "bestaudio[filesize<20M]/bestaudio" --max-filesize 20M --extract-audio --audio-format mp3 -o "' + out + '" "ytsearch1:' + q + '"', { timeout: 120000 }, async (err) => {
+      const out = path.join(TEMP_DIR, id + ".%(ext)s");
+      runYtDlp(["-f", "bestaudio[filesize<20M]/bestaudio", "--max-filesize", "20M", "--extract-audio", "--audio-format", "mp3", "-o", out, "ytsearch1:" + q.slice(0, 200)], async (err) => {
         try {
-          const files = fs.readdirSync(path.join(__dirname, "../temp")).filter((f) => f.startsWith(id));
+          const files = fs.readdirSync(TEMP_DIR).filter((f) => f.startsWith(id));
           if (files.length === 0) return ctx.reply("Could not find or download that song.");
-          const fp = path.join(__dirname, "../temp", files[0]);
+          const fp = path.join(TEMP_DIR, files[0]);
           const buf = fs.readFileSync(fp);
           await sock.sendMessage(msg.key.remoteJid, { audio: buf, mimetype: "audio/mp4", fileName: files[0], caption: q });
           try { fs.unlinkSync(fp); } catch (_) {}
@@ -72,6 +92,8 @@ module.exports = {
       const url = args[0];
       const fmt = (args[1] || "best").toLowerCase();
       if (!url) return ctx.reply("Usage: *!yt <url>* or *!yt <url> mp3*");
+      const safeUrl = await validatePublicMediaUrl(url);
+      if (!safeUrl) return ctx.reply("❌ Invalid or private media URL.");
       await ctx.react("⬇️");
       await ctx.reply("Downloading...");
       let fs_ = "best[filesize<50M]/best";
@@ -80,12 +102,12 @@ module.exports = {
       else if (fmt === "720") { fs_ = "best[height<=720][filesize<50M]/best[height<=720]"; }
       else if (fmt === "1080") { fs_ = "best[height<=1080][filesize<50M]/best[height<=1080]"; }
       const id = uuidv4();
-      const out = path.join(__dirname, "../temp", id + ".%(ext)s");
-      exec('yt-dlp -f "' + fs_ + '" --max-filesize 50M -o "' + out + '" "' + url + '"', { timeout: 120000 }, async (err) => {
+      const out = path.join(TEMP_DIR, id + ".%(ext)s");
+      runYtDlp(["-f", fs_, "--max-filesize", "50M", "-o", out, safeUrl], async (err) => {
         try {
-          const files = fs.readdirSync(path.join(__dirname, "../temp")).filter((f) => f.startsWith(id));
+          const files = fs.readdirSync(TEMP_DIR).filter((f) => f.startsWith(id));
           if (files.length === 0) return ctx.reply("Download failed.");
-          const fp = path.join(__dirname, "../temp", files[0]);
+          const fp = path.join(TEMP_DIR, files[0]);
           const buf = fs.readFileSync(fp);
           if (ia) {
             await sock.sendMessage(msg.key.remoteJid, { audio: buf, mimetype: "audio/mp4" });
@@ -132,16 +154,17 @@ module.exports = {
       ctx.reply("Voted! " + formatPollShort(poll));
     },
 
-    // !schedule "message" at <time>
-    schedule: async (sock, msg, args, ctx) => {
+    // !messageschedule "message" at <time>
+    messageschedule: async (sock, msg, args, ctx) => {
       const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
-      const m = text.match(/!schedule\s+"([^"]+)"\s+at\s+(.+)/i);
-      if (!m) return ctx.reply('Usage: *!schedule "Your message" at every day at 09:00*');
+      const m = text.match(/!messageschedule\s+"([^"]+)"\s+at\s+(.+)/i);
+      if (!m) return ctx.reply('Usage: *!messageschedule "Your message" at every day at 09:00*');
       const r = scheduleMessage(msg.key.remoteJid, m[1], m[2].trim(), msg.key.participant || msg.key.remoteJid);
       if (!r.success) return ctx.reply(r.error);
       trackAction(msg.key.remoteJid, { type: "schedule", id: r.id, message: m[1] });
       ctx.reply('Scheduled: "' + m[1] + '" at ' + m[2].trim() + ' (ID: ' + r.id + ')');
     },
+    msgschedule: "messageschedule",
 
     // !schedules — list scheduled messages
     schedules: async (sock, msg, args, ctx) => {
@@ -308,7 +331,7 @@ module.exports = {
     lottery: async (sock, msg, args, ctx) => {
       try {
         const { getBalance } = require("../src/tools/cardEconomy");
-        const bal = getBalance(senderJid) || 0;
+        const bal = getBalance(ctx.senderJid) || 0;
         const entryCost = 100;
         if (bal < entryCost) return ctx.reply("You need " + entryCost + " stardust to enter the lottery. You have " + bal);
 
@@ -538,7 +561,7 @@ module.exports = {
         if (progressMsgs.length <= 3) await ctx.reply(step);
       };
 
-      const result = await runAgent(task, getSenderName(msg), onProgress);
+      const result = await runAgent(task, ctx.senderName, onProgress);
 
       if (result.length > 4000) {
         const fs = require("fs");
@@ -579,7 +602,7 @@ module.exports = {
 
 
     // ── GITHUB INTEGRATION ──────────────────────────────────
-    github: async (sock, msg, args, ctx) => {
+    githubadmin: async (sock, msg, args, ctx) => {
       const sub = args[0]?.toLowerCase();
       const { repoInfo, listPRs, listCommits, runGit } = require("../src/tools/gitIntegration");
 
@@ -610,19 +633,22 @@ module.exports = {
       }
 
       if (sub === "commit") {
-        if (!args.slice(1).join(" ")) return ctx.reply("Usage: *!github commit <message>*");
-        const r = await runGit('add -A && git commit -m "' + args.slice(1).join(" ") + '"');
-        if (r.error) return ctx.reply("❌ " + r.error);
-        return ctx.reply("✅ " + r.output);
+        const message = args.slice(1).join(" ").trim().slice(0, 200);
+        if (!message) return ctx.reply("Usage: *!githubadmin commit <message>*");
+        const staged = await runGit(["add", "-A"]);
+        if (staged.error) return ctx.reply("❌ " + staged.error);
+        const committed = await runGit(["commit", "-m", message]);
+        if (committed.error) return ctx.reply("❌ " + committed.error);
+        return ctx.reply("✅ " + committed.output);
       }
 
       if (sub === "push") {
-        const r = await runGit("push origin HEAD");
+        const r = await runGit(["push", "origin", "HEAD"]);
         if (r.error) return ctx.reply("❌ " + r.error);
         return ctx.reply("✅ " + r.output);
       }
 
-      return ctx.reply("Usage:\n*!github repo <name>* — repo info\n*!github prs <name>* — open PRs\n*!github commits <name>* — recent commits\n*!github commit <msg>* — commit locally\n*!github push* — push to GitHub");
+      return ctx.reply("Usage:\n*!githubadmin repo <name>* — repo info\n*!githubadmin prs <name>* — open PRs\n*!githubadmin commits <name>* — recent commits\n*!githubadmin commit <msg>* — commit locally\n*!githubadmin push* — push to GitHub");
     },
 
 
@@ -663,10 +689,10 @@ module.exports = {
       });
       ctx.reply(t);
     },
-    schedule: async (sock, msg, args, ctx) => {
+    animeschedule: async (sock, msg, args, ctx) => {
       const day = (args[0] || "").toLowerCase();
       const days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
-      if (!days.includes(day)) return ctx.reply("Usage: *!schedule monday* (monday-sunday)");
+      if (!days.includes(day)) return ctx.reply("Usage: *!animeschedule monday* (monday-sunday)");
       const { getSchedule } = require("../src/tools/animeExpanded");
       const list = await getSchedule(day);
       if (list.length === 0) return ctx.reply("No anime scheduled for " + day);
@@ -694,7 +720,7 @@ module.exports = {
         }
       };
 
-      const results = await runTeamProject(task, getSenderName(msg), onProgress);
+      const results = await runTeamProject(task, ctx.senderName, onProgress);
 
       // Send results
       let summary = "*👥 Multi-Agent Build Complete*\n\n";
@@ -846,17 +872,6 @@ module.exports = {
       voices.slice(0, 10).forEach(v => { t += "• " + v.name + " (" + v.id.slice(0, 8) + "...)\n"; });
       ctx.reply(t);
     },
-    say: async (sock, msg, args, ctx) => {
-      const text = args.join(" ");
-      if (!text) return ctx.reply("Usage: *!say <text>* — ARIA speaks it");
-      await ctx.react("🔊");
-      const { textToSpeech: speakResponse } = require("../src/tools/voice");
-      const audio = await speakResponse(text);
-      if (!audio) return ctx.reply("TTS failed. Set ELEVENLABS_API_KEY in .env");
-      await sock.sendMessage(msg.key.remoteJid, { audio: audio, mimetype: "audio/mp4" });
-    },
-
-
     // ── VOICE ENHANCED ──────────────────────────────────────
     say: async (sock, msg, args, ctx) => {
       const text = args.join(" ");
@@ -953,11 +968,11 @@ module.exports = {
       await ctx.react("⚡");
       await ctx.reply("AI is building your plugin...");
       const { generatePlugin } = require("../src/tools/pluginBuilder");
-      const result = await generatePlugin(desc, getSenderName(msg));
+      const result = await generatePlugin(desc, ctx.senderName);
       if (!result.success) return ctx.reply("❌ " + result.error);
       const fs = require("fs");
       const buf = fs.readFileSync(result.path);
-      await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: result.name + ".js", mimetype: "text/javascript", caption: "✅ Plugin *" + result.name + "* generated & installed! Restart to load." });
+      await sock.sendMessage(msg.key.remoteJid, { document: buf, fileName: result.name + ".js", mimetype: "text/javascript", caption: "✅ Plugin *" + result.name + "* generated and saved for owner review. It is disabled until you explicitly enable it with !enable " + result.name + "." });
     },
 
 

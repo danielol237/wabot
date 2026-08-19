@@ -24,3 +24,7 @@ services:
         value: "3"
       - key: ANIME_PUBLIC_QUEUE_LIMIT
         value: "100"
+      - key: SESSION_GIT_REPO
+        value: danielol237/aria-whatsapp-session
+      - key: SESSION_SYNC_INTERVAL
+        value: "60"

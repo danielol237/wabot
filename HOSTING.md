@@ -55,7 +55,9 @@ At least one text AI provider must be configured for conversational replies. The
 
 ARIA uses Baileys linked-device authentication. On a new or reset session, inspect the Render logs for the QR pairing flow, then open WhatsApp and choose **Linked devices → Link a device**. Scan the displayed QR code. If the deployment uses a configured phone-number pairing flow, follow the pairing-code output instead.
 
-Keep the session directory on persistent storage. A redeploy without the Baileys session state will cause `whatsappReady` to return to `false` and require pairing again. Do not copy session credentials into source control or send them through chat.
+Keep the session directory on persistent storage. On the Render free plan, configure the encrypted Git-backed backup before the first production pairing: `SESSION_GIT_REPO=danielol237/aria-whatsapp-session`, `SESSION_GITHUB_TOKEN` as a fine-grained token limited to that private repository with **Contents: Read and write**, `SESSION_ENCRYPT_KEY` as a dedicated random value of at least 32 characters, and optionally `SESSION_SYNC_INTERVAL` (default 60 seconds). A redeploy without the Baileys session state will cause `whatsappReady` to return to `false` and require pairing again. Do not copy session credentials into source control or send them through chat.
+
+After the first successful pairing, ARIA encrypts and backs up the session automatically, restores it before connecting on boot, and performs a final backup during graceful shutdown. Subsequent code deployments should therefore reuse the existing WhatsApp link unless WhatsApp logs the device out or the backup credentials are changed.
 
 The owner is protected through both normalized phone identity and modern WhatsApp LID handling. Group-admin protection and the anti-admin denylist remain WhatsApp-side controls; the commercial platform layer does not grant a CRM user group-admin powers.
 

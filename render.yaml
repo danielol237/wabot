@@ -28,3 +28,5 @@ services:
         value: danielol237/aria-whatsapp-session
       - key: SESSION_SYNC_INTERVAL
         value: "60"
+      - key: ARIA_CAPSULE_KEY
+        sync: false

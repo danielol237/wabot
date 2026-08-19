@@ -1,14 +1,80 @@
-// Baileys-native helper functions for ARIA WhatsApp bot
-const { downloadMediaMessage } = require("@whiskeysockets/baileys");
+const { downloadMediaMessage, normalizeMessageContent } = require("@whiskeysockets/baileys");
 const { wasSentByBot } = require("./botMessages");
 const { log, error, warn } = require("./logger");
 
+const MEDIA_MESSAGE_TYPES = ["imageMessage", "videoMessage", "documentMessage", "audioMessage"];
+const MAX_QUOTED_MEDIA_DEPTH = 6;
+
+/**
+ * Baileys can wrap the actual payload in ephemeral/view-once/document-caption
+ * containers. Always normalize before inspecting message types.
+ */
+function normalizedContent(value) {
+  const raw = value?.message && typeof value.message === "object" ? value.message : value;
+  return normalizeMessageContent(raw) || raw || {};
+}
+
+function contextInfos(value) {
+  const content = normalizedContent(value);
+  return Object.values(content)
+    .filter((node) => node && typeof node === "object" && node.contextInfo)
+    .map((node) => node.contextInfo)
+    .filter(Boolean);
+}
+
+function firstContextInfo(value) {
+  return contextInfos(value)[0] || null;
+}
+
+function mediaNode(value) {
+  const content = normalizedContent(value);
+  for (const type of MEDIA_MESSAGE_TYPES) {
+    if (content[type]) return { type, media: content[type], content };
+  }
+  return null;
+}
+
+function mediaFilename(media) {
+  return media?.fileName || media?.filename || media?.title || null;
+}
+
+/**
+ * Find media in the current message's reply chain. This deliberately walks
+ * more than one quote level because ARIA replies quote the user's command,
+ * and the user may then reply to ARIA's reply. In that case the GIF is nested
+ * inside: current message -> ARIA reply -> original user media message.
+ */
+function findQuotedMediaReference(msg) {
+  let container = normalizedContent(msg);
+  let contextInfo = firstContextInfo(container);
+  let quoted = contextInfo?.quotedMessage;
+
+  for (let depth = 1; depth <= MAX_QUOTED_MEDIA_DEPTH && quoted; depth += 1) {
+    const candidate = mediaNode(quoted);
+    if (candidate) {
+      return {
+        ...candidate,
+        contextInfo,
+        depth,
+      };
+    }
+
+    container = normalizedContent(quoted);
+    contextInfo = firstContextInfo(container);
+    quoted = contextInfo?.quotedMessage;
+  }
+
+  return null;
+}
+
 function getMessageText(msg) {
+  const content = normalizedContent(msg);
   return (
-    msg.message?.conversation ||
-    msg.message?.extendedTextMessage?.text ||
-    msg.message?.imageMessage?.caption ||
-    msg.message?.videoMessage?.caption ||
+    content.conversation ||
+    content.extendedTextMessage?.text ||
+    content.imageMessage?.caption ||
+    content.videoMessage?.caption ||
+    content.documentMessage?.caption ||
     ""
   );
 }
@@ -18,10 +84,9 @@ function getSenderName(msg) {
 }
 
 function getTargetJid(msg) {
-  const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
-  if (mentioned?.length > 0) return mentioned[0];
-  const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant;
-  if (quotedParticipant) return quotedParticipant;
+  const contextInfo = firstContextInfo(msg);
+  if (contextInfo?.mentionedJid?.length > 0) return contextInfo.mentionedJid[0];
+  if (contextInfo?.participant) return contextInfo.participant;
   return null;
 }
 
@@ -29,20 +94,12 @@ function getTargetJid(msg) {
 // container, or the message replies to one of ARIA's tracked messages.
 function isBotMentioned(msg, botJid) {
   try {
-    const containers = [
-      msg?.message?.extendedTextMessage?.contextInfo,
-      msg?.message?.imageMessage?.contextInfo,
-      msg?.message?.videoMessage?.contextInfo,
-      msg?.message?.documentMessage?.contextInfo,
-      msg?.message?.buttonsResponseMessage?.contextInfo,
-      msg?.message?.listResponseMessage?.contextInfo,
-    ].filter(Boolean);
-    const mentioned = containers.flatMap((info) => Array.isArray(info.mentionedJid) ? info.mentionedJid : []);
+    const infos = contextInfos(msg);
+    const mentioned = infos.flatMap((info) => Array.isArray(info.mentionedJid) ? info.mentionedJid : []);
     const botIds = (Array.isArray(botJid) ? botJid : [botJid]).filter(Boolean).map(normalizeJid);
     if (mentioned.length && botIds.length && mentioned.some((jid) => botIds.includes(normalizeJid(jid)))) return true;
 
-    const { wasSentByBot } = require("./botMessages");
-    if (containers.some((info) => info.stanzaId && wasSentByBot(info.stanzaId))) return true;
+    if (infos.some((info) => info.stanzaId && wasSentByBot(info.stanzaId))) return true;
   } catch (_) {}
   return false;
 }
@@ -104,105 +161,74 @@ function sleep(ms) {
 }
 
 function isQuotingBotMessage(msg) {
-  const contextInfo =
-    msg.message?.extendedTextMessage?.contextInfo ||
-    msg.message?.imageMessage?.contextInfo ||
-    msg.message?.videoMessage?.contextInfo ||
-    msg.message?.documentMessage?.contextInfo ||
-    msg.message?.audioMessage?.contextInfo;
+  const contextInfo = firstContextInfo(msg);
   const stanzaId = contextInfo?.stanzaId;
   if (!stanzaId) return false;
   return wasSentByBot(stanzaId);
 }
 
 function getQuotedMessageText(msg) {
-  const contextInfo =
-    msg.message?.extendedTextMessage?.contextInfo ||
-    msg.message?.imageMessage?.contextInfo ||
-    msg.message?.videoMessage?.contextInfo ||
-    msg.message?.documentMessage?.contextInfo ||
-    msg.message?.audioMessage?.contextInfo;
-  const quoted = contextInfo?.quotedMessage;
+  let quoted = firstContextInfo(msg)?.quotedMessage;
   if (!quoted) return null;
-  return (
-    quoted.conversation ||
-    quoted.extendedTextMessage?.text ||
-    quoted.imageMessage?.caption ||
-    quoted.videoMessage?.caption ||
-    null
-  );
+
+  const parts = [];
+  for (let depth = 0; depth < MAX_QUOTED_MEDIA_DEPTH && quoted; depth += 1) {
+    const text = getMessageText({ message: quoted });
+    if (text) parts.push(text);
+    quoted = firstContextInfo(quoted)?.quotedMessage;
+  }
+  return parts.length ? parts.join("\n") : null;
 }
 
 function hasMedia(msg) {
-  return !!(msg.message?.imageMessage || msg.message?.documentMessage || msg.message?.videoMessage);
+  const reference = mediaNode(msg);
+  return Boolean(reference && reference.type !== "audioMessage");
 }
 
 function hasVoiceNote(msg) {
-  return !!msg.message?.audioMessage;
+  return Boolean(normalizedContent(msg).audioMessage);
+}
+
+function mediaResult(buffer, media) {
+  return {
+    data: buffer.toString("base64"),
+    buffer,
+    mimetype: media?.mimetype || "application/octet-stream",
+    filename: mediaFilename(media),
+  };
 }
 
 async function downloadMediaFromMsg(sock, msg) {
   try {
-    const buffer = await downloadMediaMessage(msg, "buffer", {});
-    const mediaMsg =
-      msg.message?.imageMessage ||
-      msg.message?.documentMessage ||
-      msg.message?.videoMessage ||
-      msg.message?.audioMessage;
-    return {
-      data: buffer.toString("base64"),
-      buffer,
-      mimetype: mediaMsg?.mimetype || "application/octet-stream",
-      filename: mediaMsg?.fileName || null,
-    };
+    const reference = mediaNode(msg);
+    if (!reference) return null;
+    const downloadMsg = { ...msg, message: reference.content };
+    const buffer = await downloadMediaMessage(downloadMsg, "buffer", {});
+    return mediaResult(buffer, reference.media);
   } catch (err) {
     error("Media download error:", err.message);
     return null;
   }
 }
 
-// Download media from the message this one is REPLYING TO (if any). Returns
-// null when the bot isn't replying to media. Needed for commands like
-// !sticker where the user replies to a photo with a text command.
+// Download media from the message this one is REPLYING TO (including a bounded
+// nested reply chain). Needed when a user replies to ARIA's response, because
+// ARIA's response itself quotes the original command that referenced the GIF.
 async function downloadQuotedMedia(sock, msg) {
-  const contextInfo =
-    msg.message?.extendedTextMessage?.contextInfo ||
-    msg.message?.imageMessage?.contextInfo ||
-    msg.message?.videoMessage?.contextInfo ||
-    msg.message?.documentMessage?.contextInfo;
-  const quoted = contextInfo?.quotedMessage;
-  if (!quoted) return null;
-
-  const quotedMedia =
-    quoted.imageMessage ||
-    quoted.videoMessage ||
-    quoted.documentMessage ||
-    quoted.audioMessage;
-  if (!quotedMedia) return null;
+  const reference = findQuotedMediaReference(msg);
+  if (!reference?.contextInfo?.stanzaId) return null;
 
   try {
-    // Reconstruct a media message the downloader can use, pointing at the
-    // quoted media's message key so downloadMediaMessage fetches the right one.
     const quotedMsg = {
       key: {
-        remoteJid: contextInfo.remoteJid || msg.key?.remoteJid,
-        id: contextInfo.stanzaId,
-        participant: contextInfo.participant,
+        remoteJid: reference.contextInfo.remoteJid || msg.key?.remoteJid,
+        id: reference.contextInfo.stanzaId,
+        participant: reference.contextInfo.participant,
       },
-      message: {
-        imageMessage: quoted.imageMessage,
-        videoMessage: quoted.videoMessage,
-        documentMessage: quoted.documentMessage,
-        audioMessage: quoted.audioMessage,
-      },
+      message: reference.content,
     };
     const buffer = await downloadMediaMessage(quotedMsg, "buffer", {});
-    return {
-      data: buffer.toString("base64"),
-      buffer,
-      mimetype: quotedMedia.mimetype || "application/octet-stream",
-      filename: quotedMedia.fileName || null,
-    };
+    return mediaResult(buffer, reference.media);
   } catch (err) {
     error("Quoted media download error:", err.message);
     return null;
@@ -214,4 +240,5 @@ module.exports = {
   reply, react, splitMessage, sleep,
   isQuotingBotMessage, getQuotedMessageText,
   hasMedia, hasVoiceNote, downloadMediaFromMsg, downloadQuotedMedia,
+  findQuotedMediaReference,
 };

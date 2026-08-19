@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 const { commands, detectCommandCollisions } = require("../src/utils/commandRouter");
 const { getPasquaCommands, handleWcgCommand } = require("../src/tools/pasquaCommands");
-const { getGroupSettings, setAntiAdmin } = require("../src/utils/groupSettings");
+const { getGroupSettings, setAntiAdmin, setProtection } = require("../src/utils/groupSettings");
 const { handleParticipantUpdate } = require("../src/tools/groupProtection");
 const { isBotAdmin, isSenderAdmin } = require("../src/tools/groupAdmin");
 const { resolveNaturalAction } = require("../src/utils/commandRouter");
@@ -31,7 +31,7 @@ function fakeSock() {
 
 test("PASQUA: requested safe commands are registered while approve and confirmkick remain absent", () => {
   const names = new Set(commands.flatMap((c) => [c.name, ...(c.aliases || [])]));
-  for (const name of ["antibot", "antidemote", "antigroupmention", "antigroupstatus", "antihijack", "antimention", "antipromote", "slowmode", "kickall", "getgpp", "setgpp", "introcard", "setwelcomemsg", "setgoodbyemsg", "setbio", "setname", "setpp", "pp", "randompp", "pinterest", "antiadmin", "password", "wcg", "aichat", "essay", "summarize"]) assert.ok(names.has(name), `${name} should be registered`);
+  for (const name of ["antibot", "antidemote", "antigroupmention", "antigroupstatus", "antihijack", "antimention", "antipromote", "slowmode", "kickall", "getgpp", "setgpp", "introcard", "setwelcomemsg", "setgoodbyemsg", "setbio", "setname", "setpp", "pp", "randompp", "pinterest", "antiadmin", "adminprotect", "password", "wcg", "aichat", "essay", "summarize"]) assert.ok(names.has(name), `${name} should be registered`);
   assert.equal(names.has("approve"), false);
   assert.equal(names.has("confirmkick"), false);
   assert.equal(names.has("randompp"), true);
@@ -39,6 +39,7 @@ test("PASQUA: requested safe commands are registered while approve and confirmki
   assert.equal(commands.find((c) => c.name === "kickall")?.ownerOnly, true);
   assert.equal(getPasquaCommands().find((c) => c.name === "setpp")?.ownerOnly, true);
   assert.equal(getPasquaCommands().find((c) => c.name === "antiadmin")?.ownerOnly, true);
+  assert.equal(getPasquaCommands().find((c) => c.name === "adminprotect")?.ownerOnly, true);
 });
 
 test("PASQUA: every registered command resolves without a prefix when addressed to ARIA", () => {
@@ -75,6 +76,47 @@ test("PASQUA: protection commands persist on/off state", async () => {
   assert.equal(getGroupSettings(ctx.chatId).protections.antibot, false);
 });
 
+test("PASQUA: adminprotect is owner-only and persists independently from antiadmin", async () => {
+  const previousOwner = process.env.OWNER_NUMBER;
+  process.env.OWNER_NUMBER = "12345000000";
+  try {
+    const sock = fakeSock();
+    const chatId = "adminprotect-test@g.us";
+    const command = getPasquaCommands().find((c) => c.name === "adminprotect");
+    await command.handler(sock, fakeMessage(chatId), "on", { chatId, senderJid: "12345000000@s.whatsapp.net", isGroup: true, pasquaCommand: "adminprotect" });
+    assert.equal(getGroupSettings(chatId).protections.adminprotect, true);
+    await command.handler(sock, fakeMessage(chatId), "off", { chatId, senderJid: "23456000000@s.whatsapp.net", isGroup: true, pasquaCommand: "adminprotect" });
+    assert.match(sock.sent.at(-1).payload.text, /only the owner/i);
+    assert.equal(getGroupSettings(chatId).protections.adminprotect, true);
+    await command.handler(sock, fakeMessage(chatId), "off", { chatId, senderJid: "12345000000@s.whatsapp.net", isGroup: true, pasquaCommand: "adminprotect" });
+    assert.equal(getGroupSettings(chatId).protections.adminprotect, false);
+  } finally {
+    if (previousOwner === undefined) delete process.env.OWNER_NUMBER;
+    else process.env.OWNER_NUMBER = previousOwner;
+  }
+});
+
+test("PASQUA: kicking the owner is refused with a roast and no removal update", async () => {
+  const previousOwner = process.env.OWNER_NUMBER;
+  process.env.OWNER_NUMBER = "12345000000";
+  try {
+    const sock = fakeSock();
+    const chatId = "owner-kick-test@g.us";
+    const msg = {
+      key: { remoteJid: chatId, id: "kick-msg", participant: "23456000000@s.whatsapp.net" },
+      message: { extendedTextMessage: { text: "ARIA kick @owner", contextInfo: { mentionedJid: ["12345000000@s.whatsapp.net"] } } },
+    };
+    const command = commands.find((item) => item.name === "kick");
+    await command.handler(sock, msg, "", { chatId, isGroup: true });
+    const updates = sock.sent.filter((entry) => entry.groupUpdate).map((entry) => entry.groupUpdate);
+    assert.equal(updates.some((entry) => entry.action === "remove"), false);
+    assert.match(sock.sent.at(-1).payload.text, /Absolutely not/i);
+  } finally {
+    if (previousOwner === undefined) delete process.env.OWNER_NUMBER;
+    else process.env.OWNER_NUMBER = previousOwner;
+  }
+});
+
 test("group admin checks recognize phone and LID identities", async () => {
   const sock = fakeSock();
   sock.user = { id: "12345000000@s.whatsapp.net", lid: "555000000000000@lid" };
@@ -98,6 +140,22 @@ test("PASQUA: anti-admin denylist demotes a blocked promotion and restores the o
   assert.ok(updates.some((entry) => entry.action === "add" && entry.ids.includes("12345000000@s.whatsapp.net")));
   assert.ok(updates.some((entry) => entry.action === "demote" && entry.ids.includes("23456000000@s.whatsapp.net")));
   setAntiAdmin(chatId, blocked, false);
+});
+
+test("PASQUA: adminprotect restores the owner and ARIA after a demotion attempt, then demotes the actor", async () => {
+  const sock = fakeSock();
+  const chatId = "adminprotect-event-test@g.us";
+  setProtection(chatId, "adminprotect", true);
+  await handleParticipantUpdate(sock, {
+    id: chatId,
+    author: "23456000000@s.whatsapp.net",
+    participants: ["12345000000@s.whatsapp.net"],
+    action: "demote",
+  });
+  const updates = sock.sent.filter((entry) => entry.groupUpdate).map((entry) => entry.groupUpdate);
+  assert.ok(updates.some((entry) => entry.action === "promote" && entry.ids.includes("12345000000@s.whatsapp.net")));
+  assert.ok(updates.some((entry) => entry.action === "demote" && entry.ids.includes("23456000000@s.whatsapp.net")));
+  setProtection(chatId, "adminprotect", false);
 });
 
 test("PASQUA: anti-admin enforcement matches a stored phone identity to a promoted LID", async () => {

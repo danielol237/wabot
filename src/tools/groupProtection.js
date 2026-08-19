@@ -68,7 +68,26 @@ async function handleParticipantUpdate(sock, update) {
       await sock.sendMessage(chatId, { text: settings.introCard.text.replace("{user}", `@${jidNumber(mentionJid)}`), mentions: [mentionJid] }).catch(() => {});
     }
   }
-  if (!(await isBotAdmin(sock, chatId))) return;
+  const botIsAdmin = await isBotAdmin(sock, chatId);
+  const protectedDemotionTargets = update.action === "demote" && enabled(settings, "adminprotect")
+    ? (update.participants || []).filter((participant) => participantMatches(participant, ownerIdentities))
+    : [];
+  if (protectedDemotionTargets.length) {
+    if (botIsAdmin) {
+      const protectedJids = protectedDemotionTargets.map((participant) => participantJids(participant)[0] || participant).filter(Boolean);
+      if (protectedJids.length) await sock.groupParticipantsUpdate(chatId, protectedJids, "promote").catch(() => {});
+      const actorIsProtected = ownerIdentities.some((candidate) => candidate === actorJid || jidNumber(candidate) === jidNumber(actorJid));
+      const actorTarget = actorJid.includes("@") ? actorJid : `${actorJid}@s.whatsapp.net`;
+      if (actorJid && !actorIsProtected) await sock.groupParticipantsUpdate(chatId, [actorTarget], "demote").catch(() => {});
+      const mentions = [...protectedJids, ...(actorJid && !actorIsProtected ? [actorTarget] : [])];
+      await sock.sendMessage(chatId, {
+        text: "🛡️ Admin protection restored the protected admin(s) and reversed the demotion attempt.",
+        mentions,
+      }).catch(() => {});
+    }
+    return;
+  }
+  if (!botIsAdmin) return;
   if (ownerWasRemoved) {
     const ownerJid = participantJids(ownerParticipants[0])[0] || ownerParticipants[0];
     if (ownerJid) await sock.groupParticipantsUpdate(chatId, [ownerJid], "add").catch(() => {});

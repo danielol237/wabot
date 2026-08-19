@@ -4,7 +4,7 @@
 const { getAIResponse } = require("./ai");
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
+const { execFileSync } = require("child_process");
 
 const PLUGINS_DIR = path.join(__dirname, "../../plugins");
 
@@ -42,17 +42,23 @@ module.exports = {
   const pluginName = (nameMatch ? nameMatch[1] : "custom").toLowerCase();
 
   const filePath = path.join(PLUGINS_DIR, pluginName + ".js");
+  if (fs.existsSync(filePath)) {
+    return { success: false, error: `A plugin named "${pluginName}" already exists. Choose a more specific name.` };
+  }
 
-  // Validate syntax
-  fs.writeFileSync(filePath, content);
+  // Validate syntax without executing untrusted generated code.
+  fs.writeFileSync(filePath, content, { mode: 0o600 });
   try {
-    require('child_process').execSync('node --check "' + filePath + '"', { stdio: "pipe" });
+    execFileSync(process.execPath, ["--check", filePath], { stdio: "pipe" });
   } catch (e) {
-    fs.unlinkSync(filePath);
+    try { fs.unlinkSync(filePath); } catch (_) {}
     return { success: false, error: "Generated plugin has syntax errors. Try a simpler description." };
   }
 
-  return { success: true, name: pluginName, path: filePath, content };
+  // New generated code is not loaded automatically on the next restart. An
+  // owner must explicitly enable it after reviewing the returned file.
+  try { require("./pluginMarket").setPluginState(pluginName, false); } catch (_) {}
+  return { success: true, name: pluginName, path: filePath, content, enabled: false };
 }
 
 module.exports = { generatePlugin };

@@ -531,6 +531,11 @@ async function routeMessage(sock, msg, context) {
     const args = text.slice(matchedPrefix.length).trim().slice(commandName.length).trim().split(/\s+/);
     const found = findPluginCommand(loadedPlugins, commandName);
     if (found) {
+      if (found.ownerOnly && !isOwner(senderJid)) {
+        const { reply: _rp } = require("./baileysHelpers");
+        await _rp(sock, msg, "❌ That plugin capability is owner-only.");
+        return;
+      }
       const ctx = {
         chatId, senderJid, senderName,
         reply: (t) => { const { reply: r } = require("./baileysHelpers"); return r(sock, msg, t); },

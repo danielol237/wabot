@@ -27,7 +27,9 @@ def to_pcm16k(src, dst):
 
 
 def recognize(audio_path, lang="en-US", profanity=0):
-    tmp = tempfile.mktemp(suffix=".pcm")
+    tmp_handle = tempfile.NamedTemporaryFile(suffix=".pcm", delete=False)
+    tmp = tmp_handle.name
+    tmp_handle.close()
     try:
         to_pcm16k(audio_path, tmp)
         with open(tmp, "rb") as f:

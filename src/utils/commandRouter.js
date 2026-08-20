@@ -35,7 +35,6 @@ const { runAgentTask } = require("../tools/agent");
 const { debugCode } = require("../tools/debugTool");
 const { generateIdCard, extractDetails, getMissingFields } = require("./idCard");
 const idCardSessions = {};
-const { generateIdCard, extractDetails, getMissingFields } = require("./idCard");
 const { isNsfwEnabled, setNsfw } = require("./botSettings");
 const { runEvolveCheck: selfAwarenessCheck } = require("../tools/selfAwareness");
 const { createSticker } = require("../tools/sticker");

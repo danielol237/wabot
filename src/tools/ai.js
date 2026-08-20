@@ -194,6 +194,22 @@ const { chatGPT } = require("./gpt5Cli");
     }
   }
 
+
+  // Gemini unofficial API — no key needed, free tier
+  try {
+    const gemini = require("./geminiCli");
+    const geminiResult = await gemini.sendMessage(String(userMessage));
+    if (geminiResult.text) {
+      const content = withTruncationNotice(geminiResult.text, null, "length", requestNeedsLargeOutput);
+      lastProvider = "gemini-unofficial";
+      return content;
+    } else if (geminiResult.error) {
+      error("Gemini unofficial error:", geminiResult.error);
+    }
+  } catch (err) {
+    error("Gemini unofficial exception:", err.message);
+  }
+
   // Try Cerebras first — 1M tokens/day free, the highest ceiling of any free
   // provider we've found, added after Gemini's daily quota kept getting hit
   // during normal testing/usage.

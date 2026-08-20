@@ -7,16 +7,14 @@
 // Categories with no live source return an honest "unavailable" message.
 
 const axios = require("axios");
+const { isNsfwEnabled, setNsfw } = require("../src/utils/botSettings");
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 const NSFW_TYPES = ["waifu", "neko", "trap", "blowjob", "ass", "hentai", "milf", "oral", "paizuri", "ero", "yuri", "cum", "feet", "spank", "smallboobs"];
 
-// In-memory NSFW toggle per chat
-const nsfwToggles = new Map(); // chatId -> boolean
-
 function isNSFWEnabled(chatId) {
-  return nsfwToggles.get(chatId) === true;
+  return isNsfwEnabled(chatId);
 }
 
 // ── Multi-source image resolver ────────────────────────────────
@@ -97,11 +95,11 @@ module.exports = {
       const sub = args[0]?.toLowerCase();
 
       if (sub === "on") {
-        nsfwToggles.set(chatId, true);
+        setNsfw(true, chatId);
         return ctx.reply("🔞 NSFW mode: *ON*\n\nAvailable: waifu, neko, hentai, blowjob, ass, milf, oral, paizuri, ero, yuri, trap, cum, feet, spank, smallboobs");
       }
       if (sub === "off") {
-        nsfwToggles.set(chatId, false);
+        setNsfw(false, chatId);
         return ctx.reply("🔞 NSFW mode: *OFF*");
       }
 

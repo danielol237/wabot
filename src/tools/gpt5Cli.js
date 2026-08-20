@@ -21,7 +21,7 @@ function saveMemory(memory) {
   try { fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2)); } catch (e) {}
 }
 
-async function chatGPT(prompt, userId = "default", history = [], systemPrompt = "") {
+async function chatGPT(prompt, userId = "default", history = [], systemPrompt = "", options = {}) {
   const memory = loadMemory();
   let conv = memory.conversations[userId];
   if (!conv) {
@@ -58,12 +58,14 @@ async function chatGPT(prompt, userId = "default", history = [], systemPrompt = 
       {
         action: "next",
         messages,
-        model: "auto",
-        history_and_training_disabled: false,
+        model: options?.model || "auto",
+        history_and_training_disabled: true,
         enable_message_followups: true,
         force_use_sse: true,
         supported_encodings: ["v1"],
         stream: false,
+        // Uncensored mode — disables content filtering
+        ...(options?.uncensored ? { suppress_prompt_warning: true } : {}) 
       },
       {
         headers: {

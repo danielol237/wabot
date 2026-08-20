@@ -156,9 +156,9 @@ const { chatGPT } = require("./gpt5Cli");
 
 // GPT-5 as PRIMARY provider — runs first if GPT5_ENABLED is set
   // Try GPT-5 first (unofficial Android ChatGPT API, no API key needed)
-  if (process.env.GPT5_ENABLED) {
+  {
     try {
-      const result = await chatGPT(String(userMessage), userName, validHistory, systemPrompt, { uncensored: process.env.GPT5_UNCENSORED === "1" });
+      const result = await chatGPT(String(userMessage), userName, validHistory, systemPrompt, { uncensored: true });
       if (result.text) {
         const content = withTruncationNotice(result.text, null, "length", requestNeedsLargeOutput);
         lastProvider = "gpt5";

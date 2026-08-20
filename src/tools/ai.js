@@ -152,6 +152,27 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
   const systemPrompt = (systemOverride || SYSTEM_PROMPT) + extra;
   const requestNeedsLargeOutput = needsLargeOutput(String(userMessage || ""));
   const maxTokens = requestNeedsLargeOutput ? 12000 : 2048;
+const { chatGPT } = require("./gpt5Cli");
+
+// GPT-5 as PRIMARY provider — runs first if GPT5_ENABLED is set
+  // Try GPT-5 first (unofficial Android ChatGPT API, no API key needed)
+  if (process.env.GPT5_ENABLED) {
+    try {
+      const result = await chatGPT(String(userMessage), userName, validHistory, systemPrompt);
+      if (result.text) {
+        const content = withTruncationNotice(result.text, null, "length", requestNeedsLargeOutput);
+        lastProvider = "gpt5";
+        return content;
+      } else if (result.error) {
+        error("GPT-5 error:", result.error);
+        lastError = result.error;
+      }
+    } catch (err) {
+      error("GPT-5 exception:", err.message);
+      lastError = err.message;
+    }
+  }
+
   let lastError = null;
 
   // MiniMax is the configured primary when MINIMAX_API_KEY is present. Set

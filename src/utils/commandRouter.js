@@ -43,6 +43,7 @@ const { sendFile, extractAllCodeBlocks } = require("../tools/fileSender");
 const { createBackup } = require("../tools/backupSystem");
 const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
+const { chatGPT } = require("../tools/gpt5Cli");
 const { setReminder } = require("../tools/reminders");
 const { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
@@ -268,6 +269,7 @@ function registerBuiltinCommands() {
   registerCommand({ name: "cancelbuild", aliases: ["cancel"], category: "dev", description: "Cancel a project", handler: handleProjectCancel, ownerOnly: true });
   registerCommand({ name: "edit", aliases: [], category: "dev", description: "Edit a project file", handler: handleEditFile, ownerOnly: true });
   registerCommand({ name: "think", aliases: [], category: "dev", description: "Think about a project", handler: handleThink, ownerOnly: true });
+  registerCommand({ name: "gpt5", aliases: ["ai5", "chatgpt5", "gpt5chat"], category: "dev", description: "Chat with GPT-5 via unofficial API: !gpt5 <message>", handler: handleGpt5, ownerOnly: false });
   registerCommand({ name: "fix", aliases: ["debug"], category: "dev", description: "Debug code", handler: handleDebugCode, ownerOnly: true });
   registerCommand({ name: "remember", aliases: [], category: "dev", description: "Remember a preference", handler: handleRemember, ownerOnly: false });
   registerCommand({ name: "preferences", aliases: ["myprefs"], category: "dev", description: "View preferences", handler: handlePreferences, ownerOnly: false });
@@ -2020,6 +2022,14 @@ async function handleThink(sock, msg, args, ctx) {
   if (!args) return reply(sock, msg, "Tell me what you want me to plan before I build it.");
   await react(sock, msg, "🧠");
   const result = await thinkAboutProject(args, ctx.senderName, ctx.chatId);
+  await reply(sock, msg, result);
+}
+
+async function handleGpt5(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  if (!args) return reply(sock, msg, "Usage: !gpt5 <your message>\nChat with GPT-5 directly — no API key needed.");
+  await react(sock, msg, "🤖");
+  const result = await chatGPT(args, ctx.senderJid);
   await reply(sock, msg, result);
 }
 

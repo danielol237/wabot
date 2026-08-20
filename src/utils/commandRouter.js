@@ -34,6 +34,8 @@ const { runEvolveCheck } = require("../tools/selfAwareness");
 const { runAgentTask } = require("../tools/agent");
 const { debugCode } = require("../tools/debugTool");
 const { generateIdCard, extractDetails, getMissingFields } = require("./idCard");
+const idCardSessions = {};
+const { generateIdCard, extractDetails, getMissingFields } = require("./idCard");
 const { isNsfwEnabled, setNsfw } = require("./botSettings");
 const { runEvolveCheck: selfAwarenessCheck } = require("../tools/selfAwareness");
 const { createSticker } = require("../tools/sticker");
@@ -45,6 +47,9 @@ const { sendFile, extractAllCodeBlocks } = require("../tools/fileSender");
 const { createBackup } = require("../tools/backupSystem");
 const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
+const { generateIdCard, extractDetails, getMissingFields } = require("./idCard");
+const idCardSessions = {};
+
 const { chatGPT } = require("../tools/gpt5Cli");
 const { setReminder } = require("../tools/reminders");
 const { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
@@ -69,7 +74,7 @@ const NAME_TRIGGERS = [
 
 // ── Intent patterns ──────────────────────────────────────────
 const INTENTS = {
-  idcard: ['create an id card', 'make an id card', 'generate an id card', 'create id', 'make id', 'cameroon id', 'identity card', 'national id']
+  idcard: ['create an id card', 'make an id card', 'generate an id card', 'create id', 'make id', 'cameroon id', 'identity card', 'national id'],
   nsfw: ["turn on nsfw", "enable nsfw", "nsfw on", "activate nsfw"],
   image: ["generate an image", "generate a picture", "generate a pic", "create an image", "create a picture", "create a pic", "make an image", "make a picture", "make a pic", "draw me", "draw a", "imagine a", "imagine an", "paint a", "paint me", "design an image", "give me an image", "show me a picture"],
   video: ["generate a video", "generate me a video", "generate my video", "create a video", "create me a video", "make a video", "make me a video", "animate this", "create an animation"],
@@ -136,7 +141,8 @@ function lifeFeatureHandler(feature) {
 // Built-in commands - these are the standard prefix commands
 function registerBuiltinCommands() {
   // Admin / Meta
-    registerCommand({ name: "nsfw", category: "meta", description: "Toggle NSFW mode: !nsfw on/off", handler: handleNsfw, ownerOnly: false });
+      registerCommand({ name: "idcard", aliases: ["id", "identity", "createid"], category: "utility", description: "Create an ID card", handler: handleIdCard, ownerOnly: false });
+registerCommand({ name: "nsfw", category: "meta", description: "Toggle NSFW mode: !nsfw on/off", handler: handleNsfw, ownerOnly: false });
 registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", description: "Check if bot is alive", handler: handleAlive, ownerOnly: false });
   registerCommand({ name: "help", aliases: ["menu", "commands", "h"], category: "meta", description: "Show help menu", handler: handleHelp, ownerOnly: false });
   registerCommand({ name: "stats", aliases: ["botstats"], category: "admin", description: "Show bot statistics", handler: handleStats, ownerOnly: true });
@@ -2307,10 +2313,67 @@ async function handleNsfw(sock, msg, args, ctx) {
   return reply(sock, msg, current ? "❌ NSFW mode disabled." : "✅ NSFW mode enabled.");
 }
 
+
+async function handleIdCard(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const sessionId = ctx.senderJid;
+  
+  let session = idCardSessions[sessionId] || {};
+  
+  if (!session.step) {
+    session = { step: 'initial', details: {}, photoBuffer: null };
+  }
+  
+  const text = String(args || '').trim();
+  
+  // Check for quoted image
+  if (msg.message?.imageMessage?.url || msg.message?.imageMessage?.directPath) {
+    try {
+      const buffer = await sock.downloadMediaMessage(msg);
+      session.photoBuffer = buffer;
+      await reply(sock, msg, '📸 Photo saved! Now send me your details (name, date of birth, ID number, etc.)');
+      session.step = 'waiting_details';
+      idCardSessions[sessionId] = session;
+      return;
+    } catch (e) {}
+  }
+  
+  // Parse details
+  const details = extractDetails(text);
+  session.details = { ...session.details, ...details };
+  
+  // Check missing fields
+  const missing = getMissingFields(session.details);
+  if (missing.length > 0) {
+    await reply(sock, msg, `I need more info:\n• ${missing.join('\n• ')}`);
+    idCardSessions[sessionId] = session;
+    return;
+  }
+  
+  // Check for photo
+  if (!session.photoBuffer) {
+    await reply(sock, msg, 'Great details! Now send me a passport-style photo.');
+    session.step = 'waiting_photo';
+    idCardSessions[sessionId] = session;
+    return;
+  }
+  
+  // Generate card
+  await react(sock, msg, '🪪');
+  try {
+    const buffer = generateIdCard(session.photoBuffer, session.details);
+    await sock.sendMessage(ctx.chatId, { image: buffer, caption: '🪪 Here is your Cameroon ID card!' }, { quoted: msg });
+  } catch (e) {
+    await reply(sock, msg, '❌ Failed: ' + e.message);
+  }
+  
+  delete idCardSessions[sessionId];
+}
 // ── Intent-based handlers ────────────────────────────────────
 const intentHandlers = {
   idcard: handleIdCard,
   nsfw: handleNsfw,
+  idcard: handleIdCard,
   image: handleImageGen,
   video: handleVideoGen,
   music: handleMusicGen,

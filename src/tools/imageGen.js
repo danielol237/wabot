@@ -1,4 +1,5 @@
 const axios = require("axios");
+const venice = require("./veniceMedia");
 const minimax = require("./minimaxMedia");
 const zai = require("./zaiMedia");
 
@@ -29,6 +30,12 @@ async function attachImageBuffer(result) {
 
 async function generateImage(prompt) {
   const failures = [];
+  if (venice.configured() && process.env.VENICE_IMAGE_ENABLED !== "0") {
+    const generated = await venice.generateImage(prompt);
+    if (generated.success && (generated.buffer || generated.url)) return generated;
+    failures.push(`Venice: ${generated.error || "no usable image"}`);
+    console.warn("Venice image generation failed; trying MiniMax/Z.AI/Pollinations fallback:", generated.error);
+  }
   if (minimax.configured() && process.env.MINIMAX_IMAGE_ENABLED !== "0") {
     const generated = await minimax.generateImage(prompt);
     if (generated.success) {

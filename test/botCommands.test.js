@@ -35,3 +35,23 @@ test("commandRouter: !close / !open are registered + !nsfw lives in the plugin",
   const pluginSrc = require("fs").readFileSync(path.join(__dirname, "../plugins/nsfw.js"), "utf8");
   assert.ok(pluginSrc.includes('name: "nsfw"'), "!nsfw registered in the plugin");
 });
+
+test("commandRouter: natural NSFW phrases resolve to the plugin toggle operation", () => {
+  const router = require("../src/utils/commandRouter");
+  assert.deepStrictEqual(router._test.resolveNSFWPhrase("ARIA turn on NSFW"), { operation: "on" });
+  assert.deepStrictEqual(router._test.resolveNSFWPhrase("hey Aria, enable nsfw mode"), { operation: "on" });
+  assert.deepStrictEqual(router._test.resolveNSFWPhrase("ARIA turn off NSFW"), { operation: "off" });
+  assert.equal(router._test.resolveNSFWPhrase("ARIA generate an image"), null);
+});
+
+test("NSFW plugin: gated categories are off by default and usage lists the available commands", () => {
+  const plugin = require("../plugins/nsfw");
+  plugin._test.nsfwToggles.clear();
+  assert.equal(plugin._test.isNSFWEnabled("chat-a"), false);
+  assert.match(plugin._test.NSFW_USAGE, /!milf/);
+  assert.match(plugin._test.NSFW_USAGE, /!waifu/);
+  plugin._test.nsfwToggles.set("chat-a", true);
+  assert.equal(plugin._test.isNSFWEnabled("chat-a"), true);
+  assert.equal(plugin._test.isNSFWEnabled("chat-b"), false);
+  plugin._test.nsfwToggles.clear();
+});

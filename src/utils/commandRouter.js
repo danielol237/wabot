@@ -2370,7 +2370,6 @@ async function handleIdCard(sock, msg, args, ctx) {
 const intentHandlers = {
   idcard: handleIdCard,
   nsfw: handleNsfw,
-  idcard: handleIdCard,
   image: handleImageGen,
   video: handleVideoGen,
   music: handleMusicGen,

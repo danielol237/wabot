@@ -221,6 +221,30 @@ const COUNTRIES = {
   }
 };
 
+
+function autoGenerateIdNumber(countryKey) {
+  const country = COUNTRIES[countryKey] || COUNTRIES.cameroon;
+  const timestamp = Date.now().toString().slice(-6);
+  const random = Math.floor(Math.random() * 900000) + 100000;
+  
+  // Country-specific formats
+  const formats = {
+    cameroon: 'CMR' + timestamp + random.toString().slice(0, 3),
+    nigeria: (10000000000 + Math.floor(Math.random() * 9000000000)).toString(),
+    ghana: 'GHA' + random.toString().slice(0, 9),
+    senegal: 'SN' + timestamp + Math.floor(Math.random() * 999).toString().padStart(3, '0'),
+    IvoryCoast: 'CI' + random.toString().slice(0, 8),
+    togo: 'TGO' + Math.floor(Math.random() * 999999999).toString(),
+    benin: 'BEN' + timestamp + random.toString().slice(0, 3),
+    burkina: 'BF' + Math.floor(Math.random() * 999999999).toString(),
+    mali: 'MLI' + random.toString().slice(0, 8),
+    guinea: 'GIN' + Math.floor(Math.random() * 999999999).toString()
+  };
+  
+  return formats[countryKey] || formats.cameroon;
+}
+
+
 const WIDTH = 856;
 const HEIGHT = 540;
 
@@ -390,6 +414,7 @@ function generateIdCard(imageBuffer, details, countryKey = "cameroon") {
 }
 
 module.exports = {
+  autoGenerateIdNumber,
   generateIdCard,
   extractDetails,
   getMissingFields,

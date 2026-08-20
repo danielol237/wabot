@@ -2344,8 +2344,7 @@ async function handleIdCard(sock, msg, args, ctx) {
         const countryName = session.country.charAt(0).toUpperCase() + session.country.slice(1);
         await sock.sendMessage(ctx.chatId, { 
           image: cardBuffer, 
-          caption: 'Your ' + countryName + ' ID card!\nID: ' + session.details.idNumber
-ID: ' + session.details.idNumber 
+          caption: 'Your ' + countryName + ' ID card!\nID: ' + session.details.idNumber 
         }, { quoted: msg });
       } catch (e) {
         await reply(sock, msg, 'Failed to generate: ' + e.message);

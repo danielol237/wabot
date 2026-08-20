@@ -152,6 +152,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
   const systemPrompt = (systemOverride || SYSTEM_PROMPT) + extra;
   const requestNeedsLargeOutput = needsLargeOutput(String(userMessage || ""));
   const maxTokens = requestNeedsLargeOutput ? 12000 : 2048;
+  let lastError = null;
 const { chatGPT } = require("./gpt5Cli");
 
 // GPT-5 as PRIMARY provider — runs first if GPT5_ENABLED is set
@@ -172,8 +173,6 @@ const { chatGPT } = require("./gpt5Cli");
       lastError = err.message;
     }
   }
-
-  let lastError = null;
 
   // MiniMax is the configured primary when MINIMAX_API_KEY is present. Set
   // MINIMAX_PRIMARY=false to keep the existing provider order while retaining

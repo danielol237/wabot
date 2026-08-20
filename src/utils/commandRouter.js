@@ -454,6 +454,14 @@ function resolveBusinessModePhrase(text) {
   return match ? { operation: match[1] || "start" } : null;
 }
 
+function resolveNSFWPhrase(text) {
+  const value = String(text || "").trim().replace(/[?!.]+$/g, "");
+  const match = value.match(/^(?:(?:hey|yo|ok)\s+)?aria\s*[,!:?-]?\s+(?:(?:turn|switch)\s+(on|off)|enable|disable)\s+(?:the\s+)?nsfw(?:\s+mode)?$/i);
+  if (!match) return null;
+  const enabled = match[1] ? match[1].toLowerCase() === "on" : /\benable\b/i.test(value);
+  return { operation: enabled ? "on" : "off" };
+}
+
 function resolveNaturalAction(text) {
   const cleaned = stripAriaAddress(text);
   if (!cleaned) return null;
@@ -576,6 +584,31 @@ async function routeMessage(sock, msg, context) {
     // gets feedback instead of a silent fall-through to AI chat.
     const { reply: _rp } = require("./baileysHelpers");
     await _rp(sock, msg, `🤔 *!${commandName}* isn't a command I know. Try *!help* to see what I can do.`);
+    return;
+  }
+
+  // ── NATURAL NSFW TOGGLE ─────────────────────────────────────
+  // The NSFW commands live in a plugin, so route the addressed phrase directly
+  // to that plugin instead of sending it through ordinary AI intent detection.
+  const nsfwPhrase = resolveNSFWPhrase(text);
+  if (nsfwPhrase) {
+    const found = findPluginCommand(loadedPlugins, "nsfw");
+    if (!found) {
+      const { reply: _rp } = require("./baileysHelpers");
+      await _rp(sock, msg, "⚠️ The NSFW plugin is not loaded in this deployment.");
+      return;
+    }
+    try {
+      const ctx = {
+        chatId, senderJid, senderName,
+        reply: (t) => { const { reply: r } = require("./baileysHelpers"); return r(sock, msg, t); },
+        react: (e) => { const { react: r } = require("./baileysHelpers"); return r(sock, msg, e); },
+      };
+      await found.handler(sock, msg, [nsfwPhrase.operation], { ...context, ...ctx, pasquaCommand: "nsfw" });
+    } catch (err) {
+      const { reply: _rp } = require("./baileysHelpers");
+      await _rp(sock, msg, `⚠️ NSFW toggle failed: ${String(err?.message || err).slice(0, 240)}`);
+    }
     return;
   }
 
@@ -2726,5 +2759,5 @@ module.exports = {
   resolveNaturalAction,
   naturalArgs,
   detectCommandCollisions,
-  _test: { resolveBusinessModePhrase },
+  _test: { resolveBusinessModePhrase, resolveNSFWPhrase },
 };

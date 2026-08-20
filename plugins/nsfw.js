@@ -12,8 +12,10 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 const NSFW_TYPES = ["waifu", "neko", "trap", "blowjob", "ass", "hentai", "milf", "oral", "paizuri", "ero", "yuri", "cum", "feet", "spank", "smallboobs"];
 
-// In-memory NSFW toggle per chat
+// In-memory NSFW toggle per chat. The toggle is intentionally scoped to the
+// WhatsApp chat, so enabling it in one group does not affect another chat.
 const nsfwToggles = new Map(); // chatId -> boolean
+const NSFW_USAGE = `🔞 *NSFW mode commands*\n\nEnable: *!nsfw on* or *ARIA turn on NSFW*\nDisable: *!nsfw off* or *ARIA turn off NSFW*\nStatus: *!nsfw*\n\nAvailable gated commands: ${NSFW_TYPES.map((name) => `!${name}`).join(", ")}\n\nUse these only where everyone present is an adult and has consented. ARIA only returns a fetched image; she does not contact anyone automatically.`;
 
 function isNSFWEnabled(chatId) {
   return nsfwToggles.get(chatId) === true;
@@ -77,7 +79,7 @@ async function fetchNSFWImage(category) {
 // Build one command handler per category (avoids 15 copy-pasted handlers).
 function makeNSFWCommand(category) {
   return async (sock, msg, args, ctx) => {
-    if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off. Ask an admin to enable with *!nsfw on*");
+    if (!isNSFWEnabled(msg.key.remoteJid)) return ctx.reply("🔞 NSFW is off in this chat. Enable it with *!nsfw on* or say *ARIA turn on NSFW*.");
     try {
       const img = await fetchNSFWImage(category);
       if (!img?.url) return ctx.reply(`❌ *!${category}*: no live image source right now.`);
@@ -98,18 +100,20 @@ module.exports = {
 
       if (sub === "on") {
         nsfwToggles.set(chatId, true);
-        return ctx.reply("🔞 NSFW mode: *ON*\n\nAvailable: waifu, neko, hentai, blowjob, ass, milf, oral, paizuri, ero, yuri, trap, cum, feet, spank, smallboobs");
+        return ctx.reply(`🔞 NSFW mode: *ON*\n\n${NSFW_USAGE}`);
       }
       if (sub === "off") {
         nsfwToggles.set(chatId, false);
-        return ctx.reply("🔞 NSFW mode: *OFF*");
+        return ctx.reply("🔞 NSFW mode: *OFF*. The gated commands are locked again in this chat.");
       }
+      if (["help", "commands"].includes(sub)) return ctx.reply(NSFW_USAGE);
 
       const status = isNSFWEnabled(chatId) ? "ON" : "OFF";
-      return ctx.reply(`🔞 NSFW is currently *${status}*\nUse *!nsfw on* or *!nsfw off*`);
+      return ctx.reply(`🔞 NSFW is currently *${status}*\nUse *!nsfw on*, *!nsfw off*, or say *ARIA turn on NSFW*.`);
     },
 
     // Every NSFW category command, generated from the list.
     ...Object.fromEntries(NSFW_TYPES.map((c) => [c, makeNSFWCommand(c)])),
   },
+  _test: { isNSFWEnabled, nsfwToggles, NSFW_TYPES, NSFW_USAGE },
 };

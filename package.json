@@ -16,6 +16,7 @@
     "@consumet/extensions": "^1.8.8",
     "@whiskeysockets/baileys": "^6.7.9",
     "axios": "^1.6.0",
+    "canvas": "^3.2.3",
     "cheerio": "^1.0.0",
     "csv-parser": "^3.0.0",
     "dotenv": "^16.3.0",

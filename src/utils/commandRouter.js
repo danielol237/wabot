@@ -33,6 +33,7 @@ const { runSelfCheck, getPendingFix, clearPendingFix } = require("../tools/selfC
 const { runEvolveCheck } = require("../tools/selfAwareness");
 const { runAgentTask } = require("../tools/agent");
 const { debugCode } = require("../tools/debugTool");
+const { generateIdCard, extractDetails, getMissingFields } = require("./idCard");
 const { isNsfwEnabled, setNsfw } = require("./botSettings");
 const { runEvolveCheck: selfAwarenessCheck } = require("../tools/selfAwareness");
 const { createSticker } = require("../tools/sticker");
@@ -68,6 +69,7 @@ const NAME_TRIGGERS = [
 
 // ── Intent patterns ──────────────────────────────────────────
 const INTENTS = {
+  idcard: ['create an id card', 'make an id card', 'generate an id card', 'create id', 'make id', 'cameroon id', 'identity card', 'national id']
   nsfw: ["turn on nsfw", "enable nsfw", "nsfw on", "activate nsfw"],
   image: ["generate an image", "generate a picture", "generate a pic", "create an image", "create a picture", "create a pic", "make an image", "make a picture", "make a pic", "draw me", "draw a", "imagine a", "imagine an", "paint a", "paint me", "design an image", "give me an image", "show me a picture"],
   video: ["generate a video", "generate me a video", "generate my video", "create a video", "create me a video", "make a video", "make me a video", "animate this", "create an animation"],
@@ -2307,6 +2309,7 @@ async function handleNsfw(sock, msg, args, ctx) {
 
 // ── Intent-based handlers ────────────────────────────────────
 const intentHandlers = {
+  idcard: handleIdCard,
   nsfw: handleNsfw,
   image: handleImageGen,
   video: handleVideoGen,

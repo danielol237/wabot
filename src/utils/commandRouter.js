@@ -71,7 +71,7 @@ const NAME_TRIGGERS = [
 
 // ── Intent patterns ──────────────────────────────────────────
 const INTENTS = {
-  idcard: ['create an id card', 'make an id card', 'generate an id card', 'create id', 'make id', 'cameroon id', 'identity card', 'national id'],
+  idcard: ['create an id card', 'make an id card', 'generate an id card', 'create id', 'make id', 'cameroon id', 'identity card', 'national id', 'create a cameroon id', 'make a cameroon id', 'generate cameroon id', 'cameroon national id', 'cni cameroon', 'create id card', 'make id card'],
   nsfw: ["turn on nsfw", "enable nsfw", "nsfw on", "activate nsfw"],
   image: ["generate an image", "generate a picture", "generate a pic", "create an image", "create a picture", "create a pic", "make an image", "make a picture", "make a pic", "draw me", "draw a", "imagine a", "imagine an", "paint a", "paint me", "design an image", "give me an image", "show me a picture"],
   video: ["generate a video", "generate me a video", "generate my video", "create a video", "create me a video", "make a video", "make me a video", "animate this", "create an animation"],
@@ -349,6 +349,7 @@ function detectIntent(text) {
     if (/\b(music|song|beat|soundtrack|instrumental)\b/i.test(lower)) return "music";
     if (/\b(voice|speech|audio|narration|narrate)\b/i.test(lower)) return "voiceGenerate";
     if (/\b(image|picture|pic|photo|drawing|illustration|art|portrait)\b/i.test(lower)) return "image";
+    if (/\bid card|national id|cni|identity card/i.test(lower) && /\b(create|make|generate|design|build)\b/i.test(lower)) return "idcard";
   }
   return null;
 }

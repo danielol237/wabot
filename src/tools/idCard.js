@@ -1,192 +1,400 @@
-const { createCanvas, registerFont } = require("canvas");
+const { createCanvas } = require("canvas");
 const fs = require("fs");
-const path = require("path");
 
-// Cameroon ID card dimensions (standard CRId format)
+// Country-specific ID card templates
+const COUNTRIES = {
+  cameroon: {
+    name: "Cameroon",
+    flags: ["🇨🇲"],
+    colors: { primary: "#007a3d", secondary: "#ce1126", accent: "#fcd116", bg: "#f5f5f0" },
+    header: "REPUBLIQUE DU CAMEROUN",
+    motto: "UN — UNITÉ — PATRIE",
+    cardType: "CARTE D'IDENTITÉ NATIONALE",
+    fields: [
+      { key: "lastName", label: "Nom / Last Name", required: true },
+      { key: "firstName", label: "Prénom / First Name", required: true },
+      { key: "dob", label: "Date de Naissance", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Sexe", required: true, options: ["M", "F"] },
+      { key: "idNumber", label: "N° Carte", required: true, placeholder: "123456789" },
+      { key: "issueDate", label: "Délivré le", required: false, placeholder: "DD/MM/YYYY" },
+      { key: "expiryDate", label: "Valable jusqu'au", required: false, placeholder: "DD/MM/YYYY" },
+      { key: "address", label: "Adresse", required: false },
+      { key: "nationality", label: "Nationalité", default: "CAMEROUNAIS(E)" }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  },
+  nigeria: {
+    name: "Nigeria",
+    flags: ["🇳🇬"],
+    colors: { primary: "#008751", secondary: "#ffffff", accent: "#008751", bg: "#f8f8f8" },
+    header: "FEDERAL REPUBLIC OF NIGERIA",
+    motto: "UNITY AND FAITH, PEACE AND PROGRESS",
+    cardType: "NATIONAL IDENTITY CARD",
+    fields: [
+      { key: "lastName", label: "Last Name", required: true },
+      { key: "firstName", label: "First Name", required: true },
+      { key: "middleName", label: "Middle Name", required: false },
+      { key: "dob", label: "Date of Birth", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Gender", required: true, options: ["Male", "Female"] },
+      { key: "idNumber", label: "NIN", required: true, placeholder: "12345678901" },
+      { key: "issueDate", label: "Date of Issue", required: false, placeholder: "DD/MM/YYYY" },
+      { key: "expiryDate", label: "Date of Expiry", required: false, placeholder: "DD/MM/YYYY" },
+      { key: "address", label: "Address", required: false },
+      { key: "state", label: "State of Origin", required: false }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  },
+  ghana: {
+    name: "Ghana",
+    flags: ["🇬🇭"],
+    colors: { primary: "#ce1126", secondary: "#000000", accent: "#fcd116", bg: "#fafafa" },
+    header: "THE REPUBLIC OF GHANA",
+    motto: "FREEDOM AND JUSTICE",
+    cardType: "GHANA CARD",
+    fields: [
+      { key: "lastName", label: "Surname", required: true },
+      { key: "firstName", label: "Other Names", required: true },
+      { key: "dob", label: "Date of Birth", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Sex", required: true, options: ["M", "F"] },
+      { key: "idNumber", label: "GhIPSS No.", required: true, placeholder: "X0012345678" },
+      { key: "issueDate", label: "Date of Issue", required: false, placeholder: "DD/MM/YYYY" },
+      { key: "expiryDate", label: "Date of Expiry", required: false, placeholder: "DD/MM/YYYY" },
+      { key: "address", label: "Residential Address", required: false }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  },
+  senegal: {
+    name: "Senegal",
+    flags: ["🇸🇳"],
+    colors: { primary: "#00853f", secondary: "#f42a4e", accent: "#fff500", bg: "#f5f5f5" },
+    header: "REPUBLIQUE DU SENEGAL",
+    motto: "UN PEUPLE — UN BUT — UNE FOI",
+    cardType: "CARTE D'IDENTITE NATIONALE",
+    fields: [
+      { key: "lastName", label: "Nom", required: true },
+      { key: "firstName", label: "Prénoms", required: true },
+      { key: "dob", label: "Date de Naissance", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Sexe", required: true, options: ["M", "F"] },
+      { key: "idNumber", label: "N° Carte", required: true, placeholder: "123456789" },
+      { key: "nationality", label: "Nationalité", default: "Sénégalaise" },
+      { key: "address", label: "Adresse", required: false }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  },
+  IvoryCoast: {
+    name: "Côte d'Ivoire",
+    flags: ["🇨🇮"],
+    colors: { primary: "#f77f00", secondary: "#009e60", accent: "#ffffff", bg: "#fafafa" },
+    header: "REPUBLIQUE DE COTE D'IVOIRE",
+    motto: "UNITE — DISCIPLINE — TRAVAIL",
+    cardType: "CARTE D'IDENTITE NATIONALE",
+    fields: [
+      { key: "lastName", label: "Nom", required: true },
+      { key: "firstName", label: "Prénoms", required: true },
+      { key: "dob", label: "Date de Naissance", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Sexe", required: true, options: ["M", "F"] },
+      { key: "idNumber", label: "N° Carte", required: true, placeholder: "123456789" },
+      { key: "nationality", label: "Nationalité", default: "Ivoirienne" },
+      { key: "address", label: "Adresse", required: false }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  },
+  togo: {
+    name: "Togo",
+    flags: ["🇹🇬"],
+    colors: { primary: "#006a4e", secondary: "#ff0000", accent: "#fcd116", bg: "#f5f5f5" },
+    header: "REPUBLIQUE TOGOLAISE",
+    motto: "PAIX — TRAVAIL — PATRIE",
+    cardType: "CARTE D'IDENTITE NATIONALE",
+    fields: [
+      { key: "lastName", label: "Nom", required: true },
+      { key: "firstName", label: "Prénoms", required: true },
+      { key: "dob", label: "Date de Naissance", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Sexe", required: true, options: ["M", "F"] },
+      { key: "idNumber", label: "N° Carte", required: true, placeholder: "123456789" },
+      { key: "nationality", label: "Nationalité", default: "Togolaise" },
+      { key: "address", label: "Adresse", required: false }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  },
+  benin: {
+    name: "Benin",
+    flags: ["🇧🇯"],
+    colors: { primary: "#008751", secondary: "#e8112d", accent: "#fcd116", bg: "#f5f5f5" },
+    header: "REPUBLIQUE DU BENIN",
+    motto: "FRATERNITE — JUSTICE — TRAVAIL",
+    cardType: "CARTE D'IDENTITE NATIONALE",
+    fields: [
+      { key: "lastName", label: "Nom", required: true },
+      { key: "firstName", label: "Prénoms", required: true },
+      { key: "dob", label: "Date de Naissance", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Sexe", required: true, options: ["M", "F"] },
+      { key: "idNumber", label: "N° Carte", required: true, placeholder: "123456789" },
+      { key: "nationality", label: "Nationalité", default: "Béninoise" },
+      { key: "address", label: "Adresse", required: false }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  },
+  burkina: {
+    name: "Burkina Faso",
+    flags: ["🇧🇫"],
+    colors: { primary: "#009e49", secondary: "#ef2b29", accent: "#fcd116", bg: "#f5f5f5" },
+    header: "PAYS DE L'HOMME INTEGR E",
+    motto: "UNION — JUSTICE — TRAVAIL",
+    cardType: "CARTE D'IDENTITE NATIONALE",
+    fields: [
+      { key: "lastName", label: "Nom", required: true },
+      { key: "firstName", label: "Prénoms", required: true },
+      { key: "dob", label: "Date de Naissance", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Sexe", required: true, options: ["M", "F"] },
+      { key: "idNumber", label: "N° Carte", required: true, placeholder: "123456789" },
+      { key: "nationality", label: "Nationalité", default: "Burkinabè" },
+      { key: "address", label: "Adresse", required: false }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  },
+  mali: {
+    name: "Mali",
+    flags: ["🇲🇱"],
+    colors: { primary: "#14b53a", secondary: "#ce1126", accent: "#fcd116", bg: "#fafafa" },
+    header: "REPUBLIQUE DU MALI",
+    motto: "UN PEUPLE — UN BUT — UNE FOI",
+    cardType: "CARTE D'IDENTITE NATIONALE",
+    fields: [
+      { key: "lastName", label: "Nom", required: true },
+      { key: "firstName", label: "Prénoms", required: true },
+      { key: "dob", label: "Date de Naissance", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Sexe", required: true, options: ["M", "F"] },
+      { key: "idNumber", label: "N° Carte", required: true, placeholder: "123456789" },
+      { key: "nationality", label: "Nationalité", default: "Malienne" },
+      { key: "address", label: "Adresse", required: false }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  },
+  guinea: {
+    name: "Guinea",
+    flags: ["🇬🇳"],
+    colors: { primary: "#ce1126", secondary: "#fcd116", accent: "#009e60", bg: "#fafafa" },
+    header: "REPUBLIQUE DE GUINEE",
+    motto: "TRAVAIL — JUSTICE — SOLIDARITE",
+    cardType: "CARTE D'IDENTITE NATIONALE",
+    fields: [
+      { key: "lastName", label: "Nom", required: true },
+      { key: "firstName", label: "Prénoms", required: true },
+      { key: "dob", label: "Date de Naissance", required: true, placeholder: "DD/MM/YYYY" },
+      { key: "sex", label: "Sexe", required: true, options: ["M", "F"] },
+      { key: "idNumber", label: "N° Carte", required: true, placeholder: "123456789" },
+      { key: "nationality", label: "Nationalité", default: "Guinéenne" },
+      { key: "address", label: "Adresse", required: false }
+    ],
+    layout: {
+      photoX: 50, photoY: 120, photoW: 180, photoH: 220,
+      textX: 260, textY: 140
+    }
+  }
+};
+
 const WIDTH = 856;
 const HEIGHT = 540;
 
-// Pre-built Cameroon ID card template with official colors
-const CAMEROON_ID = {
-  primaryColor: "#007a3d",      // Cameroon green
-  secondaryColor: "#ce1126",    // Cameroon red
-  accentColor: "#fcd116",       // Cameroon yellow
-  bgColor: "#f5f5f0",
-  headerText: "REPUBLIQUE DU CAMEROUN",
-  subheader: "UN — UNITÉ — PATRIE",
-  cardType: "CARTE D'IDENTITÉ NATIONALE",
-};
+function detectCountry(query) {
+  const lower = (query || "").toLowerCase();
+  
+  for (const [key, country] of Object.entries(COUNTRIES)) {
+    if (lower.includes(key.replace(/([A-Z])/g, ' $1').toLowerCase()) ||
+        lower.includes(country.name.toLowerCase()) ||
+        lower.includes("cameroon") || lower.includes("nigeria") ||
+        lower.includes("ghana") || lower.includes("senegal") ||
+        lower.includes("ivory") || lower.includes("cote") ||
+        lower.includes("togo") || lower.includes("benin") ||
+        lower.includes("burkina") || lower.includes("mali") ||
+        lower.includes("guinea")) {
+      return key;
+    }
+  }
+  return null;
+}
 
-function extractDetails(text) {
-  const details = {
-    firstName: "",
-    lastName: "",
-    dob: "",
-    nationality: "CAMEROUNAIS(E)",
-    idNumber: "",
-    issueDate: "",
-    expiryDate: "",
-    address: "",
-    sex: ""
-  };
+function extractDetails(text, countryKey) {
+  const country = COUNTRIES[countryKey] || COUNTRIES.cameroon;
+  const details = {};
+  
+  for (const field of country.fields) {
+    details[field.key] = "";
+  }
   
   const lines = String(text || "").split(/[\n,]+/).map(l => l.trim()).filter(Boolean);
   
   for (const line of lines) {
     const lower = line.toLowerCase();
-    if (lower.includes("nom") || lower.startsWith("last") || lower.startsWith("surname")) {
-      details.lastName = line.replace(/^(nom|last name|surname)[:\s]*/i, "").trim();
-    } else if (lower.includes("prénom") || lower.includes("firstname") || lower.includes("first name")) {
-      details.firstName = line.replace(/^(prénom|firstname|first name)[:\s]*/i, "").trim();
-    } else if (lower.includes("date de naissance") || lower.includes("dob") || lower.includes("date of birth")) {
-      details.dob = line.replace(/^(date de naissance|dob|date of birth)[:\s]*/i, "").trim();
-    } else if (lower.includes("no") || lower.includes("numéro") || lower.includes("id number")) {
-      details.idNumber = line.replace(/^(no|numéro|id number)[:\s]*/i, "").trim();
-    } else if (lower.includes("sexe") || lower.includes("gender") || lower.includes("sex")) {
-      details.sex = line.replace(/^(sexe|gender|sex)[:\s]*/i, "").trim();
-    } else if (lower.includes("adresse")) {
-      details.address = line.replace(/^(adresse|address)[:\s]*/i, "").trim();
-    } else if (lower.includes("nationalité") || lower.includes("nationality")) {
-      details.nationality = line.replace(/^(nationalité|nationality)[:\s]*/i, "").trim().toUpperCase();
+    
+    for (const field of country.fields) {
+      const labelLower = field.label.toLowerCase();
+      if (lower.includes(field.key) || lower.includes(labelLower.split("/")[0].trim())) {
+        const value = line.replace(new RegExp(`.*[:\\s]*`, "i"), "").trim();
+        if (value && value !== field.key) {
+          details[field.key] = value;
+        }
+      }
     }
+  }
+  
+  // Set default nationality
+  if (country.fields.find(f => f.key === "nationality")) {
+    details.nationality = country.fields.find(f => f.key === "nationality")?.default || "";
   }
   
   return details;
 }
 
-function generateIdCard(imageBuffer, details, country = "cameroon") {
-  const canvas = createCanvas(WIDTH, HEIGHT);
-  const ctx = canvas.getContext("2d");
+function getMissingFields(details, countryKey) {
+  const country = COUNTRIES[countryKey] || COUNTRIES.cameroon;
+  const missing = [];
   
-  const template = country === "cameroon" ? CAMEROON_ID : {
-    primaryColor: "#0033a0",
-    secondaryColor: "#ff0000",
-    accentColor: "#ffd700",
-    bgColor: "#f0f0f0",
-    headerText: "NATIONAL IDENTITY CARD",
-    subheader: "",
-    cardType: "IDENTITY CARD",
-  };
-  
-  // Background
-  ctx.fillStyle = template.bgColor;
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  
-  // Border
-  ctx.strokeStyle = template.primaryColor;
-  ctx.lineWidth = 8;
-  ctx.strokeRect(4, 4, WIDTH - 8, HEIGHT - 8);
-  
-  // Top header bar
-  ctx.fillStyle = template.primaryColor;
-  ctx.fillRect(0, 0, WIDTH, 80);
-  
-  // Header text
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 24px Arial";
-  ctx.textAlign = "center";
-  ctx.fillText(template.headerText, WIDTH / 2, 35);
-  
-  if (template.subheader) {
-    ctx.font = "14px Arial";
-    ctx.fillText(template.subheader, WIDTH / 2, 60);
-  }
-  
-  // Card type
-  ctx.font = "bold 18px Arial";
-  ctx.fillStyle = template.secondaryColor;
-  ctx.fillText(template.cardType, WIDTH / 2, 110);
-  
-  // Photo area (left side)
-  const photoX = 40;
-  const photoY = 130;
-  const photoW = 200;
-  const photoH = 240;
-  
-  ctx.fillStyle = "#e0e0e0";
-  ctx.fillRect(photoX, photoY, photoW, photoH);
-  ctx.strokeStyle = template.primaryColor;
-  ctx.lineWidth = 3;
-  ctx.strokeRect(photoX, photoY, photoW, photoH);
-  
-  // Draw user photo if provided
-  if (imageBuffer) {
-    try {
-      const Jimp = require('jimp');
-      const image = Jimp.read(imageBuffer).then(img => {
-        img.resize(photoW - 10, photoH - 10);
-        img.getBase64Async('image/jpeg').then(data => {
-          const fs = require('fs');
-          const tempPath = '/tmp/id_card_photo.jpg';
-          const buf = Buffer.from(data.replace(/^data:image\/jpeg;base64,/, ''), 'base64');
-          fs.writeFileSync(tempPath, buf);
-        });
-      });
-    } catch (e) {
-      // Fallback: draw placeholder
-      ctx.fillStyle = "#999";
-      ctx.font = "16px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("PHOTO", photoX + photoW/2, photoY + photoH/2);
+  for (const field of country.fields) {
+    if (field.required && !details[field.key]) {
+      missing.push(field.label);
     }
   }
   
-  // Photo placeholder
-  ctx.fillStyle = "#888";
-  ctx.beginPath();
-  ctx.arc(photoX + photoW/2, photoY + photoH/2 - 20, 40, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillRect(photoX + photoW/2 - 35, photoY + photoH/2 + 20, 70, 50);
-  
-  // Details section (right side)
-  const detailX = 270;
-  let detailY = 140;
-  ctx.textAlign = "left";
-  
-  ctx.font = "bold 16px Arial";
-  ctx.fillStyle = template.primaryColor;
-  
-  const fields = [
-    { label: "Nom / Last Name", value: details.lastName || "_________" },
-    { label: "Prénom / First Name", value: details.firstName || "_________" },
-    { label: "Date de Naissance", value: details.dob || "_________" },
-    { label: "Sexe", value: details.sex || "___" },
-    { label: "Nationalité", value: details.nationality },
-    { label: "N° Carte", value: details.idNumber || "_________" },
-    { label: "Délivré le", value: details.issueDate || "_________" },
-    { label: "Valable jusqu'au", value: details.expiryDate || "_________" },
-  ];
-  
-  for (const field of fields) {
-    ctx.font = "13px Arial";
-    ctx.fillStyle = "#666";
-    ctx.fillText(field.label, detailX, detailY);
-    
-    ctx.font = "bold 18px Arial";
-    ctx.fillStyle = "#000";
-    ctx.fillText(field.value, detailX, detailY + 25);
-    
-    detailY += 55;
-  }
-  
-  // Bottom accent stripe
-  ctx.fillStyle = template.secondaryColor;
-  ctx.fillRect(0, HEIGHT - 30, WIDTH, 15);
-  ctx.fillStyle = template.accentColor;
-  ctx.fillRect(0, HEIGHT - 15, WIDTH, 15);
-  
-  // Generate buffer
-  const buffer = canvas.toBuffer("image/jpeg", { quality: 0.9 });
-  return buffer;
-}
-
-function getMissingFields(details) {
-  const missing = [];
-  if (!details.firstName) missing.push("first name");
-  if (!details.lastName) missing.push("last name");
-  if (!details.dob) missing.push("date of birth");
-  if (!details.idNumber) missing.push("ID number");
   return missing;
 }
 
-module.exports = { generateIdCard, extractDetails, getMissingFields, WIDTH, HEIGHT };
+function generateIdCard(imageBuffer, details, countryKey = "cameroon") {
+  const country = COUNTRIES[countryKey] || COUNTRIES.cameroon;
+  const { colors, header, motto, cardType } = country;
+  const { photoX, photoY, photoW, photoH, textX, textY } = country.layout;
+  
+  const canvas = createCanvas(WIDTH, HEIGHT);
+  const ctx = canvas.getContext("2d");
+  
+  // Background
+  ctx.fillStyle = colors.bg;
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  
+  // Decorative border
+  ctx.strokeStyle = colors.primary;
+  ctx.lineWidth = 12;
+  ctx.strokeRect(6, 6, WIDTH - 12, HEIGHT - 12);
+  
+  ctx.strokeStyle = colors.secondary;
+  ctx.lineWidth = 4;
+  ctx.strokeRect(14, 14, WIDTH - 28, HEIGHT - 28);
+  
+  // Top header bar
+  ctx.fillStyle = colors.primary;
+  ctx.fillRect(0, 0, WIDTH, 90);
+  
+  // Header text
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 26px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(header, WIDTH / 2, 35);
+  
+  if (motto) {
+    ctx.font = "14px Arial";
+    ctx.fillText(motto, WIDTH / 2, 65);
+  }
+  
+  // Card type
+  ctx.font = "bold 20px Arial";
+  ctx.fillStyle = colors.secondary;
+  ctx.fillText(cardType, WIDTH / 2, 115);
+  
+  // Photo area
+  ctx.fillStyle = "#e8e8e8";
+  ctx.fillRect(photoX, photoY, photoW, photoH);
+  ctx.strokeStyle = colors.primary;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(photoX, photoY, photoW, photoH);
+  
+  // Draw placeholder photo
+  ctx.fillStyle = "#aaa";
+  ctx.beginPath();
+  ctx.arc(photoX + photoW/2, photoY + photoH/2 - 25, 35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(photoX + photoW/2 - 30, photoY + photoH/2 + 10, 60, 45);
+  
+  // Details section
+  let yPos = textY;
+  ctx.textAlign = "left";
+  
+  for (const field of country.fields) {
+    if (field.key === "nationality" && !details[field.key]) continue;
+    
+    const value = details[field.key] || "_".repeat(10);
+    
+    // Label
+    ctx.font = "13px Arial";
+    ctx.fillStyle = "#666";
+    ctx.fillText(field.label, textX, yPos);
+    
+    // Value
+    ctx.font = "bold 18px Arial";
+    ctx.fillStyle = "#000";
+    ctx.fillText(String(value).slice(0, 30), textX, yPos + 28);
+    
+    yPos += 55;
+  }
+  
+  // Bottom accent stripe
+  ctx.fillStyle = colors.secondary;
+  ctx.fillRect(0, HEIGHT - 35, WIDTH, 18);
+  ctx.fillStyle = colors.accent;
+  ctx.fillRect(0, HEIGHT - 17, WIDTH, 17);
+  
+  // Country flag in corner
+  ctx.font = "40px Arial";
+  ctx.textAlign = "right";
+  ctx.fillText(country.flags[0] || "", WIDTH - 30, HEIGHT - 50);
+  
+  // Watermark
+  ctx.save();
+  ctx.globalAlpha = 0.05;
+  ctx.font = "bold 80px Arial";
+  ctx.textAlign = "center";
+  ctx.fillStyle = colors.primary;
+  ctx.translate(WIDTH/2, HEIGHT/2);
+  ctx.rotate(-Math.PI / 6);
+  ctx.fillText(cardType, 0, 0);
+  ctx.restore();
+  
+  return canvas.toBuffer("image/jpeg", { quality: 0.9 });
+}
+
+module.exports = {
+  generateIdCard,
+  extractDetails,
+  getMissingFields,
+  detectCountry,
+  COUNTRIES,
+  WIDTH,
+  HEIGHT
+};

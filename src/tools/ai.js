@@ -210,6 +210,24 @@ const { chatGPT } = require("./gpt5Cli");
     error("Gemini unofficial exception:", err.message);
   }
 
+
+  // Venice AI — uncensored, private API (free tier available)
+  try {
+    const venice = require("./veniceCli");
+    const veniceResult = await venice.sendMessage(String(userMessage), userName, systemPrompt, { 
+      model: process.env.VENICE_MODEL || "llama-3.3-70b-instruct" 
+    });
+    if (veniceResult.text) {
+      const content = withTruncationNotice(veniceResult.text, null, "length", requestNeedsLargeOutput);
+      lastProvider = "venice";
+      return content;
+    } else if (veniceResult.error) {
+      error("Venice AI error:", veniceResult.error);
+    }
+  } catch (err) {
+    error("Venice AI exception:", err.message);
+  }
+
   // Try Cerebras first — 1M tokens/day free, the highest ceiling of any free
   // provider we've found, added after Gemini's daily quota kept getting hit
   // during normal testing/usage.

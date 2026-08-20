@@ -228,6 +228,24 @@ const { chatGPT } = require("./gpt5Cli");
     error("Venice AI exception:", err.message);
   }
 
+
+  // OpenAPIs — Free proxy to GPT-5 + Claude (no key needed)
+  try {
+    const openapis = require("./openapisCli");
+    const openapisResult = await openapis.sendMessage(String(userMessage), userName, systemPrompt, { 
+      model: process.env.OPENAPIS_MODEL || "openrouter/free" 
+    });
+    if (openapisResult.text) {
+      const content = withTruncationNotice(openapisResult.text, null, "length", requestNeedsLargeOutput);
+      lastProvider = "openapis";
+      return content;
+    } else if (openapisResult.retry) {
+      error("OpenAPIs failing, will try next provider");
+    }
+  } catch (err) {
+    error("OpenAPIs exception:", err.message);
+  }
+
   // Try Cerebras first — 1M tokens/day free, the highest ceiling of any free
   // provider we've found, added after Gemini's daily quota kept getting hit
   // during normal testing/usage.

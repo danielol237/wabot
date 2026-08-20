@@ -35,7 +35,6 @@ const { runAgentTask } = require("../tools/agent");
 const { debugCode } = require("../tools/debugTool");
 const { generateIdCard, extractDetails, getMissingFields } = require("./idCard");
 const idCardSessions = {};
-const idCardSessions = {};
 const { isNsfwEnabled, setNsfw } = require("./botSettings");
 const { runEvolveCheck: selfAwarenessCheck } = require("../tools/selfAwareness");
 const { createSticker } = require("../tools/sticker");
@@ -47,7 +46,6 @@ const { sendFile, extractAllCodeBlocks } = require("../tools/fileSender");
 const { createBackup } = require("../tools/backupSystem");
 const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
-const idCardSessions = {};
 
 const { chatGPT } = require("../tools/gpt5Cli");
 const { setReminder } = require("../tools/reminders");

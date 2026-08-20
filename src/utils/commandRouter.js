@@ -33,6 +33,7 @@ const { runSelfCheck, getPendingFix, clearPendingFix } = require("../tools/selfC
 const { runEvolveCheck } = require("../tools/selfAwareness");
 const { runAgentTask } = require("../tools/agent");
 const { debugCode } = require("../tools/debugTool");
+const { isNsfwEnabled, setNsfw } = require("./botSettings");
 const { runEvolveCheck: selfAwarenessCheck } = require("../tools/selfAwareness");
 const { createSticker } = require("../tools/sticker");
 const { translateText, convertCurrency, convertUnit, getWeather, weatherCodeToDescription } = require("../tools/utilities");
@@ -132,7 +133,8 @@ function lifeFeatureHandler(feature) {
 // Built-in commands - these are the standard prefix commands
 function registerBuiltinCommands() {
   // Admin / Meta
-  registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", description: "Check if bot is alive", handler: handleAlive, ownerOnly: false });
+    registerCommand({ name: "nsfw", category: "meta", description: "Toggle NSFW mode: !nsfw on/off", handler: handleNsfw, ownerOnly: false });
+registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", description: "Check if bot is alive", handler: handleAlive, ownerOnly: false });
   registerCommand({ name: "help", aliases: ["menu", "commands", "h"], category: "meta", description: "Show help menu", handler: handleHelp, ownerOnly: false });
   registerCommand({ name: "stats", aliases: ["botstats"], category: "admin", description: "Show bot statistics", handler: handleStats, ownerOnly: true });
   registerCommand({ name: "errors", aliases: ["errorlog"], category: "admin", description: "Show recent errors", handler: handleErrors, ownerOnly: true });
@@ -2281,6 +2283,25 @@ async function handleClear(sock, msg, args, ctx) {
   await react(sock, msg, "🗑️");
   endSession(ctx.senderJid);
   await reply(sock, msg, "✅ Session cleared. Now I don't remember what we were talking about.");
+}
+
+
+async function handleNsfw(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const enabled = args === "on" || args === "true" || args === "enable";
+  const disabled = args === "off" || args === "false" || args === "disable";
+  
+  if (disabled) {
+    setNsfw(false);
+    return reply(sock, msg, "❌ NSFW mode disabled.");
+  }
+  if (enabled) {
+    setNsfw(true);
+    return reply(sock, msg, "✅ NSFW mode enabled.");
+  }
+  const current = isNsfwEnabled();
+  setNsfw(!current);
+  return reply(sock, msg, current ? "❌ NSFW mode disabled." : "✅ NSFW mode enabled.");
 }
 
 // ── Intent-based handlers ────────────────────────────────────

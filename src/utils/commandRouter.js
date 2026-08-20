@@ -68,6 +68,7 @@ const NAME_TRIGGERS = [
 
 // ── Intent patterns ──────────────────────────────────────────
 const INTENTS = {
+  nsfw: ["turn on nsfw", "enable nsfw", "nsfw on", "activate nsfw"],
   image: ["generate an image", "generate a picture", "generate a pic", "create an image", "create a picture", "create a pic", "make an image", "make a picture", "make a pic", "draw me", "draw a", "imagine a", "imagine an", "paint a", "paint me", "design an image", "give me an image", "show me a picture"],
   video: ["generate a video", "generate me a video", "generate my video", "create a video", "create me a video", "make a video", "make me a video", "animate this", "create an animation"],
   music: ["generate music", "generate a song", "make music", "make a song", "create music", "create a song", "compose music", "compose a song", "make a beat", "make me a beat", "create a soundtrack"],
@@ -2306,6 +2307,7 @@ async function handleNsfw(sock, msg, args, ctx) {
 
 // ── Intent-based handlers ────────────────────────────────────
 const intentHandlers = {
+  nsfw: handleNsfw,
   image: handleImageGen,
   video: handleVideoGen,
   music: handleMusicGen,

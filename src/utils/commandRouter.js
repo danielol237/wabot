@@ -2312,14 +2312,22 @@ async function handleNsfw(sock, msg, args, ctx) {
 }
 
 
+
 async function handleIdCard(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
+  const { reply, react } = require('./baileysHelpers');
   const sessionId = ctx.senderJid;
   
   let session = idCardSessions[sessionId] || {};
   
+  // Detect country from initial message
+  if (!session.country) {
+    const country = detectCountry(args || msg.text || '');
+    session.country = country || 'cameroon';
+  }
+  
   if (!session.step) {
-    session = { step: 'initial', details: {}, photoBuffer: null };
+    session = { step: 'asking_details', details: {}, photoBuffer: null, country: session.country };
+    session.details.idNumber = autoGenerateIdNumber(session.country);
   }
   
   const text = String(args || '').trim();
@@ -2329,28 +2337,50 @@ async function handleIdCard(sock, msg, args, ctx) {
     try {
       const buffer = await sock.downloadMediaMessage(msg);
       session.photoBuffer = buffer;
-      await reply(sock, msg, '📸 Photo saved! Now send me your details (name, date of birth, ID number, etc.)');
-      session.step = 'waiting_details';
-      idCardSessions[sessionId] = session;
+      await reply(sock, msg, 'Photo received! Generating your ID card...');
+      
+      try {
+        const cardBuffer = generateIdCard(buffer, session.details, session.country);
+        const countryName = session.country.charAt(0).toUpperCase() + session.country.slice(1);
+        await sock.sendMessage(ctx.chatId, { 
+          image: cardBuffer, 
+          caption: 'Your ' + countryName + ' ID card!
+ID: ' + session.details.idNumber 
+        }, { quoted: msg });
+      } catch (e) {
+        await reply(sock, msg, 'Failed to generate: ' + e.message);
+      }
+      delete idCardSessions[sessionId];
       return;
     } catch (e) {}
   }
   
-  // Parse details
-  const details = extractDetails(text);
+  // Parse details from text
+  const details = extractDetails(text, session.country);
   session.details = { ...session.details, ...details };
   
-  // Check missing fields
-  const missing = getMissingFields(session.details);
-  if (missing.length > 0) {
-    await reply(sock, msg, `I need more info:\n• ${missing.join('\n• ')}`);
+  // Keep auto-generated ID number if not provided
+  if (!session.details.idNumber) {
+    session.details.idNumber = autoGenerateIdNumber(session.country);
+  }
+  
+  // Check missing required fields
+  const missing = getMissingFields(session.details, session.country);
+  const requiredMissing = missing.filter(m => !m.includes('Address') && !m.includes('Date of Issue') && !m.includes('Date of Expiry'));
+  
+  if (requiredMissing.length > 0) {
+    await reply(sock, msg, 'I need more info:
+• ' + requiredMissing.join('
+• ') + '
+
+Or just send me a photo and I will fill in the rest.');
     idCardSessions[sessionId] = session;
     return;
   }
   
-  // Check for photo
+  // Ask for photo if not received
   if (!session.photoBuffer) {
-    await reply(sock, msg, 'Great details! Now send me a passport-style photo.');
+    await reply(sock, msg, 'Great! Now send me a passport-style photo.');
     session.step = 'waiting_photo';
     idCardSessions[sessionId] = session;
     return;
@@ -2359,10 +2389,15 @@ async function handleIdCard(sock, msg, args, ctx) {
   // Generate card
   await react(sock, msg, '🪪');
   try {
-    const buffer = generateIdCard(session.photoBuffer, session.details);
-    await sock.sendMessage(ctx.chatId, { image: buffer, caption: '🪪 Here is your Cameroon ID card!' }, { quoted: msg });
+    const buffer = generateIdCard(session.photoBuffer, session.details, session.country);
+    const countryName = session.country.charAt(0).toUpperCase() + session.country.slice(1);
+    await sock.sendMessage(ctx.chatId, { 
+      image: buffer, 
+      caption: 'Your ' + countryName + ' ID card!
+ID: ' + session.details.idNumber 
+    }, { quoted: msg });
   } catch (e) {
-    await reply(sock, msg, '❌ Failed: ' + e.message);
+    await reply(sock, msg, 'Failed: ' + e.message);
   }
   
   delete idCardSessions[sessionId];

@@ -33,8 +33,7 @@ const { runSelfCheck, getPendingFix, clearPendingFix } = require("../tools/selfC
 const { runEvolveCheck } = require("../tools/selfAwareness");
 const { runAgentTask } = require("../tools/agent");
 const { debugCode } = require("../tools/debugTool");
-const { generateIdCard, extractDetails, getMissingFields, detectCountry, autoGenerateIdNumber } = require("./idCard");
-const idCardSessions = {};
+
 const { isNsfwEnabled, setNsfw } = require("./botSettings");
 const { runEvolveCheck: selfAwarenessCheck } = require("../tools/selfAwareness");
 const { createSticker } = require("../tools/sticker");
@@ -47,7 +46,6 @@ const { createBackup } = require("../tools/backupSystem");
 const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
 
-const { chatGPT } = require("../tools/gpt5Cli");
 const { setReminder } = require("../tools/reminders");
 const { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
@@ -71,7 +69,6 @@ const NAME_TRIGGERS = [
 
 // ── Intent patterns ──────────────────────────────────────────
 const INTENTS = {
-  idcard: ['create an id card', 'make an id card', 'generate an id card', 'create id', 'make id', 'cameroon id', 'identity card', 'national id', 'create a cameroon id', 'make a cameroon id', 'generate cameroon id', 'cameroon national id', 'cni cameroon', 'create id card', 'make id card'],
   nsfw: ["turn on nsfw", "enable nsfw", "nsfw on", "activate nsfw"],
   image: ["generate an image", "generate a picture", "generate a pic", "create an image", "create a picture", "create a pic", "make an image", "make a picture", "make a pic", "draw me", "draw a", "imagine a", "imagine an", "paint a", "paint me", "design an image", "give me an image", "show me a picture"],
   video: ["generate a video", "generate me a video", "generate my video", "create a video", "create me a video", "make a video", "make me a video", "animate this", "create an animation"],
@@ -138,7 +135,6 @@ function lifeFeatureHandler(feature) {
 // Built-in commands - these are the standard prefix commands
 function registerBuiltinCommands() {
   // Admin / Meta
-      registerCommand({ name: "idcard", aliases: ["id", "identity", "createid"], category: "utility", description: "Create an ID card", handler: handleIdCard, ownerOnly: false });
 registerCommand({ name: "nsfw", category: "meta", description: "Toggle NSFW mode: !nsfw on/off", handler: handleNsfw, ownerOnly: false });
 registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", description: "Check if bot is alive", handler: handleAlive, ownerOnly: false });
   registerCommand({ name: "help", aliases: ["menu", "commands", "h"], category: "meta", description: "Show help menu", handler: handleHelp, ownerOnly: false });
@@ -277,7 +273,6 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
   registerCommand({ name: "cancelbuild", aliases: ["cancel"], category: "dev", description: "Cancel a project", handler: handleProjectCancel, ownerOnly: true });
   registerCommand({ name: "edit", aliases: [], category: "dev", description: "Edit a project file", handler: handleEditFile, ownerOnly: true });
   registerCommand({ name: "think", aliases: [], category: "dev", description: "Think about a project", handler: handleThink, ownerOnly: true });
-  registerCommand({ name: "gpt5", aliases: ["ai5", "chatgpt5", "gpt5chat"], category: "dev", description: "Chat with GPT-5 via unofficial API: !gpt5 <message>", handler: handleGpt5, ownerOnly: false });
   registerCommand({ name: "fix", aliases: ["debug"], category: "dev", description: "Debug code", handler: handleDebugCode, ownerOnly: true });
   registerCommand({ name: "remember", aliases: [], category: "dev", description: "Remember a preference", handler: handleRemember, ownerOnly: false });
   registerCommand({ name: "preferences", aliases: ["myprefs"], category: "dev", description: "View preferences", handler: handlePreferences, ownerOnly: false });
@@ -387,6 +382,10 @@ function naturalArgs(intent, text) {
     poll: /^(?:please\s+)?(?:create|make)\s+(?:a\s+)?poll\s*/i,
   };
   if (["help", "memories", "atlas", "links"].includes(intent)) return "";
+  if (intent === "nsfw") {
+    const explicit = value.match(/^nsfw\s+(on|off|true|false|enable|disable|enabled|disabled)$/i);
+    if (explicit) return explicit[1].toLowerCase();
+  }
   return patterns[intent] ? value.replace(patterns[intent], "").trim() : value;
 }
 
@@ -2034,14 +2033,6 @@ async function handleThink(sock, msg, args, ctx) {
   await reply(sock, msg, result);
 }
 
-async function handleGpt5(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !gpt5 <your message>\nChat with GPT-5 directly — no API key needed.");
-  await react(sock, msg, "🤖");
-  const result = await chatGPT(args, ctx.senderJid);
-  await reply(sock, msg, result);
-}
-
 async function handleDebugCode(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   await react(sock, msg, "🐛");
@@ -2295,20 +2286,22 @@ async function handleClear(sock, msg, args, ctx) {
 
 async function handleNsfw(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
-  const enabled = args === "on" || args === "true" || args === "enable";
-  const disabled = args === "off" || args === "false" || args === "disable";
-  
+  const chatId = msg.key.remoteJid;
+  const raw = Array.isArray(args) ? args.join(" ") : String(args || "");
+  const value = raw.toLowerCase().replace(/[?!.]+$/g, "").replace(/^nsfw\s+/, "").trim();
+  const enabled = /^(?:on|true|enable|enabled|turn\s+on(?:\s+nsfw)?|switch\s+on(?:\s+nsfw)?)$/.test(value) || /^(?:turn|switch)\s+on\s+nsfw$/.test(raw.toLowerCase().trim());
+  const disabled = /^(?:off|false|disable|disabled|turn\s+off(?:\s+nsfw)?|switch\s+off(?:\s+nsfw)?)$/.test(value) || /^(?:turn|switch)\s+off\s+nsfw$/.test(raw.toLowerCase().trim());
+
   if (disabled) {
-    setNsfw(false);
-    return reply(sock, msg, "❌ NSFW mode disabled.");
+    setNsfw(false, chatId);
+    return reply(sock, msg, "❌ NSFW mode disabled in this chat.");
   }
   if (enabled) {
-    setNsfw(true);
-    return reply(sock, msg, "✅ NSFW mode enabled.");
+    setNsfw(true, chatId);
+    return reply(sock, msg, "✅ NSFW mode enabled in this chat.");
   }
-  const current = isNsfwEnabled();
-  setNsfw(!current);
-  return reply(sock, msg, current ? "❌ NSFW mode disabled." : "✅ NSFW mode enabled.");
+  const current = isNsfwEnabled(chatId);
+  return reply(sock, msg, `🔞 NSFW is currently *${current ? "ON" : "OFF"}* in this chat. Use *!nsfw on* or *!nsfw off*.`);
 }
 
 
@@ -2368,11 +2361,7 @@ async function handleIdCard(sock, msg, args, ctx) {
   const requiredMissing = missing.filter(m => !m.includes('Address') && !m.includes('Date of Issue') && !m.includes('Date of Expiry'));
   
   if (requiredMissing.length > 0) {
-    await reply(sock, msg, 'I need more info:
-• ' + requiredMissing.join('
-• ') + '
-
-Or just send me a photo and I will fill in the rest.');
+    await reply(sock, msg, 'I need more info:\n• ' + requiredMissing.join('\n• ') + '\n\nOr just send me a photo and I will fill in the rest.');
     idCardSessions[sessionId] = session;
     return;
   }
@@ -2392,8 +2381,7 @@ Or just send me a photo and I will fill in the rest.');
     const countryName = session.country.charAt(0).toUpperCase() + session.country.slice(1);
     await sock.sendMessage(ctx.chatId, { 
       image: buffer, 
-      caption: 'Your ' + countryName + ' ID card!
-ID: ' + session.details.idNumber 
+      caption: 'Your ' + countryName + ' ID card!\nID: ' + session.details.idNumber 
     }, { quoted: msg });
   } catch (e) {
     await reply(sock, msg, 'Failed: ' + e.message);
@@ -2403,7 +2391,6 @@ ID: ' + session.details.idNumber
 }
 // ── Intent-based handlers ────────────────────────────────────
 const intentHandlers = {
-  idcard: handleIdCard,
   nsfw: handleNsfw,
   image: handleImageGen,
   video: handleVideoGen,
@@ -2823,5 +2810,5 @@ module.exports = {
   resolveNaturalAction,
   naturalArgs,
   detectCommandCollisions,
-  _test: { resolveBusinessModePhrase },
+  _test: { resolveBusinessModePhrase, handleNsfw },
 };

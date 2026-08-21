@@ -35,3 +35,25 @@ test("commandRouter: !close / !open are registered + !nsfw lives in the plugin",
   const pluginSrc = require("fs").readFileSync(path.join(__dirname, "../plugins/nsfw.js"), "utf8");
   assert.ok(pluginSrc.includes('name: "nsfw"'), "!nsfw registered in the plugin");
 });
+
+test("botSettings: NSFW explicit on/off is idempotent and chat-scoped", () => {
+  wipe();
+  delete require.cache[require.resolve("../src/utils/botSettings")];
+  const bs = require("../src/utils/botSettings");
+  assert.strictEqual(bs.isNsfwEnabled("chat-a"), false);
+  assert.strictEqual(bs.setNsfw(true, "chat-a"), true);
+  assert.strictEqual(bs.setNsfw(true, "chat-a"), true, "repeating on stays on");
+  assert.strictEqual(bs.isNsfwEnabled("chat-a"), true);
+  assert.strictEqual(bs.isNsfwEnabled("chat-b"), false, "another chat stays off");
+  assert.strictEqual(bs.setNsfw(false, "chat-a"), false);
+  assert.strictEqual(bs.setNsfw(false, "chat-a"), false, "repeating off stays off");
+  wipe();
+});
+
+test("commandRouter: natural Aria nsfw on resolves to explicit enable", () => {
+  const cr = require("../src/utils/commandRouter");
+  const resolved = cr.resolveNaturalAction("Aria nsfw on");
+  assert.ok(resolved, "natural command resolves");
+  assert.strictEqual(resolved.intent, "nsfw");
+  assert.strictEqual(resolved.args, "on");
+});

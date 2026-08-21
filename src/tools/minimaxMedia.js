@@ -4,7 +4,8 @@ const DEFAULT_BASE_URL = "https://api.minimax.io/v1";
 const DEFAULT_IMAGE_MODEL = "image-01";
 const DEFAULT_VIDEO_MODEL = "MiniMax-H3";
 const DEFAULT_VOICE_MODEL = "speech-2.8-hd";
-const DEFAULT_MUSIC_MODEL = "music-3.0-free";
+const DEFAULT_MUSIC_MODEL = "music-3.0";
+const DEFAULT_MUSIC_FALLBACK_MODEL = "music-2.6";
 
 function config(env = process.env) {
   const baseUrl = String(env.MINIMAX_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
@@ -16,6 +17,7 @@ function config(env = process.env) {
     videoModel: String(env.MINIMAX_VIDEO_MODEL || DEFAULT_VIDEO_MODEL).trim(),
     voiceModel: String(env.MINIMAX_VOICE_MODEL || DEFAULT_VOICE_MODEL).trim(),
     musicModel: String(env.MINIMAX_MUSIC_MODEL || DEFAULT_MUSIC_MODEL).trim(),
+    musicFallbackModel: String(env.MINIMAX_MUSIC_FALLBACK_MODEL || DEFAULT_MUSIC_FALLBACK_MODEL).trim(),
   };
 }
 
@@ -160,22 +162,34 @@ async function generateMusic(prompt, options = {}) {
     const current = requireKey(options.env || process.env);
     const lyrics = String(options.lyrics || "").slice(0, 3500);
     const instrumental = Boolean(options.instrumental);
-    const payload = await post(`${current.baseUrl}/music_generation`, {
-      model: String(options.model || current.musicModel),
-      prompt: String(prompt || "").slice(0, 2000),
-      lyrics,
-      lyrics_optimizer: !lyrics && !instrumental,
-      is_instrumental: instrumental,
-      output_format: "hex",
-      audio_setting: { sample_rate: 44100, bitrate: 256000, format: "mp3" },
-    }, current, { timeout: 180000 });
-    const hex = payload?.data?.audio;
-    if (typeof hex === "string" && hex.length) {
-      return { success: true, provider: "minimax", kind: "music", buffer: Buffer.from(hex, "hex"), mimetype: "audio/mpeg", raw: payload };
+    const models = [...new Set([
+      String(options.model || current.musicModel).trim(),
+      String(options.fallbackModel || current.musicFallbackModel).trim(),
+    ].filter(Boolean))];
+    const failures = [];
+    for (const model of models) {
+      try {
+        const payload = await post(`${current.baseUrl}/music_generation`, {
+          model,
+          prompt: String(prompt || "").slice(0, 2000),
+          lyrics,
+          lyrics_optimizer: !lyrics && !instrumental,
+          is_instrumental: instrumental,
+          output_format: "hex",
+          audio_setting: { sample_rate: 44100, bitrate: 256000, format: "mp3" },
+        }, current, { timeout: 180000 });
+        const hex = payload?.data?.audio;
+        if (typeof hex === "string" && hex.length) {
+          return { success: true, provider: "minimax", kind: "music", model, buffer: Buffer.from(hex, "hex"), mimetype: "audio/mpeg", raw: payload };
+        }
+        const url = payload?.data?.audio_url || payload?.audio_url;
+        if (/^https?:\/\//i.test(String(url || ""))) return { success: true, provider: "minimax", kind: "music", model, url: String(url), mimetype: "audio/mpeg", raw: payload };
+        throw new Error("MiniMax music response did not contain audio.");
+      } catch (error) {
+        failures.push(`${model}: ${error.message}`);
+      }
     }
-    const url = payload?.data?.audio_url || payload?.audio_url;
-    if (/^https?:\/\//i.test(String(url || ""))) return { success: true, provider: "minimax", kind: "music", url: String(url), mimetype: "audio/mpeg", raw: payload };
-    throw new Error("MiniMax music response did not contain audio.");
+    return { success: false, provider: "minimax", kind: "music", error: failures.join(" | ") || "MiniMax music generation failed" };
   } catch (error) {
     return { success: false, provider: "minimax", kind: "music", error: error.message };
   }

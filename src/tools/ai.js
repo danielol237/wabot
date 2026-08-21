@@ -155,9 +155,9 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
   let lastError = null;
 const { chatGPT } = require("./gpt5Cli");
 
-// GPT-5 as PRIMARY provider — runs first if GPT5_ENABLED is set
-  // Try GPT-5 first (unofficial Android ChatGPT API, no API key needed)
-  {
+// GPT-5 remains the first provider by default. Set GPT5_ENABLED=0 only to skip it.
+  // The adapter is kept intact because ARIA still supports GPT-5 as requested.
+  if (process.env.GPT5_ENABLED !== "0") {
     try {
       const result = await chatGPT(String(userMessage), userName, validHistory, systemPrompt, { uncensored: true });
       if (result.text) {
@@ -209,23 +209,6 @@ const { chatGPT } = require("./gpt5Cli");
     error("Gemini unofficial exception:", err.message);
   }
 
-
-  // Venice AI — uncensored, private API (free tier available)
-  try {
-    const venice = require("./veniceCli");
-    const veniceResult = await venice.sendMessage(String(userMessage), userName, systemPrompt, { 
-      model: process.env.VENICE_MODEL || "llama-3.3-70b-instruct" 
-    });
-    if (veniceResult.text) {
-      const content = withTruncationNotice(veniceResult.text, null, "length", requestNeedsLargeOutput);
-      lastProvider = "venice";
-      return content;
-    } else if (veniceResult.error) {
-      error("Venice AI error:", veniceResult.error);
-    }
-  } catch (err) {
-    error("Venice AI exception:", err.message);
-  }
 
 
   // OpenAPIs — Free proxy to GPT-5 + Claude (no key needed)

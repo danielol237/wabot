@@ -12,7 +12,12 @@ Module._load = function patchedLoad(request, parent, isMain) {
           throw error;
         }
         if (url.endsWith("/images/generations")) {
-          if (mode === "image-direct") return { data: { images: [{ url: "https://cdn.example/image.png" }] } };
+          if (mode === "image-model-fallback" && body.model === "cogview-3-flash") {
+            const error = new Error("model not found");
+            error.response = { status: 404, data: { message: "model not found" } };
+            throw error;
+          }
+          if (mode === "image-direct" || mode === "image-model-fallback") return { data: { images: [{ url: "https://cdn.example/image.png" }] } };
           return { data: { id: "image-task-1" } };
         }
         if (url.endsWith("/videos/generations")) return { data: { task_id: "video-task-1" } };
@@ -30,12 +35,14 @@ Module._load = function patchedLoad(request, parent, isMain) {
 };
 
 if (!['missing', 'config'].includes(mode)) process.env.ZHIPU_API_KEY = "test-zai-key";
+if (mode === "image-model-fallback") process.env.ZHIPU_IMAGE_FALLBACK_MODEL = "glm-image";
 const zai = require("../../src/tools/zaiMedia");
 
 (async () => {
   let result;
   if (mode === "config") result = { configured: zai.configured() };
   else if (mode === "image-direct") result = await zai.generateImage("an orbital ribbon mark");
+  else if (mode === "image-model-fallback") result = await zai.generateImage("a fallback test");
   else if (mode === "image-async") result = await zai.generateImage("an editorial cover", { pollMs: 1000 });
   else if (mode === "video") result = await zai.generateVideo("a ribbon moving through a warm studio", { pollMs: 1000 });
   else if (mode === "vision") result = await zai.analyzeImage("aW1hZ2U=", "image/png", "Describe the mark.");

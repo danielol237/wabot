@@ -106,7 +106,7 @@ The authenticated workspace and operator dashboard expose the readiness matrix. 
 | Atlas delivery | Configure `GITHUB_WEBHOOK_SECRET` and `RENDER_WEBHOOK_SECRET`; map repository/service identifiers | Send signed GitHub and Render test deliveries and confirm idempotent acceptance/rejection |
 | Android Companion | Set `COMPANION_API_KEY`; package `aria.glb` in the Android app; point the client at `/api/companion/chat` | Authenticated chat request returns the ARIA brain response and rate limiting remains active |
 | Pinterest batches | Set `PINTEREST_ACCESS_TOKEN` for official results | Request a batch with default 5 images and verify the max-10 guard |
-| Z.AI media | Set `ZHIPU_API_KEY` and `ZHIPU_BASE_URL=https://api.z.ai/api/paas/v4` | Verify image, video, and vision adapters; use the coding-plan endpoint only with a matching coding-plan key |
+| Z.AI media | Set `ZHIPU_API_KEY` only; endpoint and model defaults are source-controlled | Verify image, video, and vision adapters; use the coding-plan endpoint only with a matching coding-plan key |
 | Vercel delivery | Set `VERCEL_TOKEN`; keep automatic deployment disabled until owner-controlled delivery is verified | Build, verify, and explicitly request deployment; record the returned preview URL |
 | MTN/Orange | Complete official merchant onboarding and configure signed callback secrets | Verify sandbox callbacks, idempotency, and blocked live transitions |
 

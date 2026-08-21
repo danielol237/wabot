@@ -79,7 +79,33 @@ test("minimax media: converts speech and music hex responses to audio buffers", 
     assert.equal(calls[0].body.text, "hello ARIA");
     assert.equal(calls[1].url, "https://api.example/v1/music_generation");
     assert.equal(calls[1].body.prompt, "dark afrobeats for a night drive");
-    assert.equal(calls[1].body.model, "music-3.0-free");
+    assert.equal(calls[1].body.model, "music-3.0");
+  } finally {
+    restore(axios, "post", originalPost);
+  }
+});
+
+
+test("minimax media: retries music with the configured fallback model", async () => {
+  const originalPost = axios.post;
+  const calls = [];
+  axios.post = async (url, body) => {
+    calls.push({ url, body });
+    if (body.model === "music-3.0") {
+      const error = new Error("primary model unavailable");
+      error.response = { status: 404, data: { base_resp: { status_msg: "model not found" } } };
+      throw error;
+    }
+    return { data: { data: { audio: "6869" }, base_resp: { status_code: 0 } } };
+  };
+  try {
+    const result = await media.generateMusic("fallback test", {
+      env: { MINIMAX_API_KEY: "test-key", MINIMAX_BASE_URL: "https://api.example/v1" },
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.model, "music-2.6");
+    assert.equal(result.buffer.toString(), "hi");
+    assert.deepEqual(calls.map((call) => call.body.model), ["music-3.0", "music-2.6"]);
   } finally {
     restore(axios, "post", originalPost);
   }

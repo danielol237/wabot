@@ -2,7 +2,11 @@ const axios = require("axios");
 
 const BASE_URL = String(process.env.ZHIPU_BASE_URL || "https://api.z.ai/api/paas/v4").replace(/\/+$/, "");
 const API_KEY = String(process.env.ZHIPU_API_KEY || "").trim();
-const IMAGE_MODEL = String(process.env.ZHIPU_IMAGE_MODEL || "glm-image").trim();
+// CogView-3-Flash is ARIA's requested image model. GLM-Image remains a
+// compatibility fallback because Z.AI's currently published catalog may expose
+// different image model IDs by account or region.
+const IMAGE_MODEL = String(process.env.ZHIPU_IMAGE_MODEL || "cogview-3-flash").trim();
+const IMAGE_FALLBACK_MODEL = String(process.env.ZHIPU_IMAGE_FALLBACK_MODEL || "glm-image").trim();
 const VIDEO_MODEL = String(process.env.ZHIPU_VIDEO_MODEL || "cogvideox-3").trim();
 const VISION_MODEL = String(process.env.ZHIPU_VISION_MODEL || "glm-4.6v-flash").trim();
 const DEFAULT_USER = String(process.env.ZHIPU_USER_ID || "aria-server").slice(0, 128).padEnd(6, "0");
@@ -85,8 +89,12 @@ async function waitForTask(id, kind, options = {}) {
   while (Date.now() - started < timeoutMs) {
     latest = await get(`/async-result/${encodeURIComponent(id)}`);
     const status = statusOf(latest);
-    if (status === "SUCCESS" || resultUrl(latest, kind)) {
-      return { success: true, taskId: id, url: resultUrl(latest, kind), raw: latest };
+    const url = resultUrl(latest, kind);
+    if (url) {
+      return { success: true, taskId: id, url, raw: latest };
+    }
+    if (status === "SUCCESS") {
+      throw new Error(`${kind} generation completed without a usable media URL`);
     }
     if (status === "FAIL" || status === "FAILED" || status === "ERROR") {
       throw new Error(String(latest?.message || latest?.error?.message || `${kind} generation failed`));
@@ -97,22 +105,31 @@ async function waitForTask(id, kind, options = {}) {
 }
 
 async function generateImage(prompt, options = {}) {
-  try {
-    const payload = await post("/images/generations", {
-      model: String(options.model || IMAGE_MODEL),
-      prompt: String(prompt || "").slice(0, 5000),
-      quality: options.quality || process.env.ZHIPU_IMAGE_QUALITY || "hd",
-      size: options.size || process.env.ZHIPU_IMAGE_SIZE || "1280x1280",
-      user_id: userId(options.userId),
-    });
-    const id = taskId(payload);
-    const direct = resultUrl(payload, "image");
-    if (direct) return { success: true, provider: "zai", kind: "image", url: direct, taskId: id || null, raw: payload };
-    if (!id) throw new Error("Z.AI image response did not include a task ID or image URL");
-    return { provider: "zai", kind: "image", ...await waitForTask(id, "image", options) };
-  } catch (error) {
-    return { success: false, provider: "zai", kind: "image", error: error.message };
+  const models = [...new Set([
+    String(options.model || IMAGE_MODEL).trim(),
+    String(options.fallbackModel || IMAGE_FALLBACK_MODEL).trim(),
+  ].filter(Boolean))];
+  const failures = [];
+  for (const model of models) {
+    try {
+      const payload = await post("/images/generations", {
+        model,
+        prompt: String(prompt || "").slice(0, 5000),
+        quality: options.quality || process.env.ZHIPU_IMAGE_QUALITY || "hd",
+        size: options.size || process.env.ZHIPU_IMAGE_SIZE || "1280x1280",
+        user_id: userId(options.userId),
+      });
+      const id = taskId(payload);
+      const direct = resultUrl(payload, "image");
+      if (direct) return { success: true, provider: "zai", kind: "image", model, url: direct, taskId: id || null, raw: payload };
+      if (!id) throw new Error("Z.AI image response did not include a task ID or image URL");
+      const result = await waitForTask(id, "image", options);
+      return { provider: "zai", kind: "image", model, ...result };
+    } catch (error) {
+      failures.push(`${model}: ${error.message}`);
+    }
   }
+  return { success: false, provider: "zai", kind: "image", error: failures.join(" | ") || "Z.AI image generation failed" };
 }
 
 async function generateVideo(prompt, options = {}) {

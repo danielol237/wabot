@@ -1358,11 +1358,13 @@ async function handleVideoGen(sock, msg, args, ctx) {
   await react(sock, msg, "🎬");
   await reply(sock, msg, "🎬 Generating it now — video generation can take a little while.");
   const minimax = require("../tools/minimaxMedia");
-  let result = minimax.configured() ? await minimax.generateVideo(prompt) : { success: false, error: "MiniMax is not configured" };
+  let result = minimax.configured() && process.env.MINIMAX_VIDEO_ENABLED !== "0"
+    ? await minimax.generateVideo(prompt)
+    : { success: false, error: minimax.configured() ? "MiniMax video generation is disabled" : "MiniMax is not configured" };
   if (!result.success) {
     try {
       const zai = require("../tools/zaiMedia");
-      if (zai.configured()) result = await zai.generateVideo(prompt, { userId: "aria-video" });
+      if (zai.configured() && process.env.ZHIPU_VIDEO_ENABLED !== "0") result = await zai.generateVideo(prompt, { userId: "aria-video" });
     } catch (_) {}
   }
   if (!result?.success || !result.url) return reply(sock, msg, `❌ Video generation failed: ${result?.error || "the provider returned no video URL"}`);
@@ -1379,6 +1381,7 @@ async function handleMusicGen(sock, msg, args, ctx) {
   if (!prompt) return reply(sock, msg, "Tell me the style or mood, for example: make a dark afrobeats track for a night drive.");
   await react(sock, msg, "🎵");
   await reply(sock, msg, "🎵 Composing it now…");
+  if (process.env.MINIMAX_MUSIC_ENABLED === "0") return reply(sock, msg, "❌ Music generation is disabled on this server.");
   const result = await require("../tools/minimaxMedia").generateMusic(prompt);
   if (!result?.success) return reply(sock, msg, `❌ Music generation failed: ${result?.error || "the provider returned no audio"}`);
   try {
@@ -1394,10 +1397,9 @@ async function handleVoiceGenerate(sock, msg, args, ctx) {
   const text = String(args || "").trim();
   if (!text) return reply(sock, msg, "Tell me what you want ARIA to say, for example: generate a voice saying I am on my way.");
   await react(sock, msg, "🔊");
-  let result = { success: false, error: "MiniMax is not configured" };
-  const minimax = require("../tools/minimaxMedia");
-  if (minimax.configured()) result = await minimax.generateSpeech(text);
-  if (!result.success) result = await textToSpeech(text);
+  // Use the consolidated chain once: MiniMax → ElevenLabs → FreeTTS.
+  // Calling MiniMax here and then calling textToSpeech() used to invoke MiniMax twice.
+  const result = await textToSpeech(text);
   if (!result?.success) return reply(sock, msg, `❌ Voice generation failed: ${result?.error || "no audio was returned"}`);
   try {
     const payload = result.buffer ? { audio: result.buffer, mimetype: result.mimetype || "audio/mpeg", ptt: false } : { audio: { url: result.url }, mimetype: result.mimetype || "audio/mpeg", ptt: false };

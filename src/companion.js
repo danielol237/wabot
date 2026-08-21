@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const express = require("express");
 const router = express.Router();
 const { getAIResponse } = require("./tools/ai");
-const zaiMedia = require("./tools/zaiMedia");
+const { analyzeImage } = require("./tools/visionAI");
 const platform = require("./core");
 const { ownerContext, recordProductActivity } = require("./core/productBridge");
 const {
@@ -142,11 +142,10 @@ router.post("/vision", async (req, res) => {
   if (!imageBase64) return res.status(400).json({ ok: false, error: "imageBase64 is required" });
   if (imageBase64.length > 180000) return res.status(413).json({ ok: false, error: "image is too large" });
   if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) return res.status(400).json({ ok: false, error: "mimeType must be image/jpeg, image/png, or image/webp" });
-  if (!zaiMedia.configured()) return res.status(503).json({ ok: false, error: "Vision is not configured on ARIA's server." });
   try {
-    const result = await zaiMedia.analyzeImage(imageBase64, mimeType, question, { userId: auth.context.userId, maxTokens: 900 });
-    if (!result.success) return res.status(502).json({ ok: false, error: "ARIA could not interpret that image right now." });
-    const text = String(result.text || "I saw the image, but I could not form a response.").slice(0, 6000);
+    const textResult = await analyzeImage(imageBase64, mimeType, question);
+    if (!textResult || /^❌/.test(String(textResult))) return res.status(502).json({ ok: false, error: "ARIA could not interpret that image right now." });
+    const text = String(textResult || "I saw the image, but I could not form a response.").slice(0, 6000);
     try {
       recordProductActivity({
         product: "companion",
@@ -154,11 +153,11 @@ router.post("/vision", async (req, res) => {
         context: auth.context,
         aggregateType: "conversation",
         aggregateId: clean(req.body?.conversationId, 120) || "vision",
-        metadata: { authType: auth.authType, provider: result.provider },
+        metadata: { authType: auth.authType, provider: "zai-or-groq" },
         usage: { category: "ai", metric: "companion-vision", units: 1 },
       });
     } catch (_) {}
-    return res.json({ ok: true, text, provider: result.provider || "vision" });
+    return res.json({ ok: true, text, provider: "zai-or-groq" });
   } catch (_) {
     return res.status(502).json({ ok: false, error: "ARIA could not interpret that image right now." });
   }

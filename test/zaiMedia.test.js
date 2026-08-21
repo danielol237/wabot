@@ -35,6 +35,13 @@ test("Z.AI image generation accepts direct URLs and async task results", () => {
   assert.equal(asyncResult.url, "https://cdn.example/image-async.png");
 });
 
+test("Z.AI image generation falls back from CogView-3-Flash when unavailable", () => {
+  const result = run("image-model-fallback");
+  assert.equal(result.success, true);
+  assert.equal(result.model, "glm-image");
+  assert.equal(result.url, "https://cdn.example/image.png");
+});
+
 test("Z.AI video generation polls the async result and vision returns text", () => {
   const video = run("video");
   assert.equal(video.success, true);

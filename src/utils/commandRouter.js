@@ -48,6 +48,7 @@ const { getAIResponse, needsLargeOutput } = require("../tools/ai");
 
 const { setReminder } = require("../tools/reminders");
 const { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
+const { handleEngineeringRequest } = require("../tools/engineeringSystem");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
 const { handleAriaLifeFeature } = require("../tools/ariaLifeFeatures");
 const businessMode = require("../tools/businessMode");
@@ -100,6 +101,7 @@ const INTENTS = {
   weather: ["weather in", "weather for", "what's the weather"],
   news: ["news about", "latest news", "news on", "what's happening with"],
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
+  engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade"],
   delegate: ["delegate", "delegate this", "orchestrate", "hand this off"],
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
   deploy: ["deploy", "deploy it", "deploy through vercel", "host it", "host this", "host through vercel", "publish it", "put it online"],
@@ -266,6 +268,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 
   // Dev / Advanced
   registerCommand({ name: "build", aliases: [], category: "dev", description: "Build a complete app from a description", handler: handleBuild, ownerOnly: true });
+  registerCommand({ name: "engineering", aliases: ["engineer", "selfupgrade", "upgrade"], category: "dev", description: "Inspect ARIA and prepare guarded GitHub upgrades", handler: handleEngineering, ownerOnly: true });
   registerCommand({ name: "deploy", aliases: ["host", "publish"], category: "dev", description: "Deploy the verified project to Vercel", handler: handleDeploy, ownerOnly: true });
   registerCommand({ name: "continue", aliases: ["resume"], category: "dev", description: "Continue a project", handler: handleContinue, ownerOnly: true });
   registerCommand({ name: "status", aliases: [], category: "dev", description: "Project status: !status <id>", handler: handleProjectStatus, ownerOnly: false });
@@ -382,6 +385,7 @@ function naturalArgs(intent, text) {
     poll: /^(?:please\s+)?(?:create|make)\s+(?:a\s+)?poll\s*/i,
   };
   if (["help", "memories", "atlas", "links"].includes(intent)) return "";
+  if (intent === "engineering") return value;
   if (intent === "nsfw") {
     const explicit = value.match(/^nsfw\s+(on|off|true|false|enable|disable|enabled|disabled)$/i);
     if (explicit) return explicit[1].toLowerCase();
@@ -402,6 +406,13 @@ function resolveExplicitNaturalCommand(cleaned) {
     return command ? { handler: command.handler, intent: command.name, args, command } : null;
   };
 
+  if (/^(?:what|which)\s+(?:modules|packages|capabilities)\b.*\b(?:installed|have|available)\b/i.test(lower) || /^(?:inspect|show)\s+(?:(?:your|aria'?s|the bot'?s)\s+)?(?:system|modules|capabilities|installed)\b/i.test(lower)) return makeCommand("engineering", "status");
+  if (/^(?:approve|apply|execute)\s+(?:the\s+)?(?:upgrade|engineering)\s+(upgrade_[a-z0-9_]+)$/i.test(lower)) return makeCommand("engineering", `approve ${lower.match(/(upgrade_[a-z0-9_]+)$/i)[1]}`);
+  if (/^(?:verify|check|test)\s+(?:the\s+)?(?:upgrade|engineering)\s+(upgrade_[a-z0-9_]+)$/i.test(lower)) return makeCommand("engineering", `verify ${lower.match(/(upgrade_[a-z0-9_]+)$/i)[1]}`);
+  if (/^merge\s+(?:the\s+)?(?:upgrade|engineering)\s+(upgrade_[a-z0-9_]+)$/i.test(lower)) return makeCommand("engineering", `merge ${lower.match(/(upgrade_[a-z0-9_]+)$/i)[1]}`);
+  if (/^(?:open|create)\s+(?:a\s+)?(?:github\s+)?(?:pr|pull\s+request)\s+(?:for\s+)?(?:the\s+)?(?:upgrade|engineering)\s+(upgrade_[a-z0-9_]+)$/i.test(lower)) return makeCommand("engineering", `approve ${lower.match(/(upgrade_[a-z0-9_]+)$/i)[1]}`);
+  if (/^(?:implement|upgrade|improve|add|fix|change)\s+(?:this|that|it)\b.*\b(?:your|the)\s+(?:system|code|repository|bot)\b/i.test(lower)) return makeCommand("engineering", "plan this");
+  if (/^(?:upgrade|improve)\s+(?:yourself|the\s+bot|the\s+system)\b/i.test(lower)) return makeCommand("engineering", lower);
   if (/^(?:kick|remove|banish)\s+(?:everyone|everybody|all(?:\s+members)?)(?:\s+(?:in|from)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("kickall");
   if (/^(?:make|promote|appoint|give)\s+(?:him|her|them|this person|that person)\s+(?:an?\s+)?admin(?:\s+(?:in|of)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("promote");
   if (/^(?:make|promote|appoint|give)\s+.+?\s+(?:an?\s+)?admin(?:\s+(?:in|of)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("promote");
@@ -1972,21 +1983,45 @@ function formatBuildResult(result) {
   return JSON.stringify(result).slice(0, 1500);
 }
 
+async function handleEngineering(sock, msg, args, ctx) {
+  const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
+  let request = String(args || "").trim();
+  if (/^(?:this|it|that|the brief|the proposal)$/i.test(request)) request = getQuotedMessageText(msg) || request;
+  await react(sock, msg, "🛠️");
+  const result = await handleEngineeringRequest(request, ctx.senderName, ctx.chatId);
+  await reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));
+}
+
 async function handleBuild(sock, msg, args, ctx) {
   const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
   let request = String(args || "").trim();
   if (/^(?:this|it|that|the brief|the project)$/i.test(request)) request = getQuotedMessageText(msg) || "";
   if (!request) return reply(sock, msg, "Tell me what to build, or reply to a project brief and say “ARIA, build this”.");
+
+  // Treat “build ... and deploy on Vercel” as one explicit owner request. The
+  // project must still pass the builder’s deterministic repair and real build
+  // gates before the deployment step is attempted.
+  const deployRequested = /\s+(?:and\s+)?(?:deploy|publish|host)(?:\s+(?:it|this|the\s+project))?(?:\s+(?:on|through)\s+vercel)?\s*$/i.test(request);
+  if (deployRequested) request = request.replace(/\s+(?:and\s+)?(?:deploy|publish|host)(?:\s+(?:it|this|the\s+project))?(?:\s+(?:on|through)\s+vercel)?\s*$/i, "").trim();
+  if (!request) return reply(sock, msg, "Tell me what to build before asking me to deploy it.");
+
   await react(sock, msg, "🏗️");
   const result = await buildProject(request, ctx.senderName, ctx.chatId);
-  await reply(sock, msg, formatBuildResult(result));
+  if (!result.success || !deployRequested) return reply(sock, msg, formatBuildResult(result));
+  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, `${formatBuildResult(result)}\n\n⚠️ The build passed, but Vercel deployment is unavailable because VERCEL_TOKEN is not configured in the runtime.`);
+  await reply(sock, msg, `${formatBuildResult(result)}\n\n🌐 Build verified. Deploying the verified project to Vercel...`);
+  const deployment = await deployProject(ctx.chatId, result.projectId || null);
+  if (!deployment.success) return reply(sock, msg, `⚠️ The build passed, but Vercel deployment failed: ${deployment.error}`);
+  return reply(sock, msg, `✅ The verified project is live on Vercel: ${deployment.url}`);
 }
 
 async function handleDeploy(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, "Vercel hosting is not configured. Add VERCEL_TOKEN in the runtime, then say ‘deploy it’ again.");
+  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, "Vercel hosting is not configured in the runtime.");
   await react(sock, msg, "🌐");
-  const result = await deployProject(ctx.chatId, args || null);
+  const candidate = String(args || "").trim();
+  const projectId = /^project_[a-z0-9_-]+$/i.test(candidate) ? candidate : null;
+  const result = await deployProject(ctx.chatId, projectId);
   if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
   await reply(sock, msg, `✅ The verified project is live: ${result.url}`);
 }
@@ -2448,6 +2483,7 @@ const intentHandlers = {
     await reply(sock, msg, `Here you go:\n\n🌐 Dashboard: ${base ? `${origin}/dashboard` : "/dashboard"}\n🎬 Anime site: ${base ? `${origin}/anime` : "/anime"}\n🎓 Learner portal: ${base ? `${origin}/portal/login` : "/portal/login"}`);
   },
   delegate: async (sock, msg, text, ctx) => handleDelegate(sock, msg, naturalArgs("delegate", text), ctx),
+  engineering: async (sock, msg, text, ctx) => handleEngineering(sock, msg, naturalArgs("engineering", text), ctx),
   edit: async (sock, msg, text, ctx) => handleEditFile(sock, msg, naturalArgs("edit", text), ctx),
   sticker: handleStickerIntent,
   voiceReply: async (sock, msg, text, ctx) => {

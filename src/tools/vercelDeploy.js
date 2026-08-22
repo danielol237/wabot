@@ -13,6 +13,21 @@ const fs = require("fs");
 
 const VERCEL_API = "https://api.vercel.com";
 
+function sanitizeProjectName(value) {
+  return String(value || "aria-project").toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "aria-project";
+}
+
+function redact(value, token = process.env.VERCEL_TOKEN) {
+  const text = String(value || "");
+  return token ? text.split(token).join("[redacted]") : text;
+}
+
+function extractDeploymentUrl(output) {
+  const cleaned = redact(output).replace(/\x1B\[[0-?]*[ -\/]*[@-~]/g, "");
+  const matches = cleaned.match(new RegExp("https://(?:[a-z0-9-]+[.])?(?:vercel[.]app|vercel[.]sh|vercel[.]com)(?:/[^\\s)]*)?", "gi")) || [];
+  return matches.length ? matches[matches.length - 1].replace(/[),.;]+$/, "") : null;
+}
+
 async function verifyDeployment(url) {
   try {
     const response = await axios.get(url, { timeout: 15000, maxContentLength: 2 * 1024 * 1024, validateStatus: () => true });
@@ -38,21 +53,15 @@ async function deployViaCli(projectDir, projectName, token) {
       "--prod",
       "--yes",
       "--name",
-      (projectName || "aria-project").toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 40),
-      "--token",
-      token,
+      sanitizeProjectName(projectName),
     ];
-    execFile("npx", args, { timeout: 120000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("npx", args, { env: { ...process.env, VERCEL_TOKEN: token }, timeout: 120000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
       const out = (stdout || "") + "\n" + (stderr || "");
-      log("[vercel] CLI deploy output:", out.slice(-600));
-      if (err) return resolve({ success: false, error: "CLI deploy failed: " + (err.message || "error") });
-      // The CLI prints the production URL (e.g. https://xxx.vercel.app) on success.
-      const m = out.match(/(https:\/\/[a-z0-9-]+\.vercel\.app)/i) || out.match(/(https:\/\/[^\s]+\.vercel\.app)/i);
-      if (m) return verifyDeployment(m[1]).then(resolve);
-      // Some CLI versions print the URL to stdout on its own line.
-      const urls = out.split("\n").map((l) => l.trim()).filter((l) => /^https:\/\/.+\..+/.test(l));
-      if (urls.length) return verifyDeployment(urls[urls.length - 1]).then(resolve);
-      return resolve({ success: false, error: "CLI deploy finished but no URL found in output" });
+      log("[vercel] CLI deploy output:", redact(out).slice(-600));
+      if (err) return resolve({ success: false, error: "CLI deploy failed: " + redact(err.message || "error") });
+      const url = extractDeploymentUrl(out);
+      if (url) return verifyDeployment(url).then(resolve);
+      return resolve({ success: false, error: "CLI deploy finished but no deployment URL was found in output" });
     });
   });
 }
@@ -74,7 +83,7 @@ async function deployViaApi(projectDir, projectName, token) {
     walk(projectDir, "");
 
     const res = await axios.post(`${VERCEL_API}/v13/deployments`, {
-      name: (projectName || "aria-project").toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 40),
+      name: sanitizeProjectName(projectName),
       files,
       projectSettings: { framework: null },
       target: "production",
@@ -87,8 +96,8 @@ async function deployViaApi(projectDir, projectName, token) {
     if (url) return verifyDeployment("https://" + url);
     return { success: false, error: "No deployment URL returned" };
   } catch (err) {
-    log("Vercel API deploy failed (non-fatal):", err.message);
-    return { success: false, error: err.message };
+    log("Vercel API deploy failed (non-fatal):", redact(err.message));
+    return { success: false, error: redact(err.message) };
   }
 }
 
@@ -110,9 +119,9 @@ async function deployToVercel(projectDir, projectName) {
     log("[vercel] CLI deploy skipped/failed, falling back to REST API");
     return await deployViaApi(projectDir, projectName, token);
   } catch (err) {
-    log("Vercel deploy failed (non-fatal):", err.message);
-    return { success: false, error: err.message };
+    log("Vercel deploy failed (non-fatal):", redact(err.message));
+    return { success: false, error: redact(err.message) };
   }
 }
 
-module.exports = { deployToVercel };
+module.exports = { deployToVercel, _test: { sanitizeProjectName, extractDeploymentUrl, redact } };

@@ -904,8 +904,8 @@ function runNpmScript(projectDir, scriptName) {
 
 function runBuildVerification(projectDir) {
   return new Promise((resolve) => {
-    const installCmd = `cd "${projectDir}" && npm install --no-audit --no-fund 2>&1`;
-    exec(installCmd, { timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, async (installErr, installOut) => {
+    execFile("npm", ["install", "--no-audit", "--no-fund"], { cwd: projectDir, timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, async (installErr, stdout, stderr) => {
+      const installOut = (stdout || "") + (stderr || "");
       if (installErr) {
         resolve({ success: false, error: `npm install failed:\n${installOut}` });
         return;
@@ -916,8 +916,10 @@ function runBuildVerification(projectDir) {
       catch (_) { resolve({ success: true }); return; }
 
       if (pkg.scripts?.build) {
-        const buildCmd = `cd "${projectDir}" && npm run build 2>&1`;
-        const buildResult = await new Promise((done) => exec(buildCmd, { timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, (err, out) => done(err ? { success: false, error: `npm run build failed:\n${out}` } : { success: true })));
+        const buildResult = await new Promise((done) => execFile("npm", ["run", "build"], { cwd: projectDir, timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
+          const out = (stdout || "") + (stderr || "");
+          done(err ? { success: false, error: `npm run build failed:\n${out}` } : { success: true });
+        }));
         if (!buildResult.success) { resolve(buildResult); return; }
       }
 
@@ -946,10 +948,11 @@ Project files: ${project.files.map((f) => f.path).join(", ")}
 Which ONE file is most likely the cause? Respond with ONLY the file path, nothing else.`;
 
   try {
-    const targetPath = (await getAIResponse(repairPrompt, "system", [], CODE_SYSTEM_PROMPT, "")).trim();
-    const fullPath = path.join(projectDir, targetPath);
+    const targetPath = (await getAIResponse(repairPrompt, "system", [], CODE_SYSTEM_PROMPT, "")).trim().replace(/\\\\/g, "/");
+    const projectRoot = path.resolve(projectDir) + path.sep;
+    const fullPath = path.resolve(projectDir, targetPath);
 
-    if (!fs.existsSync(fullPath)) {
+    if (!fullPath.startsWith(projectRoot) || !fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
       return false; // AI pointed at a file that doesn't exist, can't proceed safely
     }
 
@@ -966,7 +969,7 @@ Which ONE file is most likely the cause? Respond with ONLY the file path, nothin
 
 function zipDirectory(sourceDir, outPath) {
   return new Promise((resolve) => {
-    exec(`cd "${sourceDir}" && zip -r "${outPath}" .`, (err, stdout, stderr) => {
+    execFile("zip", ["-r", outPath, "."], { cwd: sourceDir, timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
       if (err) {
         error("Zip error:", stderr);
         resolve({ success: false, error: "Failed to package the project." });

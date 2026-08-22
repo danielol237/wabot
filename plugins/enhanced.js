@@ -632,23 +632,11 @@ module.exports = {
         return ctx.reply(t);
       }
 
-      if (sub === "commit") {
-        const message = args.slice(1).join(" ").trim().slice(0, 200);
-        if (!message) return ctx.reply("Usage: *!githubadmin commit <message>*");
-        const staged = await runGit(["add", "-A"]);
-        if (staged.error) return ctx.reply("❌ " + staged.error);
-        const committed = await runGit(["commit", "-m", message]);
-        if (committed.error) return ctx.reply("❌ " + committed.error);
-        return ctx.reply("✅ " + committed.output);
+      if (sub === "commit" || sub === "push") {
+        return ctx.reply("🛡️ Direct Git commits and pushes from chat are disabled. Use *ARIA propose an upgrade* or *ARIA engineering plan* so the change is bounded, tested, placed on a branch, and opened as a reviewable pull request.");
       }
 
-      if (sub === "push") {
-        const r = await runGit(["push", "origin", "HEAD"]);
-        if (r.error) return ctx.reply("❌ " + r.error);
-        return ctx.reply("✅ " + r.output);
-      }
-
-      return ctx.reply("Usage:\n*!githubadmin repo <name>* — repo info\n*!githubadmin prs <name>* — open PRs\n*!githubadmin commits <name>* — recent commits\n*!githubadmin commit <msg>* — commit locally\n*!githubadmin push* — push to GitHub");
+      return ctx.reply("Usage:\n*!githubadmin repo <name>* — repo info\n*!githubadmin prs <name>* — open PRs\n*!githubadmin commits <name>* — recent commits\nDirect commit/push is intentionally disabled; use ARIA’s guarded engineering workflow.");
     },
 
 

@@ -87,3 +87,9 @@ inspect → propose → owner review → approve → branch/PR → CI verificati
 ```
 
 If CI fails, ARIA reports the failed state and stops. It does not repeatedly rewrite the same files or merge around failed checks.
+
+## Website builder and Vercel deployment contract
+
+Website builds are accepted only after deterministic quality checks, a project-wide cross-file review, a build verification pass, and a headless Chromium smoke check. The quality gate rejects placeholder copy, missing responsive metadata, missing image alt text, missing local assets, invalid image signatures, missing DOM targets, and unsafe generated paths. The builder uses a disposable Docker runner for `npm install`, build, and start checks; generated dependencies are installed with lifecycle scripts disabled.
+
+Automatic deployment is preview-only. The `!build ... and deploy` flow and `!deploy <project-id>` create a Vercel preview. Production promotion requires an explicit owner command such as `!deploy production <project-id>`. Vercel CLI is pinned, deployment names include a project-specific suffix, readiness is polled before success is reported, and API fallback uploads are bounded and reject symlinks. Set `ARIA_SKIP_BROWSER_SMOKE=true` only for controlled environments that cannot provide Chromium; doing so weakens the release gate and should not be used for public production builds.

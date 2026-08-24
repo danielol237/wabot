@@ -27,7 +27,7 @@ function save() {
   }
 }
 
-function createProject(chatId, goal, plannedFiles) {
+function createProject(chatId, goal, plannedFiles, metadata = {}) {
   const id = uuidv4().slice(0, 8);
   projects[id] = {
     id,
@@ -37,6 +37,7 @@ function createProject(chatId, goal, plannedFiles) {
     currentIndex: 0,
     status: "running", // running | paused | done | failed | cancelled
     createdAt: Date.now(),
+    ...(metadata.templateKey ? { templateKey: metadata.templateKey } : {}),
   };
   save();
   return projects[id];
@@ -127,6 +128,23 @@ function setProjectStatus(projectId, status) {
   save();
 }
 
+function recordDeployment(projectId, deployment = {}) {
+  const project = projects[projectId];
+  if (!project) return null;
+  project.deployment = {
+    ...(project.deployment || {}),
+    provider: "vercel",
+    deploymentId: deployment.deploymentId || project.deployment?.deploymentId || null,
+    vercelProjectId: deployment.vercelProjectId || project.deployment?.vercelProjectId || null,
+    url: deployment.url || project.deployment?.url || null,
+    target: deployment.target || project.deployment?.target || "preview",
+    state: deployment.state || project.deployment?.state || null,
+    updatedAt: Date.now(),
+  };
+  save();
+  return project.deployment;
+}
+
 function getProgress(project) {
   const done = project.files.filter((f) => f.status === "done").length;
   return { done, total: project.files.length, percent: Math.round((done / project.files.length) * 100) };
@@ -140,6 +158,7 @@ module.exports = {
   markFileStatus,
   advanceProject,
   setProjectStatus,
+  recordDeployment,
   getProgress,
   getFileContent,
   saveFileContent,

@@ -1,33 +1,71 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Landing Page</title>
+  <meta name="description" content="Northstar gives small teams a clear, calm workspace for turning customer signals into the next useful action." />
+  <meta property="og:title" content="Northstar — make the next move obvious" />
+  <meta property="og:description" content="A focused workspace for teams that want less noise and better follow-through." />
+  <title>Northstar — make the next move obvious</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <nav>
-    <div class="logo">Brand</div>
-    <div class="nav-links">
-      <a href="#features">Features</a>
-      <a href="#pricing">Pricing</a>
-      <a href="#contact">Contact</a>
-    </div>
-  </nav>
-  <section class="hero">
-    <h1>Build Something Great</h1>
-    <p>Clean, modern, responsive — built for growth.</p>
-    <a href="#cta" class="cta-button">Get Started</a>
-  </section>
-  <section id="features" class="features">
-    <h2>Features</h2>
-    <div class="feature-grid">
-      <div class="feature-card"><h3>Fast</h3><p>Optimized for performance.</p></div>
-      <div class="feature-card"><h3>Responsive</h3><p>Works on every device.</p></div>
-      <div class="feature-card"><h3>Modern</h3><p>Built with best practices.</p></div>
-    </div>
-  </section>
-  <footer><p>&copy; 2026 Brand. All rights reserved.</p></footer>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header">
+    <nav class="nav shell" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="Northstar home"><span class="brand-mark" aria-hidden="true">N</span><span>northstar</span></a>
+      <div class="nav-links">
+        <a href="#approach">Approach</a>
+        <a href="#outcomes">Outcomes</a>
+        <a href="#contact">Contact</a>
+      </div>
+      <a class="nav-cta" href="#contact">Start a conversation <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main-content">
+    <section class="hero shell" id="top">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span> Signal over noise</p>
+        <h1>Make the next move <em>obvious.</em></h1>
+        <p class="hero-lede">Northstar turns scattered customer notes into a shared view of what matters now, what can wait, and who owns the follow-through.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="#contact">See how it works <span aria-hidden="true">→</span></a>
+          <a class="text-link" href="#approach">Explore the approach <span aria-hidden="true">↓</span></a>
+        </div>
+      </div>
+      <div class="hero-panel" aria-label="Northstar workspace preview">
+        <div class="panel-topline"><span>WEEKLY SIGNALS</span><span class="panel-status"><span class="status-dot" aria-hidden="true"></span> Live view</span></div>
+        <div class="signal-score"><strong>82</strong><span>/ 100<br /><small>clarity score</small></span></div>
+        <div class="signal-bars" aria-hidden="true"><span class="bar bar-one"></span><span class="bar bar-two"></span><span class="bar bar-three"></span><span class="bar bar-four"></span><span class="bar bar-five"></span><span class="bar bar-six"></span><span class="bar bar-seven"></span></div>
+        <div class="panel-footer"><span>Most useful signal</span><strong>Renewal risk is easing</strong></div>
+      </div>
+    </section>
+
+    <section class="proof-strip" aria-label="Northstar principles">
+      <div class="shell proof-grid"><p>Built for the moment between <strong>insight</strong> and <strong>action.</strong></p><span>01 / Listen</span><span>02 / Focus</span><span>03 / Follow through</span></div>
+    </section>
+
+    <section class="approach section shell" id="approach">
+      <div class="section-intro"><p class="eyebrow">A calmer operating rhythm</p><h2>Good decisions need a place to land.</h2></div>
+      <div class="approach-grid">
+        <article class="approach-card"><span class="card-number">01</span><h3>Collect the signal</h3><p>Bring customer conversations, product notes, and team observations into one readable stream.</p><a class="card-link" href="#contact">Learn more <span aria-hidden="true">↗</span></a></article>
+        <article class="approach-card featured-card"><span class="card-number">02</span><h3>Find the pattern</h3><p>See the recurring question beneath the one-off request, with context your whole team can trust.</p><a class="card-link" href="#contact">Learn more <span aria-hidden="true">↗</span></a></article>
+        <article class="approach-card"><span class="card-number">03</span><h3>Move with intent</h3><p>Turn a clear signal into a small, owned next step and keep the loop visible until it is done.</p><a class="card-link" href="#contact">Learn more <span aria-hidden="true">↗</span></a></article>
+      </div>
+    </section>
+
+    <section class="outcomes section shell" id="outcomes">
+      <div class="outcomes-copy"><p class="eyebrow">What changes</p><h2>Less chasing.<br /><em>More progress.</em></h2><p>Northstar is designed for teams that already have enough tools. It gives the important things a sharper edge: the question, the decision, and the next owner.</p><a class="button button-dark" href="#contact">Talk to our team <span aria-hidden="true">→</span></a></div>
+      <div class="outcomes-list"><div class="outcome-row"><span class="outcome-index">A</span><div><h3>One shared truth</h3><p>Everyone sees the same current story without another status meeting.</p></div></div><div class="outcome-row"><span class="outcome-index">B</span><div><h3>Decisions with memory</h3><p>Keep the reasoning beside the work so the team can move faster next time.</p></div></div><div class="outcome-row"><span class="outcome-index">C</span><div><h3>Progress you can feel</h3><p>Make ownership visible, close the loop, and give momentum somewhere to go.</p></div></div></div>
+    </section>
+
+    <section class="contact section shell" id="contact">
+      <div><p class="eyebrow">Have a signal worth following?</p><h2>Let’s find the<br /><em>useful next step.</em></h2></div>
+      <form class="contact-form" action="mailto:hello@northstar.studio" method="post" enctype="text/plain"><label for="name">Your name</label><input id="name" name="name" type="text" autocomplete="name" required /><label for="email">Work email</label><input id="email" name="email" type="email" autocomplete="email" required /><label for="message">What are you working through?</label><textarea id="message" name="message" rows="4" required></textarea><button class="button button-primary" type="submit">Send the note <span aria-hidden="true">→</span></button></form>
+    </section>
+  </main>
+
+  <footer class="site-footer"><div class="shell footer-inner"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">N</span><span>northstar</span></a><p>Clarity for the work that matters.</p><p>© 2026 Northstar Studio</p></div></footer>
 </body>
 </html>

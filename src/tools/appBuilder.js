@@ -1,10 +1,12 @@
 const fs = require("fs");
 const path = require("path");
-const { exec, spawn } = require("child_process");
+const { exec, execFile, spawn } = require("child_process");
 const { log, error, warn } = require("../utils/logger");
 const { getAIResponse } = require("./ai");
 const { uploadToGofile } = require("./gofileUpload");
 const { repairGeneratedProject, hasProviderFailureText } = require("./generatedProjectRepair");
+const { checkProject: checkWebsiteQuality } = require("./websiteQuality");
+const { runBrowserSmoke } = require("./browserSmoke");
 const { loadTemplate, matchTemplate: tmplMatch, TEMPLATES } = require("../templates/loader");
 const {
   createProject,
@@ -14,6 +16,7 @@ const {
   markFileStatus,
   advanceProject,
   setProjectStatus,
+  recordDeployment,
   getProgress,
   getFileContent,
   saveFileContent,
@@ -69,11 +72,40 @@ function getMandatoryFiles(request, existingPaths) {
   return out;
 }
 
-// Zip and return the template as a starting point
+function mergePlannedFiles(files, mandatory) {
+  const required = new Map(mandatory.map((file) => [file.path, file]));
+  const seen = new Set(required.keys());
+  const planned = (files || []).filter((file) => {
+    if (!file || !file.path || seen.has(file.path) || !safeRelativePath(file.path)) return false;
+    seen.add(file.path);
+    return true;
+  });
+  const slots = Math.max(0, MAX_FILES - required.size);
+  return [...planned.slice(0, slots), ...required.values()];
+}
+
+function safeRelativePath(value) {
+  const raw = String(value || "").replace(/\\/g, "/");
+  if (!raw || raw.startsWith("/") || /\0/.test(raw) || path.posix.isAbsolute(raw)) return null;
+  const parts = raw.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".." || /\0/.test(part))) return null;
+  return parts.join("/");
+}
+
+// Return a complete, known-good starter plan when the AI planner cannot produce
+// a safe plan. The files are seeded below and remain editable by later commands.
 async function scaffoldFromTemplate(request, templateKey) {
   const template = PROJECT_TEMPLATES[templateKey];
   if (!template) return null;
-  return { template: templateKey, name: template.name };
+  return {
+    template: templateKey,
+    name: template.name,
+    request,
+    files: TEMPLATES[templateKey].files.map((file) => ({
+      path: file,
+      description: `${template.name} starter ${file}`,
+    })),
+  };
 }
 
 const PLANNER_SYSTEM_PROMPT = `You are a JSON-only API. You respond with valid JSON arrays and nothing else. No greetings, no emojis, no markdown formatting, no explanations before or after the JSON. If you add anything other than the raw JSON array, the response will fail to parse and break the system calling you.`;
@@ -91,6 +123,14 @@ If the user specified particular languages/technologies (e.g. "using only HTML, 
 Respond ONLY with a JSON array, no other text, no markdown fences. Each item: {"path": "relative/file/path.ext", "description": "what this file does"}.
 Max ${MAX_FILES} files. Include only files genuinely needed — no filler.
 
+Quality requirements:
+- Create an intentional visual system: a clear page hierarchy, distinctive typography, a restrained color palette, spacing rules, responsive breakpoints, hover/focus states, and accessible semantic HTML.
+- Include real, specific copy for the requested product or audience. Never use lorem ipsum, "Your Company", "Build Something Great", fake testimonials, empty pricing, or generic starter language.
+- Include working interactions, plus loading, empty, validation, and error states where the project needs them.
+- For a web app, include the smallest complete runnable structure: package.json/scripts, entry HTML, source entrypoint, styles, and any required configuration. Do not invent files that are not referenced.
+- Never plan secrets, .env files, lockfiles, node_modules, or binary assets as generated text files.
+- Prefer 5–12 cohesive files over a shallow dump of unrelated pages.
+
 Example output:
 [{"path":"index.html","description":"Main HTML structure with calculator UI"},{"path":"style.css","description":"Styling for the calculator"},{"path":"script.js","description":"Calculator logic and button handlers"}]`;
 
@@ -103,7 +143,17 @@ Example output:
 
     const files = JSON.parse(cleaned);
     if (!Array.isArray(files) || files.length === 0) throw new Error("Empty plan");
-    return { success: true, files: files.slice(0, MAX_FILES) };
+    const normalized = [];
+    const seen = new Set();
+    for (const file of files) {
+      const safePath = safeRelativePath(file?.path);
+      if (!safePath || /^(?:\.env(?:\.|$)|node_modules(?:\/|$)|.*(?:secret|credential|token|private[-_]?key).*)/i.test(safePath)) continue;
+      if (seen.has(safePath)) continue;
+      seen.add(safePath);
+      normalized.push({ path: safePath, description: String(file.description || "Generated project file").slice(0, 300) });
+    }
+    if (!normalized.length) throw new Error("Plan contained no safe files");
+    return { success: true, files: normalized.slice(0, MAX_FILES) };
   } catch (err) {
     error("Plan parsing failed:", err.message, "Raw response:", response.slice(0, 300));
     return { success: false, error: "Couldn't plan this project. Try describing it more simply, e.g. 'a todo app in HTML/CSS/JS'." };
@@ -147,7 +197,8 @@ async function reviewProjectFiles(projectDir, fileList, senderName) {
     .map((f) => {
       try {
         const content = fs.readFileSync(path.join(projectDir, f), "utf8");
-        return `=== ${f} ===\n${content.slice(0, 2000)}`;
+        const excerpt = content.length <= 12000 ? content : `${content.slice(0, 9000)}\n...[middle omitted; deterministic checks still inspect the full file]...\n${content.slice(-3000)}`;
+        return `=== ${f} ===\n${excerpt}`;
       } catch (err) {
         return `=== ${f} ===\n[Could not read this file: ${err.message}]`;
       }
@@ -165,7 +216,7 @@ async function reviewProjectFiles(projectDir, fileList, senderName) {
     return Array.isArray(issues) ? issues : [];
   } catch (err) {
     error("Reviewer agent failed to produce usable output:", err.message);
-    return []; // reviewer failing shouldn't block the build — just means no extra issues caught
+    return [{ file: "reviewer", issue: "AI cross-file review was unavailable or returned invalid JSON; project cannot pass the quality gate without review confirmation.", severity: "high" }];
   }
 }
 
@@ -463,6 +514,7 @@ async function buildProject(request, senderName, chatId, onProgress, userId = nu
   // rather than silently redoing it.
   const pending = getPendingPlan(chatId);
   let files;
+  let templateKey = null;
 
   if (pending) {
     files = pending.files;
@@ -470,8 +522,16 @@ async function buildProject(request, senderName, chatId, onProgress, userId = nu
     if (onProgress) await onProgress(`🧠 Using the plan from earlier — ${files.length} files. Generating...`);
   } else {
     const planResult = await planProject(request, senderName, userId);
-    if (!planResult.success) return planResult;
-    files = planResult.files;
+    if (!planResult.success) {
+      const matchedTemplate = matchTemplate(request);
+      const starter = matchedTemplate ? await scaffoldFromTemplate(request, matchedTemplate) : null;
+      if (!starter) return planResult;
+      templateKey = starter.template;
+      files = starter.files;
+      if (onProgress) await onProgress(`🧰 *Starter:* Using the verified ${starter.name} template while the planner is unavailable.`);
+    } else {
+      files = planResult.files;
+    }
   }
 
   // Always append the mandatory config/build files the planner tends to omit,
@@ -479,11 +539,11 @@ async function buildProject(request, senderName, chatId, onProgress, userId = nu
   const existing = files.map((f) => f.path);
   const mandatory = getMandatoryFiles(request, existing);
   if (mandatory.length) {
-    files = [...files, ...mandatory].slice(0, MAX_FILES);
+    files = mergePlannedFiles(files, mandatory);
     if (onProgress) await onProgress(`📦 Ensuring required config files (${mandatory.map((m) => m.path).join(", ")})...`);
   }
 
-  const project = createProject(chatId, request, files);
+  const project = createProject(chatId, request, files, { templateKey });
   if (onProgress) await onProgress(`📐 *Planner:* Designed ${files.length} files for *${request}*.\nProject ID: \`${project.id}\`\n👨‍💻 *Coder:* Starting generation...`);
 
   return await processProjectBatch(project.id, senderName, onProgress);
@@ -513,6 +573,13 @@ async function processProjectBatch(projectId, senderName, onProgress) {
   const projectDir = path.join(TEMP_DIR, `project_${project.id}`);
   fs.mkdirSync(projectDir, { recursive: true });
 
+  // A starter is copied only when its entry file is absent. This makes the
+  // fallback reproducible across paused batches without overwriting any edits.
+  if (project.templateKey && TEMPLATES[project.templateKey]) {
+    const entryFile = TEMPLATES[project.templateKey].files[0];
+    if (!fs.existsSync(path.join(projectDir, entryFile))) loadTemplate(project.templateKey, projectDir);
+  }
+
   const projectContext = project.files.map((f) => `- ${f.path}: ${f.description}`).join("\n");
   const batchEnd = Math.min(project.currentIndex + FILES_PER_BATCH, project.files.length);
   // Track which file paths have already been written so generateFileContent can
@@ -528,7 +595,15 @@ async function processProjectBatch(projectId, senderName, onProgress) {
     if (onProgress) await onProgress(`👨‍💻 *Coder:* Writing ${i + 1}/${project.files.length} — ${filePlan.path}`);
 
     try {
-      let content = await generateFileContent(filePlan, projectContext, senderName, projectDir, doneFiles);
+      const safeRel = safeRelativePath(filePlan.path);
+      if (!safeRel) throw new Error(`unsafe generated file path: ${filePlan.path}`);
+      const fullPath = path.join(projectDir, safeRel);
+      const seededContent = fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()
+        ? fs.readFileSync(fullPath, "utf8")
+        : null;
+      let content = seededContent !== null
+        ? seededContent
+        : await generateFileContent(filePlan, projectContext, senderName, projectDir, doneFiles);
       let verification = verifyFile(filePlan.path, content);
 
       // One repair attempt if verification fails — keeps this bounded, not an infinite loop
@@ -540,13 +615,6 @@ async function processProjectBatch(projectId, senderName, onProgress) {
 
       // Sanitize the AI-provided file path: strip absolute paths and any ".."
       // traversal so a malicious/mistaken path can't escape the project dir.
-      const safeRel = String(filePlan.path || "")
-        .replace(/\\/g, "/")
-        .replace(/^\/+/, "")
-        .split("/")
-        .filter((seg) => seg && seg !== ".." && seg !== ".")
-        .join("/");
-      const fullPath = path.join(projectDir, safeRel);
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, content, "utf8");
       doneFiles.push(filePlan.path); // now available as context for the next files
@@ -576,7 +644,6 @@ async function processProjectBatch(projectId, senderName, onProgress) {
   }
 
   // All files done — package and upload
-  setProjectStatus(project.id, "done");
   return await finalizeProject(updatedProject, projectDir, onProgress);
 }
 
@@ -633,11 +700,30 @@ async function finalizeProject(project, projectDir, onProgress) {
   // bugs (unmatched CSS classes, dead theme toggle, hidden sections never shown,
   // fake images, `.body` typo) that the AI reviewer can miss or not run on.
   const staticIssues = checkFrontendConsistency(projectDir, doneFiles.map((f) => f.path));
-  if (staticIssues.length > 0) {
-    if (onProgress) {
-      const s = staticIssues.slice(0, 5).map((i) => `• ${i.file}: ${i.issue}`).join("\n");
-      await onProgress(`⚠️ *Consistency check:* Found ${staticIssues.length} frontend issue(s):\n${s}`);
-    }
+  const websiteQuality = checkWebsiteQuality(projectDir, doneFiles.map((f) => f.path));
+  const allQualityIssues = [...staticIssues, ...websiteQuality.all];
+  const blockingStaticIssues = [
+    ...staticIssues.filter((issue) => /no matching CSS rule|theme may do nothing|never expand|fake image|crashes on load|features won't work|Typo:|Missing <meta name=['\"]viewport/i.test(issue.issue)),
+    ...websiteQuality.blocking,
+  ];
+  if (allQualityIssues.length > 0 && onProgress) {
+    const s = allQualityIssues.slice(0, 5).map((i) => `• ${i.file}: ${i.issue}`).join("\n");
+    await onProgress(`⚠️ *Quality check:* Found ${allQualityIssues.length} issue(s):\n${s}`);
+  }
+  if (highSeverityIssues.length || blockingStaticIssues.length) {
+    setProjectStatus(project.id, "failed");
+    cleanupDir(projectDir);
+    const reasons = [
+      ...highSeverityIssues.map((i) => `${i.file}: ${i.issue}`),
+      ...blockingStaticIssues.map((i) => `${i.file}: ${i.issue}`),
+    ].slice(0, 8);
+    return {
+      success: false,
+      qualityGate: "failed",
+      error: `Project rejected by quality gates: ${reasons.join("; ")}`,
+      crossFileIssues,
+      staticIssues: allQualityIssues,
+    };
   }
 
   // Real build verification — only for npm-based projects (anything with package.json).
@@ -676,6 +762,18 @@ async function finalizeProject(project, projectDir, onProgress) {
     cleanupDir(path.join(projectDir, "node_modules"));
   }
 
+  let browserSmoke = { skipped: true };
+  if (process.env.ARIA_SKIP_BROWSER_SMOKE !== "true") {
+    if (onProgress) await onProgress("🖥️ *Browser check:* Rendering the generated site...");
+    browserSmoke = await runBrowserSmoke(projectDir);
+    if (!browserSmoke.success) {
+      setProjectStatus(project.id, "failed");
+      cleanupDir(projectDir);
+      return { success: false, qualityGate: "failed", error: browserSmoke.error, buildVerification: hasPackageJson ? "passed" : "not_required", browserSmoke };
+    }
+  }
+  setProjectStatus(project.id, "done");
+
   // Optional live preview via Vercel — works for BOTH static projects and
   // build-step projects (package.json). The CLI auto-detects the framework,
   // installs deps and runs the build. Entirely skipped if VERCEL_TOKEN isn't
@@ -685,8 +783,11 @@ async function finalizeProject(project, projectDir, onProgress) {
     if (onProgress) await onProgress("🌐 *Deployer:* Setting up a live preview...");
     try {
       const { deployToVercel } = require("./vercelDeploy");
-      const deployResult = await deployToVercel(projectDir, project.goal);
-      if (deployResult.success) previewUrl = deployResult.url;
+      const deployResult = await deployToVercel(projectDir, project.goal, { projectId: project.id, target: "preview" });
+      if (deployResult.success) {
+        previewUrl = deployResult.url;
+        recordDeployment(project.id, { ...deployResult, target: "preview" });
+      }
     } catch (err) {
       error("Vercel deploy step failed (non-fatal):", err.message);
     }
@@ -735,15 +836,17 @@ async function finalizeProject(project, projectDir, onProgress) {
     files: doneFiles.map((f) => f.path),
     warnings: warningFiles.map((f) => f.path),
     buildWarning,
+    browserSmoke,
     repairFixes,
     previewUrl,
-    crossFileIssues: highSeverityIssues,
+    crossFileIssues,
+    qualityWarnings: allQualityIssues,
     downloadUrl: uploadResult.downloadPage,
     zipPath, // keep the local zip so the caller can send it directly as a document
   };
 }
 
-async function deployProject(chatId, projectId = null) {
+async function deployProject(chatId, projectId = null, options = {}) {
   const project = projectId ? getProject(projectId) : getAllProjectsForChat(chatId).find((item) => item.status === "done");
   if (!project) return { success: false, error: "No completed project found. Build and verify a project first." };
   if (project.chatId !== chatId) return { success: false, error: "That project belongs to a different chat." };
@@ -768,14 +871,17 @@ async function deployProject(chatId, projectId = null) {
       if (!file.path || !["done", "done_with_warning"].includes(file.status)) continue;
       const content = getFileContent(project.id, file.path);
       if (content === null) throw new Error(`Stored content is missing for ${file.path}`);
-      const safeRel = String(file.path).replace(/\\/g, "/").replace(/^\/+/, "").split("/").filter((seg) => seg && seg !== ".." && seg !== ".").join("/");
+      const safeRel = safeRelativePath(file.path);
+      if (!safeRel) throw new Error(`unsafe stored project path: ${file.path}`);
       const fullPath = path.join(projectDir, safeRel);
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, content, "utf8");
     }
     const { deployToVercel } = require("./vercelDeploy");
-    const result = await deployToVercel(projectDir, project.goal);
-    if (!result.success) return { success: false, error: result.error || "Vercel deployment failed." };
+    const target = options.target === "production" ? "production" : "preview";
+    const result = await deployToVercel(projectDir, project.goal, { projectId: project.id, target, vercelProjectId: project.deployment?.vercelProjectId });
+    recordDeployment(project.id, { ...result, target });
+    if (!result.success) return { success: false, error: result.error || "Vercel deployment failed.", target };
     try {
       const bridge = require("../core/productBridge");
       bridge.recordProductActivity({
@@ -789,7 +895,7 @@ async function deployProject(chatId, projectId = null) {
         idempotencyKey: `developer-deploy-completed:${project.id}`,
       });
     } catch (_) {}
-    return { success: true, projectId: project.id, url: result.url };
+    return { success: true, projectId: project.id, url: result.url, deploymentId: result.deploymentId || null, target };
   } finally {
     cleanupDir(projectDir);
   }
@@ -864,76 +970,87 @@ Apply this change and return the COMPLETE updated file content. No explanations,
 // This is genuinely heavier than the syntax check — it executes whatever scripts
 // the generated package.json defines. That's an acceptable risk on your own machine
 // where you're the one running it, but should NEVER run on a shared/multi-tenant server.
-function runNpmScript(projectDir, scriptName) {
+function runSandboxCommand(projectDir, args, label, timeout = 120000, network = "none", options = {}) {
   return new Promise((resolve) => {
-    const child = spawn("npm", ["run", scriptName], {
-      cwd: projectDir,
-      env: { ...process.env, CI: "1", HOST: "127.0.0.1", PORT: "0" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawn("docker", [
+      "run", "--rm", "--network", network, "--user", "1000:1000",
+      "--read-only", "--tmpfs", "/tmp:size=256m", "--memory", "768m", "--cpus", "1",
+      "--pids-limit", "128", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+      "--ulimit", "nproc=128:128", "--ulimit", "nofile=256:256",
+      "-e", "CI=1", "-e", "HOST=127.0.0.1", "-e", "PORT=0", "-e", "NPM_CONFIG_CACHE=/tmp/npm-cache",
+      "-v", `${path.resolve(projectDir)}:/workspace:rw`, "-w", "/workspace",
+      "node:22-slim", ...args,
+    ], { stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let settled = false;
-    const append = (chunk) => { output = (output + String(chunk)).slice(-12000); };
-    child.stdout.on("data", append);
-    child.stderr.on("data", append);
+    let timer = null;
+    let observeTimer = null;
     const finish = (result) => {
       if (settled) return;
       settled = true;
+      if (timer) clearTimeout(timer);
+      if (observeTimer) clearTimeout(observeTimer);
       resolve(result);
     };
-    const timer = setTimeout(() => {
-      if (child.exitCode === null) {
-        child.kill("SIGTERM");
-        setTimeout(() => { try { child.kill("SIGKILL"); } catch (_) {} }, 700);
-        finish({ success: true, observed: true, output });
-      } else {
-        finish({ success: false, error: `npm run ${scriptName} exited unexpectedly:\n${output}` });
-      }
-    }, 7000);
+    const append = (chunk) => {
+      output = (output + String(chunk)).slice(-16000);
+      if (output.length >= 16000 && child.exitCode === null) child.kill("SIGKILL");
+    };
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
+    timer = setTimeout(() => {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      finish({ success: false, error: `${label} timed out after ${timeout}ms:\n${output}` });
+    }, timeout);
+    if (options.observe) {
+      const observeAfter = Math.min(options.observeAfter ?? 7000, timeout - 1);
+      observeTimer = setTimeout(() => {
+        if (child.exitCode === null) {
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            if (child.exitCode === null) child.kill("SIGKILL");
+          }, 1000).unref();
+          finish({ success: true, observed: true, output });
+        }
+      }, Math.max(1, observeAfter));
+    }
     child.once("error", (err) => {
       clearTimeout(timer);
-      finish({ success: false, error: `npm run ${scriptName} could not start: ${err.message}\n${output}` });
+      finish({ success: false, error: `${label} could not start: ${err.message}\n${output}` });
     });
     child.once("exit", (code, signal) => {
       clearTimeout(timer);
       if (code === 0) finish({ success: true, output });
-      else finish({ success: false, error: `npm run ${scriptName} failed (${signal || `exit ${code}`}):\n${output}` });
+      else finish({ success: false, error: `${label} failed (${signal || `exit ${code}`}):\n${output}` });
     });
   });
 }
 
-function runBuildVerification(projectDir) {
-  return new Promise((resolve) => {
-    execFile("npm", ["install", "--no-audit", "--no-fund"], { cwd: projectDir, timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, async (installErr, stdout, stderr) => {
-      const installOut = (stdout || "") + (stderr || "");
-      if (installErr) {
-        resolve({ success: false, error: `npm install failed:\n${installOut}` });
-        return;
-      }
+async function runNpmScript(projectDir, scriptName, options = {}) {
+  return runSandboxCommand(projectDir, ["npm", "run", scriptName], `npm run ${scriptName}`, 30000, "none", options);
+}
 
-      let pkg;
-      try { pkg = JSON.parse(fs.readFileSync(path.join(projectDir, "package.json"), "utf8")); }
-      catch (_) { resolve({ success: true }); return; }
+async function runBuildVerification(projectDir) {
+  const installResult = await runSandboxCommand(projectDir, ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"], "npm install", 120000, "bridge");
+  if (!installResult.success) return installResult;
 
-      if (pkg.scripts?.build) {
-        const buildResult = await new Promise((done) => execFile("npm", ["run", "build"], { cwd: projectDir, timeout: 120000, maxBuffer: 1024 * 1024 * 10 }, (err, stdout, stderr) => {
-          const out = (stdout || "") + (stderr || "");
-          done(err ? { success: false, error: `npm run build failed:\n${out}` } : { success: true });
-        }));
-        if (!buildResult.success) { resolve(buildResult); return; }
-      }
+  let pkg;
+  try { pkg = JSON.parse(fs.readFileSync(path.join(projectDir, "package.json"), "utf8")); }
+  catch (err) { return { success: false, error: `package.json could not be parsed: ${err.message}` }; }
 
-      const scriptsToCheck = ["start", "dev"].filter((name, index, list) => pkg.scripts?.[name] && list.indexOf(name) === index);
-      for (const scriptName of scriptsToCheck) {
-        const runtime = await runNpmScript(projectDir, scriptName);
-        if (!runtime.success) {
-          resolve({ success: false, error: runtime.error });
-          return;
-        }
-      }
-      resolve({ success: true });
-    });
-  });
+  if (pkg.scripts?.build) {
+    const buildResult = await runNpmScript(projectDir, "build");
+    if (!buildResult.success) return buildResult;
+  }
+
+  const scriptsToCheck = ["start"].filter((name, index, list) => pkg.scripts?.[name] && list.indexOf(name) === index);
+  for (const scriptName of scriptsToCheck) {
+    // A web server is expected to stay alive. Observe it for a bounded window,
+    // then terminate the container and treat that as a successful smoke check.
+    const runtime = await runNpmScript(projectDir, scriptName, { observe: true, observeAfter: 7000 });
+    if (!runtime.success) return runtime;
+  }
+  return { success: true };
 }
 
 // ── Attempts one repair pass when build verification fails ──────
@@ -992,4 +1109,8 @@ function slugify(text) {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 40) || "project";
 }
 
-module.exports = { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, getPendingPlan, editProjectFile };
+module.exports = {
+  buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject,
+  thinkAboutProject, getPendingPlan, editProjectFile,
+  _test: { mergePlannedFiles, safeRelativePath, checkFrontendConsistency, runBuildVerification, matchTemplate, scaffoldFromTemplate },
+};

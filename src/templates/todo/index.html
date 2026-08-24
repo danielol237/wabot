@@ -1,26 +1,39 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Todo App</title>
+  <meta name="description" content="A quiet, focused task list for keeping today's work moving." />
+  <meta property="og:title" content="Daymark — a focused task list" />
+  <meta property="og:description" content="A small, calm workspace for keeping today’s work moving." />
+  <title>Daymark — a focused task list</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="container">
-    <h1>📋 Todo</h1>
-    <div class="add-todo">
-      <input type="text" id="todoInput" placeholder="What needs to be done?" />
-      <button onclick="addTodo()">Add</button>
-    </div>
-    <div class="filters">
-      <button class="filter active" onclick="setFilter('all')">All</button>
-      <button class="filter" onclick="setFilter('active')">Active</button>
-      <button class="filter" onclick="setFilter('completed')">Completed</button>
-    </div>
-    <ul id="todoList"></ul>
-    <div class="stats"><span id="todoCount">0</span> items left</div>
-  </div>
+  <main class="app-shell" aria-labelledby="page-title">
+    <header class="app-header">
+      <div><p class="kicker">DAYMARK / TODAY</p><h1 id="page-title">Keep the next thing close.</h1><p class="lede">A focused list for the work you want to finish, not just collect.</p></div>
+      <div class="progress-ring" aria-label="Task completion"><span id="progressValue">0%</span></div>
+    </header>
+
+    <section class="composer" aria-label="Add a task">
+      <form id="todoForm">
+        <label for="todoInput">Add a task</label>
+        <div class="composer-row"><input id="todoInput" name="task" type="text" maxlength="160" autocomplete="off" placeholder="What would make today feel lighter?" required /><button type="submit">Add task <span aria-hidden="true">→</span></button></div>
+        <p class="form-error" id="formError" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <section class="list-section" aria-labelledby="list-title">
+      <div class="list-heading"><div><p class="kicker">YOUR LIST</p><h2 id="list-title">Tasks in view</h2></div><button id="clearCompleted" class="quiet-button" type="button">Clear completed</button></div>
+      <div class="filters" role="group" aria-label="Filter tasks"><button class="filter active" type="button" data-filter="all" aria-pressed="true">All</button><button class="filter" type="button" data-filter="active" aria-pressed="false">Open</button><button class="filter" type="button" data-filter="completed" aria-pressed="false">Done</button></div>
+      <ul id="todoList" aria-live="polite"></ul>
+      <div id="emptyState" class="empty-state" hidden><span class="empty-mark" aria-hidden="true">✦</span><h3 id="emptyTitle">Nothing here yet.</h3><p id="emptyCopy">Add one small task and give it a clear place to land.</p></div>
+      <p class="stats"><strong id="todoCount">0</strong> open <span aria-hidden="true">·</span> <span id="totalCount">0</span> total</p>
+    </section>
+
+    <footer class="app-footer"><span>Stored locally in this browser.</span><button id="resetAll" class="text-button" type="button">Reset list</button></footer>
+  </main>
   <script src="script.js"></script>
 </body>
 </html>

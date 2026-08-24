@@ -2027,20 +2027,22 @@ async function handleBuild(sock, msg, args, ctx) {
   if (!result.success || !deployRequested) return reply(sock, msg, formatBuildResult(result));
   if (!process.env.VERCEL_TOKEN) return reply(sock, msg, `${formatBuildResult(result)}\n\n⚠️ The build passed, but Vercel deployment is unavailable because VERCEL_TOKEN is not configured in the runtime.`);
   await reply(sock, msg, `${formatBuildResult(result)}\n\n🌐 Build verified. Deploying the verified project to Vercel...`);
-  const deployment = await deployProject(ctx.chatId, result.projectId || null);
-  if (!deployment.success) return reply(sock, msg, `⚠️ The build passed, but Vercel deployment failed: ${deployment.error}`);
-  return reply(sock, msg, `✅ The verified project is live on Vercel: ${deployment.url}`);
+  const deployment = await deployProject(ctx.chatId, result.projectId || null, { target: "preview" });
+  if (!deployment.success) return reply(sock, msg, `⚠️ The build passed, but Vercel preview deployment failed: ${deployment.error}`);
+  return reply(sock, msg, `✅ The verified project is available on a Vercel preview: ${deployment.url}\n\nUse *!deploy production ${deployment.projectId}* only after reviewing it.`);
 }
 
 async function handleDeploy(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!process.env.VERCEL_TOKEN) return reply(sock, msg, "Vercel hosting is not configured in the runtime.");
   await react(sock, msg, "🌐");
-  const candidate = String(args || "").trim();
-  const projectId = /^project_[a-z0-9_-]+$/i.test(candidate) ? candidate : null;
-  const result = await deployProject(ctx.chatId, projectId);
+  const parts = String(args || "").trim().split(/\s+/).filter(Boolean);
+  const target = parts.some((part) => /^(?:production|prod|live)$/i.test(part)) ? "production" : "preview";
+  const projectId = parts.find((part) => /^project_[a-z0-9_-]+$/i.test(part)) || null;
+  const result = await deployProject(ctx.chatId, projectId, { target });
   if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
-  await reply(sock, msg, `✅ The verified project is live: ${result.url}`);
+  const label = target === "production" ? "production" : "preview";
+  await reply(sock, msg, `✅ The verified project is live on Vercel ${label}: ${result.url}`);
 }
 
 async function handleContinue(sock, msg, args, ctx) {

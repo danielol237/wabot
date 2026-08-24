@@ -2,7 +2,7 @@
 // !run <lang> <code> — executes code and returns output
 // Supports JS, Python, Bash, HTML (as screenshot)
 
-const { exec } = require("child_process");
+const { exec, execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
@@ -35,11 +35,12 @@ async function interpret(language, code) {
 function runFile(id, code, ext, cmd) {
   return new Promise((resolve) => {
     const filePath = path.join(TEMP, id + "." + ext);
-    fs.writeFileSync(filePath, code);
-    exec(cmd + ' "' + filePath + '"', { timeout: 15000, maxBuffer: 1024 * 500 }, (err, stdout, stderr) => {
-      fs.unlinkSync(filePath);
-      const output = stdout || stderr || "(no output)";
-      resolve({ success: !err || stdout, output: output.slice(0, 4000) });
+    try { fs.mkdirSync(TEMP, { recursive: true }); fs.writeFileSync(filePath, code); }
+    catch (err) { return resolve({ success: false, output: "Could not prepare code: " + err.message }); }
+    execFile(cmd, [filePath], { timeout: 15000, maxBuffer: 1024 * 500 }, (err, stdout, stderr) => {
+      try { fs.unlinkSync(filePath); } catch (_) {}
+      const output = stdout || stderr || err?.message || "(no output)";
+      resolve({ success: !err, output: output.slice(0, 4000) });
     });
   });
 }
@@ -71,9 +72,9 @@ print('Plot saved')
     const filePath = path.join(TEMP, id + "_plot.py");
     fs.writeFileSync(filePath, pyCode);
     exec('python3 "' + filePath + '"', { timeout: 30000 }, (err, stdout, stderr) => {
-      fs.unlinkSync(filePath);
+      try { fs.unlinkSync(filePath); } catch (_) {}
       const imagePath = "/tmp/" + id + "_plot.png";
-      if (fs.existsSync(imagePath)) {
+      if (!err && fs.existsSync(imagePath)) {
         resolve({ success: true, output: "Plot generated!", image: imagePath });
       } else {
         resolve({ success: false, output: (stderr || err?.message || "Plot failed") });

@@ -48,10 +48,8 @@ async function sendMessage(prompt, userId = "default", systemPrompt = "", option
   } catch (err) {
     // If openapis fails, try official OpenAI free tier models via OpenRouter
     if (err.response?.status === 404 || err.response?.status === 500) {
-      try {
-        // Fallback to OpenRouter free tier (needs minimal key but often works)
-        return { text: null, error: "OpenAPIs unavailable, trying fallback", provider: "openapis", retry: true };
-      } catch (e) {}
+      // Ask the provider orchestrator to try the next configured provider.
+      return { text: null, error: "OpenAPIs unavailable, trying fallback", provider: "openapis", retry: true };
     }
     return { text: null, error: err.message || "OpenAPIs failed", provider: "openapis" };
   }

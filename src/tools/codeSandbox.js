@@ -88,20 +88,38 @@ async function runSandboxed(code, lang, opts = {}) {
     // a real stdin write because execFile's `input` option doesn't reliably
     // deliver stdin through `docker run`.
     if (opts.stdin != null) dockerArgs.splice(dockerArgs.indexOf("--rm") + 1, 0, "-i");
-    const proc = spawn("docker", dockerArgs, { timeout: (timeoutSec + 5) * 1000 });
-    let stdout = "", stderr = "", timedOut = false;
-    proc.stdout.on("data", (d) => { stdout += String(d); if (stdout.length > 4000) proc.kill("SIGKILL"); });
-    proc.stderr.on("data", (d) => { stderr += String(d); });
-    proc.on("error", (e) => {
+    const proc = spawn("docker", dockerArgs);
+    let stdout = "", stderr = "", killReason = null, settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       try { fs.unlinkSync(filePath); } catch (_) {}
-      return resolve({ success: false, output: "docker error: " + e.message, sandboxed: true });
+      resolve(result);
+    };
+    const killWithReason = (reason) => {
+      if (killReason || settled) return;
+      killReason = reason;
+      try { proc.kill("SIGKILL"); } catch (_) {}
+    };
+    const timer = setTimeout(() => killWithReason("timeout"), (timeoutSec + 5) * 1000);
+    proc.stdout.on("data", (d) => {
+      if (settled) return;
+      stdout += String(d);
+      if (stdout.length > 4000) { stdout = stdout.slice(0, 4000); killWithReason("output_limit"); }
     });
-    proc.on("close", (code) => {
-      try { fs.unlinkSync(filePath); } catch (_) {}
+    proc.stderr.on("data", (d) => {
+      if (settled) return;
+      stderr += String(d);
+      if (stderr.length > 4000) { stderr = stderr.slice(0, 4000); killWithReason("output_limit"); }
+    });
+    proc.on("error", (e) => finish({ success: false, output: "docker error: " + e.message, sandboxed: true }));
+    proc.on("close", (code, signal) => {
+      if (killReason === "timeout") return finish({ success: false, output: "❌ Timed out / killed in sandbox.", sandboxed: true, timedOut: true });
+      if (killReason === "output_limit") return finish({ success: false, output: "❌ Output limit exceeded in sandbox.", sandboxed: true, outputLimit: true });
       const output = (stdout || stderr || "").slice(0, 4000);
-      if (timedOut) return resolve({ success: false, output: "❌ Timed out / killed in sandbox.", sandboxed: true });
-      if (code !== 0 && !stdout) return resolve({ success: false, output: (stderr || `exit ${code}`).slice(0, 2000), sandboxed: true });
-      resolve({ success: true, output: output || "(no output)", sandboxed: true });
+      if (code !== 0 || signal) return finish({ success: false, output: (stderr || stdout || `exit ${code || signal}`).slice(0, 2000), sandboxed: true, exitCode: code, signal: signal || null });
+      finish({ success: true, output: output || "(no output)", sandboxed: true, exitCode: 0 });
     });
     // Write stdin, then close so the program sees EOF.
     if (opts.stdin != null) {
@@ -129,7 +147,7 @@ function runUnsafe(code, lang, opts = {}) {
     exec(`${cmd} "${filePath}"`, { timeout: (opts.timeout || 15) * 1000, maxBuffer: 1024 * 500 }, (err, stdout, stderr) => {
       try { fs.unlinkSync(filePath); } catch (_) {}
       const output = (stdout || stderr || "(no output)").slice(0, 4000);
-      resolve({ success: !err || !!stdout, output, sandboxed: false });
+      resolve({ success: !err, output, sandboxed: false, exitCode: err ? (typeof err.code === "number" ? err.code : null) : 0 });
     });
   });
 }

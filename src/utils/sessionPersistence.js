@@ -74,10 +74,15 @@ function decryptBuffer(buf, key) {
 
 function walk(dir, out = []) {
   if (!fs.existsSync(dir)) return out;
+  const root = fs.lstatSync(dir);
+  if (!root.isDirectory()) throw new Error(`expected directory: ${dir}`);
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(p, out);
-    else out.push(p);
+    const stat = fs.lstatSync(p);
+    if (stat.isSymbolicLink()) throw new Error(`symbolic links are not allowed: ${p}`);
+    if (stat.isDirectory()) walk(p, out);
+    else if (stat.isFile()) out.push(p);
+    else throw new Error(`special files are not allowed: ${p}`);
   }
   return out;
 }
@@ -140,18 +145,20 @@ async function ensureRepo() {
 }
 
 // Push the current session files to the repo
-async function backupSession() {
+async function backupSessionUnlocked() {
   if (!syncEnabled()) return { ok: false, err: "session persistence not configured" };
   if (!fs.existsSync(SESSIONS_DIR)) return { ok: true }; // nothing to back up yet
 
   const ensure = await ensureRepo();
   if (!ensure.ok) return ensure;
 
-  // Copy session files into the git dir
+  // Reject links and special files before copying any session material.
+  try { walk(SESSIONS_DIR); } catch (e) { return { ok: false, err: "unsafe session tree: " + e.message }; }
   fs.mkdirSync(path.join(GIT_DIR, "sessions"), { recursive: true });
   try {
     fs.rmSync(path.join(GIT_DIR, "sessions"), { recursive: true, force: true });
-    fs.cpSync(SESSIONS_DIR, path.join(GIT_DIR, "sessions"), { recursive: true });
+    fs.cpSync(SESSIONS_DIR, path.join(GIT_DIR, "sessions"), { recursive: true, dereference: false });
+    walk(path.join(GIT_DIR, "sessions"));
   } catch (e) {
     return { ok: false, err: "copy failed: " + e.message };
   }
@@ -159,7 +166,7 @@ async function backupSession() {
   // Encrypt the git-side copy so the repo never holds plaintext session keys.
   const key = deriveKey();
   if (!key) return { ok: false, err: "SESSION_ENCRYPT_KEY is not configured" };
-  encryptTree(path.join(GIT_DIR, "sessions"), key);
+  try { encryptTree(path.join(GIT_DIR, "sessions"), key); } catch (e) { return { ok: false, err: "encryption failed: " + e.message }; }
 
   await git(["add", "-A"], GIT_DIR);
   const status = await git(["status", "--porcelain"], GIT_DIR);
@@ -174,7 +181,7 @@ async function backupSession() {
 }
 
 // Restore session files from the repo on boot
-async function restoreSession() {
+async function restoreSessionUnlocked() {
   if (!syncEnabled()) return { ok: false, err: "session persistence not configured" };
 
   const ensure = await ensureRepo();
@@ -194,7 +201,9 @@ async function restoreSession() {
     if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
     fs.mkdirSync(staging, { recursive: true, mode: 0o700 });
     try { fs.chmodSync(staging, 0o700); } catch (_) {}
-    fs.cpSync(backed, staging, { recursive: true });
+    walk(backed);
+    fs.cpSync(backed, staging, { recursive: true, dereference: false });
+    walk(staging);
     const key = deriveKey();
     if (!key) throw new Error("SESSION_ENCRYPT_KEY is not configured");
     decryptTree(staging, key);
@@ -217,6 +226,16 @@ async function restoreSession() {
   try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
   return { ok: true };
 }
+
+// Serialize backup and restore operations so Git working-tree state cannot overlap.
+let syncOperation = Promise.resolve();
+function withSyncLock(operation) {
+  const next = syncOperation.then(operation, operation);
+  syncOperation = next.catch(() => {});
+  return next;
+}
+function backupSession() { return withSyncLock(backupSessionUnlocked); }
+function restoreSession() { return withSyncLock(restoreSessionUnlocked); }
 
 // Auto-sync loop
 let syncInterval = null;

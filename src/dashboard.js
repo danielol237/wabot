@@ -17,6 +17,7 @@ const router = express.Router();
 const SESSION_TTL = 12 * 60 * 60 * 1000;
 const SESSIONS_FILE = path.join(__dirname, "../data/dashboardSessions.json");
 const CSRF_SECRET = process.env.DASHBOARD_CSRF_SECRET || process.env.DASHBOARD_PASSWORD || "";
+const MAX_LOGIN_BODY_BYTES = 8 * 1024;
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -186,8 +187,17 @@ router.post("/login", (req, res) => {
     return res.status(429).send(renderPage("Login", loginForm() + '<p class="error">Too many attempts. Try again later.</p>', false, true));
   }
   let body = "";
-  req.on("data", (c) => (body += c));
+  let oversized = false;
+  req.on("data", (c) => {
+    if (oversized) return;
+    body += c;
+    if (Buffer.byteLength(body, "utf8") > MAX_LOGIN_BODY_BYTES) {
+      oversized = true;
+      return res.status(413).send(renderPage("Login", loginForm() + '<p class="error">Request too large.</p>', false, true));
+    }
+  });
   req.on("end", () => {
+    if (oversized || res.headersSent) return;
     const supplied = new URLSearchParams(body).get("password") || "";
     if (pw && constantTimeEqual(supplied, pw)) {
       loginAttempts.delete(ip);

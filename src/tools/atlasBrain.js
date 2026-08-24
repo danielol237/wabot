@@ -2,7 +2,7 @@
 // This layer keeps intake deterministic and explainable. The LLM can later help
 // classify ambiguous notes, but project writes always go through atlasStore.
 
-const { createWorkspace, findWorkspace, getBrief, addEvent, addEvidence, addTask, updateTask, summary } = require("./atlasStore");
+const { createWorkspace, findWorkspace, getBrief, addEvent, addEvidence, addTask, addDecision, updateTask, summary } = require("./atlasStore");
 const { createMission, executeMission } = require("./durableMissions");
 const { decisionCard, LEVELS } = require("./atlasPolicy");
 const { handlePlanner } = require("./atlasPlanner");

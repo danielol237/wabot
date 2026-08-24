@@ -22,6 +22,7 @@ const { addPreference, getPreferences, clearPreferences } = require("../utils/us
 const { learnFact, getFacts, forgetFact } = require("../utils/learnedFacts");
 const { getMemory, saveMemory } = require("../utils/memory");
 const { getUserStore, getProfile, memoryEnabled } = require("../utils/semanticMemory");
+const { extractFromMessage } = require("../utils/worldModel");
 const { isOwner, isAdmin, addAdmin, removeAdmin, listAdmins, banUser, unbanUser, isBanned, muteChat, unmuteChat, isMuted } = require("../utils/permissions");
 const { findPluginCommand } = require("../utils/pluginLoader");
 const { createTask, getTasksForChat, deactivateTaskForChat } = require("../utils/backgroundTasks");
@@ -33,6 +34,22 @@ const { runSelfCheck, getPendingFix, clearPendingFix } = require("../tools/selfC
 const { runEvolveCheck } = require("../tools/selfAwareness");
 const { runAgentTask } = require("../tools/agent");
 const { debugCode } = require("../tools/debugTool");
+const { error } = require("./logger");
+const { generateIdCard, extractDetails, getMissingFields, detectCountry, autoGenerateIdNumber } = require("../tools/idCard");
+
+const ID_CARD_SESSION_TTL_MS = 15 * 60 * 1000;
+const idCardSessions = new Map();
+function getIdCardSession(sessionId) {
+  const session = idCardSessions.get(sessionId);
+  if (!session || session.expiresAt <= Date.now()) {
+    if (session) idCardSessions.delete(sessionId);
+    return null;
+  }
+  return session;
+}
+function saveIdCardSession(sessionId, session) {
+  idCardSessions.set(sessionId, { ...session, expiresAt: Date.now() + ID_CARD_SESSION_TTL_MS });
+}
 
 const { isNsfwEnabled, setNsfw } = require("./botSettings");
 const { runEvolveCheck: selfAwarenessCheck } = require("../tools/selfAwareness");
@@ -2345,9 +2362,9 @@ async function handleNsfw(sock, msg, args, ctx) {
 
 async function handleIdCard(sock, msg, args, ctx) {
   const { reply, react } = require('./baileysHelpers');
-  const sessionId = ctx.senderJid;
+  const sessionId = String(ctx.senderJid || msg.key?.participant || msg.key?.remoteJid || "");
   
-  let session = idCardSessions[sessionId] || {};
+  let session = getIdCardSession(sessionId) || {};
   
   // Detect country from initial message
   if (!session.country) {
@@ -2379,7 +2396,7 @@ async function handleIdCard(sock, msg, args, ctx) {
       } catch (e) {
         await reply(sock, msg, 'Failed to generate: ' + e.message);
       }
-      delete idCardSessions[sessionId];
+      idCardSessions.delete(sessionId);
       return;
     } catch (e) {}
   }
@@ -2399,7 +2416,7 @@ async function handleIdCard(sock, msg, args, ctx) {
   
   if (requiredMissing.length > 0) {
     await reply(sock, msg, 'I need more info:\n• ' + requiredMissing.join('\n• ') + '\n\nOr just send me a photo and I will fill in the rest.');
-    idCardSessions[sessionId] = session;
+    saveIdCardSession(sessionId, session);
     return;
   }
   
@@ -2407,7 +2424,7 @@ async function handleIdCard(sock, msg, args, ctx) {
   if (!session.photoBuffer) {
     await reply(sock, msg, 'Great! Now send me a passport-style photo.');
     session.step = 'waiting_photo';
-    idCardSessions[sessionId] = session;
+    saveIdCardSession(sessionId, session);
     return;
   }
   
@@ -2424,7 +2441,7 @@ async function handleIdCard(sock, msg, args, ctx) {
     await reply(sock, msg, 'Failed: ' + e.message);
   }
   
-  delete idCardSessions[sessionId];
+  idCardSessions.delete(sessionId);
 }
 // ── Intent-based handlers ────────────────────────────────────
 const intentHandlers = {

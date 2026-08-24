@@ -47,6 +47,16 @@ function requireMutation(req, res, next) {
   next();
 }
 
+function paymentForContext(req, intentId) {
+  const intent = platform.billing.getPaymentIntent(intentId);
+  if (!intent || intent.tenantId !== req.platformContext?.tenantId) {
+    const error = new Error("payment intent not found");
+    error.code = "PAYMENT_NOT_FOUND";
+    throw error;
+  }
+  return intent;
+}
+
 function handle(handler) {
   return async (req, res) => {
     try {
@@ -54,7 +64,7 @@ function handle(handler) {
       if (res.headersSent) return;
       res.json({ ok: true, ...(value && typeof value === "object" ? value : { data: value }) });
     } catch (err) {
-      const status = err.code === "CAPABILITY_DENIED" ? 403 : err.code === "ENTITLEMENT_LIMIT_REACHED" ? 402 : 400;
+      const status = err.code === "CAPABILITY_DENIED" ? 403 : err.code === "ENTITLEMENT_LIMIT_REACHED" ? 402 : err.code === "PAYMENT_NOT_FOUND" ? 404 : 400;
       res.status(status).json({ ok: false, error: String(err.message || "Platform operation failed").slice(0, 300), code: err.code || "PLATFORM_ERROR" });
     }
   };
@@ -84,7 +94,7 @@ router.get("/overview", handle((req) => {
 }));
 
 router.get("/plans", handle(() => ({ plans: platform.billing.listPlans() })));
-router.get("/integrations", handle(() => ({ integrations: platform.integrations.listIntegrations({ whatsappReady: Boolean(req.app.locals.whatsappReady) }) })));
+router.get("/integrations", handle((req) => ({ integrations: platform.integrations.listIntegrations({ whatsappReady: Boolean(req.app.locals.whatsappReady) }) })));
 router.get("/business/:type", handle((req) => ({ items: crm.list(req.platformContext, req.params.type, { stage: req.query.stage, status: req.query.status, limit: req.query.limit }) })));
 
 router.post("/customers", requireMutation, handle((req) => ({ customer: crm.ensureCustomer(req.platformContext, req.body || {}) })));
@@ -94,14 +104,30 @@ router.post("/conversations", requireMutation, handle((req) => ({ conversation: 
 router.post("/knowledge", requireMutation, handle((req) => ({ knowledge: crm.addKnowledge(req.platformContext, req.body || {}) })));
 router.post("/followups", requireMutation, handle((req) => ({ followup: crm.scheduleFollowup(req.platformContext, req.body || {}) })));
 router.post("/orders", requireMutation, handle((req) => ({ order: crm.createOrder(req.platformContext, req.body || {}) })));
-router.get("/autopilot/recommendations", handle(() => ({ recommendations: require("./core/business/autopilot").recommendations(req.platformContext) })));
+router.get("/autopilot/recommendations", handle((req) => ({ recommendations: require("./core/business/autopilot").recommendations(req.platformContext) })));
 router.post("/autopilot/leads/:id/qualify", requireMutation, handle((req) => ({ lead: require("./core/business/autopilot").qualifyLead(req.platformContext, req.params.id, req.body || {}) })));
 router.post("/autopilot/replies/propose", requireMutation, handle((req) => require("./core/business/autopilot").proposeReply(req.platformContext, req.body || {})));
 router.post("/autopilot/replies/:id/approve", requireMutation, handle((req) => ({ draft: require("./core/business/autopilot").approveReply(req.platformContext, req.params.id) })));
 router.post("/autopilot/followups/:id/approve", requireMutation, handle((req) => ({ followup: require("./core/business/autopilot").approveFollowup(req.platformContext, req.params.id) })));
 router.post("/billing/checkout", requireMutation, handle((req) => platform.billing.beginCheckout({ tenantId: req.platformContext.tenantId, planId: req.body?.planId, provider: req.body?.provider, actorId: req.platformContext.userId })));
-router.post("/billing/payment/:id/reconcile", requireMutation, handle((req) => platform.billing.reconcilePayment(req.params.id, req.body?.status, { actorId: req.platformContext.userId, externalId: req.body?.externalId, metadata: req.body?.metadata })));
+router.post("/billing/payment/:id/reconcile", requireMutation, handle((req) => {
+  paymentForContext(req, req.params.id);
+  if (req.platformContext.role !== "owner") {
+    const error = new Error("payment reconciliation requires owner access");
+    error.code = "CAPABILITY_DENIED";
+    throw error;
+  }
+  return platform.billing.reconcilePayment(req.params.id, req.body?.status, { actorId: req.platformContext.userId, externalId: req.body?.externalId, metadata: req.body?.metadata });
+}));
 router.post("/payments/intents", requireMutation, handle((req) => ({ intent: platform.billing.createPaymentIntent({ ...req.body, tenantId: req.platformContext.tenantId, actorId: req.platformContext.userId }) })));
-router.post("/payments/:id/status", requireMutation, handle((req) => ({ intent: platform.billing.transitionPayment(req.params.id, req.body?.status, { actorId: req.platformContext.userId, externalId: req.body?.externalId, metadata: req.body?.metadata }) })));
+router.post("/payments/:id/status", requireMutation, handle((req) => {
+  paymentForContext(req, req.params.id);
+  if (req.platformContext.role !== "owner") {
+    const error = new Error("payment status changes require owner access");
+    error.code = "CAPABILITY_DENIED";
+    throw error;
+  }
+  return { intent: platform.billing.transitionPayment(req.params.id, req.body?.status, { actorId: req.platformContext.userId, externalId: req.body?.externalId, metadata: req.body?.metadata }) };
+}));
 
 module.exports = router;

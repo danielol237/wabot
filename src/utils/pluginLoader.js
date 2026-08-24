@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { log, error, warn } = require("./logger");
 
 const PLUGINS_DIR = path.join(__dirname, "../../plugins");
 
@@ -40,8 +41,6 @@ function loadPlugins() {
     try {
       const pluginPath = path.join(PLUGINS_DIR, file);
       const plugin = require(pluginPath);
-      const { log, error, warn } = require("./logger");
-
       if (!plugin.name || !plugin.commands) {
         error(`Plugin ${file} is missing required "name" or "commands" export, skipping.`);
         continue;

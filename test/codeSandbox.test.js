@@ -24,3 +24,10 @@ test("sandbox: explicit SANDBOX_IMAGE overrides auto-selection (audit #20)", () 
     if (old === undefined) delete process.env.SANDBOX_IMAGE; else process.env.SANDBOX_IMAGE = old;
   }
 });
+
+test("sandbox: explicit unsafe fallback reports nonzero exit as failure", async () => {
+  const { runUnsafe } = require("../src/tools/codeSandbox");
+  const result = await runUnsafe("console.log('diagnostic'); process.exit(3);", "js", { timeout: 5 });
+  assert.equal(result.success, false);
+  assert.equal(result.sandboxed, false);
+});

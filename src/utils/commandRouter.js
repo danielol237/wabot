@@ -121,6 +121,8 @@ const INTENTS = {
   engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade"],
   delegate: ["delegate", "delegate this", "orchestrate", "hand this off"],
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
+  hidetag: ["hidetag", "hide tag", "hide-tag", "tag everyone silently", "mention everyone silently", "silently tag everyone"],
+  tagall: ["tag everyone", "tag everybody", "tag all members", "mention everyone", "mention everybody", "mention all members"],
   deploy: ["deploy", "deploy it", "deploy through vercel", "host it", "host this", "host through vercel", "publish it", "put it online"],
   edit: ["edit", "edit this", "change the file", "update the file", "fix the file"],
   github: ["on github", "look on github", "github search", "search github", "search on github", "look up on github", "find it on github", "git hub"],
@@ -429,6 +431,11 @@ function resolveExplicitNaturalCommand(cleaned) {
   if (/^(?:open|create)\s+(?:a\s+)?(?:github\s+)?(?:pr|pull\s+request)\s+(?:for\s+)?(?:the\s+)?(?:upgrade|engineering)\s+(upgrade_[a-z0-9_]+)$/i.test(lower)) return makeCommand("engineering", `approve ${lower.match(/(upgrade_[a-z0-9_]+)$/i)[1]}`);
   if (/^(?:implement|upgrade|improve|add|fix|change)\s+(?:this|that|it)\b.*\b(?:your|the)\s+(?:system|code|repository|bot)\b/i.test(lower)) return makeCommand("engineering", "plan this");
   if (/^(?:upgrade|improve)\s+(?:yourself|the\s+bot|the\s+system)\b/i.test(lower)) return makeCommand("engineering", lower);
+  const polite = String.raw`(?:(?:please|can you|could you|would you|will you)\s+)?`;
+  const hideTagNatural = new RegExp(String.raw`^${polite}(?:hidetag|hide[- ]tag|tag everyone silently|mention everyone silently|silently tag everyone)(?:\s+.+)?$`, "i");
+  if (hideTagNatural.test(lower)) return makeCommand("hidetag", lower.replace(new RegExp(String.raw`^${polite}(?:hidetag|hide[- ]tag|tag everyone silently|mention everyone silently|silently tag everyone)\s*`, "i"), "").trim());
+  const tagAllNatural = new RegExp(String.raw`^${polite}(?:tag|mention)\s+(?:everyone|everybody|all(?:\s+members)?)(?:\s+.+)?$`, "i");
+  if (tagAllNatural.test(lower)) return makeCommand("tagall", lower.replace(new RegExp(String.raw`^${polite}(?:tag|mention)\s+(?:everyone|everybody|all(?:\s+members)?)\s*`, "i"), "").trim());
   if (/^(?:kick|remove|banish)\s+(?:everyone|everybody|all(?:\s+members)?)(?:\s+(?:in|from)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("kickall");
   if (/^(?:make|promote|appoint|give)\s+(?:him|her|them|this person|that person)\s+(?:an?\s+)?admin(?:\s+(?:in|of)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("promote");
   if (/^(?:make|promote|appoint|give)\s+.+?\s+(?:an?\s+)?admin(?:\s+(?:in|of)\s+(?:this|the)\s+(?:gc|group))?$/i.test(lower)) return makeCommand("promote");
@@ -936,8 +943,13 @@ async function handleTagAll(sock, msg, args, ctx) {
 }
 
 async function handleHideTag(sock, msg, args, ctx) {
-  if (!ctx.isGroup) return;
-  await hideTag(sock, ctx.chatId, args || " ");
+  const { reply, react } = require("./baileysHelpers");
+  if (!ctx.isGroup) return reply(sock, msg, "This only works in groups.");
+  if (!(await ensureBotGroupAdmin(sock, msg, ctx.chatId))) return;
+  const message = String(args || "").replace(/^(?:everyone|everybody|all(?:\s+members)?|the\s+group)\b[\s,:-]*/i, "").trim() || "📢 Attention";
+  const result = await hideTag(sock, ctx.chatId, message);
+  if (result?.success === false) return reply(sock, msg, `❌ Hide-tag failed: ${result.error}`);
+  await react(sock, msg, "📢");
 }
 
 async function handleAntilink(sock, msg, args, ctx) {
@@ -2021,7 +2033,11 @@ async function handleBuild(sock, msg, args, ctx) {
   if (!request) return reply(sock, msg, "Tell me what to build before asking me to deploy it.");
 
   await react(sock, msg, "🏗️");
-  const result = await buildProject(request, ctx.senderName, ctx.chatId);
+  await reply(sock, msg, "🏗️ Build started. I’m working through the plan, files, checks, and packaging now.");
+  const onProgress = async (update) => {
+    try { await reply(sock, msg, `⏳ ${update}`); } catch (_) {}
+  };
+  const result = await buildProject(request, ctx.senderName, ctx.chatId, onProgress);
   if (!result.success || !deployRequested) return reply(sock, msg, formatBuildResult(result));
   if (!process.env.VERCEL_TOKEN) return reply(sock, msg, `${formatBuildResult(result)}\n\n⚠️ The build passed, but Vercel deployment is unavailable because VERCEL_TOKEN is not configured in the runtime.`);
   await reply(sock, msg, `${formatBuildResult(result)}\n\n🌐 Build verified. Deploying the verified project to Vercel...`);
@@ -2535,7 +2551,11 @@ const intentHandlers = {
   build: async (sock, msg, text, ctx) => {
     const { reply, react } = require("./baileysHelpers");
     await react(sock, msg, "🏗️");
-    const result = await buildProject(text, ctx.senderName, ctx.chatId);
+    await reply(sock, msg, "🏗️ Build started. I’m working through the plan, files, checks, and packaging now.");
+    const onProgress = async (update) => {
+      try { await reply(sock, msg, `⏳ ${update}`); } catch (_) {}
+    };
+    const result = await buildProject(text, ctx.senderName, ctx.chatId, onProgress);
     await reply(sock, msg, formatBuildResult(result));
   },
   github: async (sock, msg, text, ctx) => {

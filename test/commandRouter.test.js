@@ -33,6 +33,47 @@ test("commandRouter: no duplicate sticker registration (was registered twice)", 
   assert.strictEqual(stickers.length, 1, "sticker registered exactly once");
 });
 
+test("commandRouter: natural hidetag and tag-all requests resolve to group commands", () => {
+  const { commands, resolveNaturalAction } = require("../src/utils/commandRouter");
+  const hidetag = resolveNaturalAction("Aria, hidetag everyone");
+  assert.equal(hidetag?.intent, "hidetag");
+  assert.equal(hidetag?.command?.category, "group");
+  assert.ok(commands.some((command) => command.name === "hidetag"));
+  assert.equal(resolveNaturalAction("Aria, can you hide tag everyone?")?.intent, "hidetag");
+
+  const tagall = resolveNaturalAction("Aria, tag everyone for dinner");
+  assert.equal(tagall?.intent, "tagall");
+  assert.equal(tagall?.args, "for dinner");
+  assert.equal(tagall?.command?.category, "group");
+
+  const builderSource = require("fs").readFileSync(require("path").join(__dirname, "../src/utils/commandRouter.js"), "utf8");
+  assert.match(builderSource, /buildProject\(request, ctx\.senderName, ctx\.chatId, onProgress\)/);
+  assert.match(builderSource, /buildProject\(text, ctx\.senderName, ctx\.chatId, onProgress\)/);
+});
+
+test("commandRouter: hidetag sends hidden mentions when ARIA is a group admin", async () => {
+  const { commands } = require("../src/utils/commandRouter");
+  const sent = [];
+  const sock = {
+    user: { id: "bot@s.whatsapp.net" },
+    groupMetadata: async () => ({ participants: [
+      { id: "bot@s.whatsapp.net", admin: "admin" },
+      { id: "237650000001@s.whatsapp.net" },
+      { id: "237650000002@s.whatsapp.net" },
+    ] }),
+    sendMessage: async (chatId, payload) => { sent.push({ chatId, payload }); return {}; },
+  };
+  const command = commands.find((item) => item.name === "hidetag");
+  await command.handler(sock, { key: { remoteJid: "group@g.us" } }, "Dinner is ready", {
+    isGroup: true,
+    chatId: "group@g.us",
+    senderJid: "owner@s.whatsapp.net",
+  });
+  const hidden = sent.find((item) => item.payload.mentions);
+  assert.deepEqual(hidden.payload.mentions, ["bot@s.whatsapp.net", "237650000001@s.whatsapp.net", "237650000002@s.whatsapp.net"]);
+  assert.equal(hidden.payload.text, "Dinner is ready");
+});
+
 test("commandRouter: zero command collisions (audit #1)", () => {
   // Every name and every alias must be unique across the whole registry. A
   // duplicate (same name twice, or an alias that collides with another name or

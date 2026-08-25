@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { exec, execFile, spawn } = require("child_process");
 const { log, error, warn } = require("../utils/logger");
-const { getAIResponse } = require("./ai");
+const { generateCodingText } = require("./codingProvider");
 const { uploadToGofile } = require("./gofileUpload");
 const { repairGeneratedProject, hasProviderFailureText } = require("./generatedProjectRepair");
 const { checkProject: checkWebsiteQuality } = require("./websiteQuality");
@@ -133,7 +133,13 @@ Quality requirements:
 Example output:
 [{"path":"index.html","description":"Main HTML structure with calculator UI"},{"path":"style.css","description":"Styling for the calculator"},{"path":"script.js","description":"Calculator logic and button handlers"}]`;
 
-  const response = await getAIResponse(prompt, senderName, [], PLANNER_SYSTEM_PROMPT, "");
+  let response;
+  try {
+    response = await generateCodingText(prompt, { system: PLANNER_SYSTEM_PROMPT, maxTokens: 3000, temperature: 0.1 });
+  } catch (err) {
+    error("Coding planner failed:", err.message);
+    return { success: false, providerError: true, error: err.message };
+  }
 
   try {
     let cleaned = response.replace(/```json|```/g, "").trim();
@@ -207,7 +213,7 @@ async function reviewProjectFiles(projectDir, fileList, senderName) {
   const prompt = `Here are all the files in this project:\n\n${fileContents}\n\nReview for cross-file issues as instructed.`;
 
   try {
-    const response = await getAIResponse(prompt, senderName, [], REVIEWER_SYSTEM_PROMPT, "");
+    const response = await generateCodingText(prompt, { system: REVIEWER_SYSTEM_PROMPT, maxTokens: 5000, temperature: 0.1 });
     let cleaned = response.replace(/```json|```/g, "").trim();
     const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
     if (arrayMatch) cleaned = arrayMatch[0];
@@ -215,7 +221,7 @@ async function reviewProjectFiles(projectDir, fileList, senderName) {
     return Array.isArray(issues) ? issues : [];
   } catch (err) {
     error("Reviewer agent failed to produce usable output:", err.message);
-    return [{ file: "reviewer", issue: "AI cross-file review was unavailable or returned invalid JSON; project cannot pass the quality gate without review confirmation.", severity: "high" }];
+    return [{ file: "reviewer", issue: `Dedicated coding-provider review failed: ${String(err.message || err).slice(0, 300)}; project cannot pass the quality gate without review confirmation.`, severity: "high" }];
   }
 }
 
@@ -250,7 +256,7 @@ Rules:
 - No explanations, no markdown fences — just the raw file content
 - Make sure it actually works with the other files in the project (consistent imports, naming, etc)`;
 
-  const response = await getAIResponse(prompt, senderName, [], CODE_SYSTEM_PROMPT, "");
+  const response = await generateCodingText(prompt, { system: CODE_SYSTEM_PROMPT, maxTokens: 12000, temperature: 0.15 });
   const content = response.replace(/^```[\w]*\n?/, "").replace(/```$/, "").trim();
   if (hasProviderFailureText(content)) throw new Error("AI provider failure returned instead of source content");
   return content;
@@ -457,7 +463,7 @@ Error: ${errorMsg}
 Broken content:
 ${brokenContent}`;
 
-  const response = await getAIResponse(prompt, senderName, [], CODE_SYSTEM_PROMPT, "");
+  const response = await generateCodingText(prompt, { system: CODE_SYSTEM_PROMPT, maxTokens: 12000, temperature: 0.15 });
   return response.replace(/^```[\w]*\n?/, "").replace(/```$/, "").trim();
 }
 
@@ -496,6 +502,7 @@ function clearPendingPlan(chatId) {
 
 
 async function buildProject(request, senderName, chatId, onProgress, userId = null) {
+  if (onProgress) await onProgress("🧭 Planner: preparing the complete project plan...");
   try {
     const bridge = require("../core/productBridge");
     bridge.recordProductActivity({
@@ -943,8 +950,9 @@ Requested change: "${instruction}"
 
 Apply this change and return the COMPLETE updated file content. No explanations, no markdown fences — just the full file.`;
 
-  const response = await getAIResponse(prompt, senderName, [], CODE_SYSTEM_PROMPT, "");
+  const response = await generateCodingText(prompt, { system: CODE_SYSTEM_PROMPT, maxTokens: 12000, temperature: 0.15 });
   const newContent = response.replace(/^```[\w]*\n?/, "").replace(/```$/, "").trim();
+  if (hasProviderFailureText(newContent)) throw new Error("AI provider failure returned instead of edited source content");
 
   const verification = verifyFile(filePlan.path, newContent);
   saveFileContent(project.id, filePlan.path, newContent);
@@ -1056,7 +1064,7 @@ Project files: ${project.files.map((f) => f.path).join(", ")}
 Which ONE file is most likely the cause? Respond with ONLY the file path, nothing else.`;
 
   try {
-    const targetPath = (await getAIResponse(repairPrompt, "system", [], CODE_SYSTEM_PROMPT, "")).trim().replace(/\\\\/g, "/");
+    const targetPath = (await generateCodingText(repairPrompt, { system: CODE_SYSTEM_PROMPT, maxTokens: 1000, temperature: 0.1 })).trim().replace(/\\\\/g, "/");
     const projectRoot = path.resolve(projectDir) + path.sep;
     const fullPath = path.resolve(projectDir, targetPath);
 

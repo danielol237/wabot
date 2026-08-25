@@ -24,7 +24,6 @@ const {
 
 const TEMP_DIR = path.join(__dirname, "../../temp");
 const MAX_FILES = 12; // hard ceiling per build — keeps requests bounded and Groq-token-realistic
-const FILES_PER_BATCH = 4; // generate this many files per !build/!continue call before pausing
 
 // ── Step 1: Plan ──────────────────────────────────────────────
 // Dedicated strict system prompt for planning — bypasses ARIA's chatty personality
@@ -565,7 +564,7 @@ async function continueProject(chatId, senderName, onProgress, projectId = null)
   return await processProjectBatch(project.id, senderName, onProgress);
 }
 
-// ── Processes one batch of files (FILES_PER_BATCH at a time), with verification ──
+// ── Processes the complete planned project with verification ──
 async function processProjectBatch(projectId, senderName, onProgress) {
   const project = getProject(projectId);
   if (!project) return { success: false, error: "Project not found." };
@@ -574,14 +573,16 @@ async function processProjectBatch(projectId, senderName, onProgress) {
   fs.mkdirSync(projectDir, { recursive: true });
 
   // A starter is copied only when its entry file is absent. This makes the
-  // fallback reproducible across paused batches without overwriting any edits.
+  // fallback reproducible across retries without overwriting any edits.
   if (project.templateKey && TEMPLATES[project.templateKey]) {
     const entryFile = TEMPLATES[project.templateKey].files[0];
     if (!fs.existsSync(path.join(projectDir, entryFile))) loadTemplate(project.templateKey, projectDir);
   }
 
   const projectContext = project.files.map((f) => `- ${f.path}: ${f.description}`).join("\n");
-  const batchEnd = Math.min(project.currentIndex + FILES_PER_BATCH, project.files.length);
+  // Build the complete planned project in one invocation so the owner never
+  // has to manually advance generation between file groups.
+  const batchEnd = project.files.length;
   // Track which file paths have already been written so generateFileContent can
   // include their ACTUAL content (cross-file consistency: shared class names,
   // ids, function names, selectors) instead of guessing per-file.
@@ -631,19 +632,9 @@ async function processProjectBatch(projectId, senderName, onProgress) {
   const updatedProject = getProject(project.id);
   const progress = getProgress(updatedProject);
 
-  // Still more files to go — pause here and ask for a natural-language continuation
-  if (updatedProject.currentIndex < updatedProject.files.length) {
-    setProjectStatus(project.id, "paused");
-    return {
-      success: true,
-      paused: true,
-      projectId: project.id,
-      progress,
-      message: `⏸️ Generated ${progress.done}/${progress.total} files. Say “continue the project” to keep going.`,
-    };
-  }
+  // Every planned file has been processed in this invocation.
+  // Package and upload without requiring another user message.
 
-  // All files done — package and upload
   return await finalizeProject(updatedProject, projectDir, onProgress);
 }
 

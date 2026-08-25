@@ -64,7 +64,7 @@ const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
 
 const { setReminder } = require("../tools/reminders");
-const { buildProject, continueProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
+const { buildProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
 const { handleEngineeringRequest } = require("../tools/engineeringSystem");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
 const { handleAriaLifeFeature } = require("../tools/ariaLifeFeatures");
@@ -287,7 +287,6 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
   registerCommand({ name: "build", aliases: [], category: "dev", description: "Build a complete app from a description", handler: handleBuild, ownerOnly: true });
   registerCommand({ name: "engineering", aliases: ["engineer", "selfupgrade", "upgrade"], category: "dev", description: "Inspect ARIA and prepare guarded GitHub upgrades", handler: handleEngineering, ownerOnly: true });
   registerCommand({ name: "deploy", aliases: ["host", "publish"], category: "dev", description: "Deploy the verified project to Vercel", handler: handleDeploy, ownerOnly: true });
-  registerCommand({ name: "continue", aliases: ["resume"], category: "dev", description: "Continue a project", handler: handleContinue, ownerOnly: true });
   registerCommand({ name: "status", aliases: [], category: "dev", description: "Project status: !status <id>", handler: handleProjectStatus, ownerOnly: false });
   registerCommand({ name: "projects", aliases: ["mylist"], category: "dev", description: "List projects", handler: handleProjectList, ownerOnly: false });
   registerCommand({ name: "cancelbuild", aliases: ["cancel"], category: "dev", description: "Cancel a project", handler: handleProjectCancel, ownerOnly: true });
@@ -1988,7 +1987,6 @@ async function handleWikipedia(sock, msg, args, ctx) {
 function formatBuildResult(result) {
   if (!result) return "❌ Build returned nothing.";
   if (result.success === false) return "❌ " + (result.error || "Build failed.");
-  if (result.paused) return result.message || "⏸️ Build paused — say ‘continue the project’ to keep going.";
   if (result.success && result.downloadUrl) {
     let t = "✅ *Project built!*\n";
     if (result.fileCount) t += `📄 ${result.fileCount} file(s)\n`;
@@ -2043,13 +2041,6 @@ async function handleDeploy(sock, msg, args, ctx) {
   if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
   const label = target === "production" ? "production" : "preview";
   await reply(sock, msg, `✅ The verified project is live on Vercel ${label}: ${result.url}`);
-}
-
-async function handleContinue(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
-  await react(sock, msg, "▶️");
-  const result = await continueProject(ctx.chatId, ctx.senderName, null, args);
-  await reply(sock, msg, formatBuildResult(result));
 }
 
 async function handleProjectStatus(sock, msg, args, ctx) {

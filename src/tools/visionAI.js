@@ -1,73 +1,141 @@
 const Groq = require("groq-sdk");
+const axios = require("axios");
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 const zai = require("./zaiMedia");
 
-// Vision-capable models on Groq, in priority order. Groq retires preview models
-// frequently with little notice (we already got burned twice — llama-3.2-90b-vision
-// and llama-3.2-11b-vision were both decommissioned), so this tries each one in turn
-// and only gives up after all options fail.
 const VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct", "qwen/qwen3.6-27b"];
+const OPENROUTER_VISION_MODEL = "google/gemini-3.1-pro-preview";
+const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 
-// The old default prompt ("Describe this image in detail") produced flat content
-// lists — "a man, a dog, a tree" — instead of actually explaining what's happening,
-// the mood, the likely context, or anything someone would actually want to know.
-// This version asks for genuine understanding: what's going on, why it matters,
-// any text/emotion/action visible, not just an inventory of objects.
-const DEFAULT_VISION_PROMPT = `Look at this image and actually explain what's happening in it — not just a list of objects. Cover:
-- What's going on in the scene (the actual situation/action, not just "there is a X and a Y")
-- Who/what is involved and what they appear to be doing or feeling
-- Any text visible and what it says
-- Context clues that explain WHY this image exists or what it's likely from (a meme, a screenshot, a photo of a real place, etc.)
-- Anything notable, funny, unusual, or worth pointing out
+const DEFAULT_VISION_PROMPT = `Look at this media and explain what is actually happening, not just a list of objects. Cover the visible action, people or characters, expressions, any readable text, the emotional tone, and useful context clues. Distinguish what is clearly visible from what is only an inference. Talk like you're explaining it to a friend who cannot see it.`;
 
-Talk like you're explaining it to a friend who can't see it, not like you're filling out a checklist.`;
+function cleanText(value, max = 8000) {
+  return String(value || "").replace(/\u0000/g, "").trim().slice(0, max);
+}
 
-async function analyzeImage(base64Image, mimeType, question) {
+function asksForDetails(question) {
+  return /\b(?:what(?:'s| is)\s+(?:in|shown|happening)|describe|explain\s+(?:the\s+)?(?:image|sticker|picture|meme)|read\s+(?:the\s+)?text|what does it say|exact(?:ly)?\s+what)\b/i.test(String(question || ""));
+}
+
+function asksHowVisionWorks(question) {
+  return /\b(?:how|why)\s+(?:can|do|are you able to)\s+(?:you|aria)\s+(?:read|see|understand|know)|how did you read|are you seeing this|can you actually see/i.test(String(question || ""));
+}
+
+function buildVisionPrompt({ question = "", kind = "image", history = [], quotedContext = "" } = {}) {
+  const userQuestion = cleanText(question, 1200);
+  const detailMode = asksForDetails(userQuestion);
+  const howMode = asksHowVisionWorks(userQuestion);
+  const recent = Array.isArray(history)
+    ? history.filter((item) => item && typeof item.content === "string").slice(-4).map((item) => `${item.role || "user"}: ${cleanText(item.content, 500)}`).join("\n")
+    : "";
+
+  return `You are ARIA, a sharp, emotionally expressive humanoid AI companion inside WhatsApp. A user sent a ${kind === "sticker" ? "sticker" : "piece of visual media"}.
+
+Conversation context:
+${recent || "(no earlier text)"}
+${quotedContext ? `Quoted context:\n${cleanText(quotedContext, 800)}\n` : ""}
+User's current text: ${userQuestion || "(no text; they only sent the media)"}
+
+Response policy:
+- If there is no explicit question, reply naturally to the emotional or comedic meaning of the ${kind}, as if you are participating in the conversation. Do not begin with “I see an image”, “This sticker shows”, or a dry object inventory. Keep it to one or two lively lines unless the media genuinely needs explanation.
+- If the user asks what is in it, describes it, asks what it says, or asks for exact details, switch to precise visual reporting: identify characters/people, pose, facial expression, clothing, colors, background, visible text, action, and likely meme/emotional context. Clearly label uncertainty instead of inventing details.
+- If the user asks how you can read it, explain plainly that WhatsApp supplied the media bytes and a vision model interpreted the pixels and text. Do not claim human eyesight, a physical body, or literal consciousness.
+- If it is a meme or reaction sticker, respond to the implied feeling or joke first. Mention visual details only when useful or requested.
+- Never pretend to have read text that is too small or obscured. Say exactly what is legible and what is not.
+- Match the user's energy. Be warm, witty, blunt, or sympathetic when appropriate, but do not become cruel.
+${detailMode ? "The user requested details: prioritize accurate observation over banter." : "The user did not request a visual inventory: prioritize a genuine conversational reaction."}
+${howMode ? "The user is asking about your visual process: answer that directly and honestly after briefly acknowledging the media." : ""}
+
+Return only ARIA's WhatsApp reply, with no analysis labels or provider commentary.`;
+}
+
+async function analyzeWithOpenRouter(base64Image, mimeType, prompt) {
+  if (!String(process.env.OPENROUTER_API_KEY || "").trim()) return null;
+  try {
+    const response = await axios.post(
+      OPENROUTER_ENDPOINT,
+      {
+        model: OPENROUTER_VISION_MODEL,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+          ],
+        }],
+        max_tokens: 1800,
+        temperature: 0.65,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://aria.local",
+          "X-Title": "ARIA Visual Companion",
+        },
+        timeout: 60000,
+      }
+    );
+    const text = response.data?.choices?.[0]?.message?.content;
+    return typeof text === "string" && text.trim() ? text.trim() : null;
+  } catch (error) {
+    console.warn("OpenRouter vision error:", error.response?.data?.error?.message || error.message);
+    return null;
+  }
+}
+
+async function analyzeImage(base64Image, mimeType = "image/jpeg", question, options = {}) {
+  const kind = options.kind || "image";
+  const prompt = options.prompt || buildVisionPrompt({ question, kind, history: options.history, quotedContext: options.quotedContext });
+
   if (zai.configured()) {
-    const result = await zai.analyzeImage(base64Image, mimeType, question || DEFAULT_VISION_PROMPT);
+    const result = await zai.analyzeImage(base64Image, mimeType, prompt, { maxTokens: 1800 });
     if (result.success) return result.text;
     console.warn("Z.AI vision error:", result.error);
   }
-  if (!groq) return "❌ No vision provider configured. Add ZHIPU_API_KEY or GROQ_API_KEY.";
 
-  let lastError = null;
-
-  for (const model of VISION_MODELS) {
-    try {
-      const res = await groq.chat.completions.create({
-        model,
-        messages: [
-          {
+  if (groq) {
+    for (const model of VISION_MODELS) {
+      try {
+        const res = await groq.chat.completions.create({
+          model,
+          messages: [{
             role: "user",
             content: [
-              { type: "text", text: question || DEFAULT_VISION_PROMPT },
+              { type: "text", text: prompt },
               { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
             ],
-          },
-        ],
-        max_tokens: 1536,
-      });
-      return res.choices[0]?.message?.content || "I couldn't analyze that image.";
-    } catch (err) {
-      console.error(`Vision AI error (${model}):`, err.message);
-      lastError = err;
-      // If the model is gone, try the next one. For any other error type, stop and report it.
-      if (!err.message?.includes("decommissioned") && !err.message?.includes("does not exist")) break;
+          }],
+          max_tokens: 1800,
+          temperature: 0.65,
+        });
+        const text = res.choices[0]?.message?.content;
+        if (text) return text.trim();
+      } catch (error) {
+        console.warn(`Vision AI error (${model}):`, error.message);
+        if (!/decommissioned|does not exist|not found/i.test(error.message || "")) break;
+      }
     }
   }
 
-  return `❌ Image analysis failed: ${lastError?.message || "unknown error"}`;
+  const openRouterText = await analyzeWithOpenRouter(base64Image, mimeType, prompt);
+  if (openRouterText) return openRouterText;
+
+  return "❌ I couldn't read that visual right now. The media reached me, but no vision provider is available or responding.";
 }
 
-// OCR — reuses the same vision pipeline with a prompt tuned for accurate text extraction
+async function respondToMedia(base64Image, mimeType, options = {}) {
+  return analyzeImage(base64Image, mimeType, options.question || "", options);
+}
+
 async function extractText(base64Image, mimeType) {
-  return analyzeImage(
-    base64Image,
-    mimeType,
-    "Extract ALL text visible in this image, exactly as written, preserving line breaks. If there's no text, say 'No text found in this image.' Don't add commentary, just the extracted text."
-  );
+  return analyzeImage(base64Image, mimeType, "Extract all legible text visible in this image exactly as written. If text is too small or obscured, say so. Do not add commentary.", { kind: "image" });
 }
 
-module.exports = { analyzeImage, extractText };
-
+module.exports = {
+  analyzeImage,
+  respondToMedia,
+  extractText,
+  _test: { buildVisionPrompt, asksForDetails, asksHowVisionWorks, OPENROUTER_VISION_MODEL },
+};

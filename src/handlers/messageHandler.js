@@ -1,7 +1,7 @@
 // Slimmed-down message handler — routes to commandRouter
 // Previously 1669 lines, now ~150. New commands go in commandRouter, not here.
 
-const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNote, downloadMediaFromMsg, isBotMentioned } = require("../utils/baileysHelpers");
+const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNote, downloadMediaFromMsg, downloadQuotedMedia, findQuotedMediaReference, getQuotedMessageText, isQuotingBotMessage, isBotMentioned } = require("../utils/baileysHelpers");
 const { routeMessage, triggeredByName } = require("../utils/commandRouter");
 const { checkGroupProtection } = require("../tools/groupProtection");
 const { handleWcgReply } = require("../tools/pasquaCommands");
@@ -175,7 +175,8 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   const sessionActive = isSessionActive(chatId);
   const mentioned = isBotMentioned(msg, botJids);
   // In groups, only act when actually addressed. In DMs, always act.
-  const shouldReply = !isGroup || hasNameTrigger || isCommand || mentioned || sessionActive;
+  const isReplyToBot = isQuotingBotMessage(msg);
+  const shouldReply = !isGroup || hasNameTrigger || isCommand || mentioned || sessionActive || isReplyToBot;
   if (!shouldReply) return;
 
   // Direct commands, mentions, and named action requests should feel immediate.
@@ -201,19 +202,74 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     }
   }
 
-  // ── FILE ANALYSIS (auto-analyze media) ─────────────────────
+  // ── VISUAL MEDIA → CONVERSATIONAL VISION ────────────────────
+  // Stickers and images are treated as part of the conversation. A bare
+  // reaction gets a natural response; explicit questions get precise details.
   if (hasMedia(msg)) {
     const media = await downloadMediaFromMsg(sock, msg);
     if (media) {
-      // Remember image content for future context (media personality).
-      if (media.mimetype?.startsWith("image/")) {
+      const visual = /^image\//i.test(String(media.mimetype || ""));
+      if (visual) {
+        const kind = /webp/i.test(String(media.mimetype || "")) && (msg.message?.stickerMessage || msg.message?.ephemeralMessage?.message?.stickerMessage || msg.message?.viewOnceMessage?.message?.stickerMessage) ? "sticker" : "image";
+        const { respondToMedia } = require("../tools/visionAI");
+        const visualBase64 = media.buffer.toString("base64");
+        const result = await respondToMedia(visualBase64, media.mimetype, {
+          kind,
+          question: text,
+          history: getMemory(chatId),
+          quotedContext: getQuotedMessageText(msg) || "",
+        });
+        try { require("../tools/visualContext").remember(chatId, { base64: visualBase64, mimeType: media.mimetype, kind }); } catch (_) {}
         try {
-          const { rememberImage } = require("../tools/mediaMemory");
-          rememberImage(senderJid, media.buffer.toString("base64"), media.mimetype, text).catch(() => {});
+          const { rememberObservation } = require("../tools/mediaMemory");
+          rememberObservation(senderJid, result, { kind, mimeType: media.mimetype, question: text });
         } catch (_) {}
+        return reply(sock, msg, result);
       }
+
       const question = text || "Analyze this file.";
       const result = await analyzeFile(media, question);
+      return reply(sock, msg, result);
+    }
+  }
+
+  // If the user replies to ARIA while referring to an earlier image/sticker,
+  // recover the bounded quoted media chain and answer the follow-up directly.
+  if (!hasMedia(msg) && text && findQuotedMediaReference(msg)) {
+    const quotedMedia = await downloadQuotedMedia(sock, msg);
+    if (quotedMedia && /^image\//i.test(String(quotedMedia.mimetype || ""))) {
+      const { respondToMedia } = require("../tools/visionAI");
+      const kind = /webp/i.test(String(quotedMedia.mimetype || "")) ? "sticker" : "image";
+      const result = await respondToMedia(quotedMedia.buffer.toString("base64"), quotedMedia.mimetype, {
+        kind,
+        question: text,
+        history: getMemory(chatId),
+        quotedContext: getQuotedMessageText(msg) || "",
+      });
+      try {
+        const { rememberObservation } = require("../tools/mediaMemory");
+        rememberObservation(senderJid, result, { kind, mimeType: quotedMedia.mimetype, question: text });
+      } catch (_) {}
+      return reply(sock, msg, result);
+    }
+  }
+
+  // Short follow-up continuity: if a user asks about the last visual in the
+  // same chat without quoting it, reuse the bounded in-memory media reference.
+  if (!hasMedia(msg) && text) {
+    const previousVisual = (() => { try { return require("../tools/visualContext").get(chatId); } catch (_) { return null; } })();
+    const visualFollowUp = /\b(?:what(?:'s| is)\s+(?:in|shown|happening|that|this|it)|describe\s+(?:that|this|it)|explain\s+(?:that|this|it)|read\s+(?:that|this|it)|how\s+(?:can|do)\s+you\s+(?:read|see|understand)|what\s+does\s+(?:it|that|this)\s+say|exact(?:ly)?\s+what)\b/i.test(text);
+    if (previousVisual && visualFollowUp) {
+      const { respondToMedia } = require("../tools/visionAI");
+      const result = await respondToMedia(previousVisual.base64, previousVisual.mimeType, {
+        kind: previousVisual.kind,
+        question: text,
+        history: getMemory(chatId),
+      });
+      try {
+        const { rememberObservation } = require("../tools/mediaMemory");
+        rememberObservation(senderJid, result, { kind: previousVisual.kind, mimeType: previousVisual.mimeType, question: text });
+      } catch (_) {}
       return reply(sock, msg, result);
     }
   }

@@ -59,6 +59,30 @@ async function rememberImage(userId, base64, mimeType, question) {
   }
 }
 
+function rememberObservation(userId, summary, metadata = {}) {
+  try {
+    const text = String(summary || "").trim();
+    if (!text || /^❌/.test(text)) return null;
+    const entry = {
+      id: Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+      kind: metadata.kind || "image",
+      summary: text.slice(0, 500),
+      keywords: keywords(text),
+      ts: Date.now(),
+      mimeType: metadata.mimeType || null,
+      question: String(metadata.question || "").slice(0, 300),
+    };
+    const store = userStore(userId);
+    store.push(entry);
+    if (store.length > 100) db[userId] = store.slice(-100);
+    save();
+    return entry;
+  } catch (err) {
+    error("rememberObservation error:", err.message);
+    return null;
+  }
+}
+
 // Analyze and remember a voice note (store its transcription).
 async function rememberVoice(userId, audioBuffer, mimetype) {
   try {
@@ -106,4 +130,4 @@ function stats() {
   return { users: users.length, total: users.reduce((s, u) => s + db[u].length, 0) };
 }
 
-module.exports = { rememberImage, rememberVoice, recallMedia, getAllMedia, stats };
+module.exports = { rememberImage, rememberObservation, rememberVoice, recallMedia, getAllMedia, stats };

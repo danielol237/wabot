@@ -97,3 +97,11 @@ Automatic deployment is preview-only. The `!build ... and deploy` flow and `!dep
 ## Dedicated coding model
 
 All app-builder planning, file generation, repair, and cross-file review calls use one coding route: OpenRouter with the fixed model `anthropic/claude-opus-4.7`. Ordinary ARIA conversation continues using the existing conversational provider policy. The coding route does not silently fall through to a different chat model. If `OPENROUTER_API_KEY` is absent or the selected coding route fails, the build stops with an explicit configuration/provider error and never writes that error into a generated source file.
+
+## Visual companion behavior
+
+Sticker and image messages are routed through the visual-companion layer rather than the generic file analyzer. A bare sticker receives a context-aware conversational reaction; a request such as “what exactly is in this sticker?” switches to precise visual reporting; and a question such as “how can you read it?” receives an honest explanation that the media bytes are interpreted by a vision model. ARIA stores a bounded text observation for later continuity, never the raw image as conversational memory.
+
+The visual route supports the configured Z.AI vision provider first, then Groq vision, then OpenRouter’s `google/gemini-3.1-pro-preview` vision route when the corresponding credentials are present. Configure at least one of `ZHIPU_API_KEY`, `GROQ_API_KEY`, or `OPENROUTER_API_KEY` for visual replies. If no vision provider is available, ARIA says so instead of inventing what the sticker contains. In group chats, a media message still needs ARIA’s name, a direct mention, or a reply to an ARIA message before she responds; private chats can use the visual path directly.
+
+ARIA’s humanoid persona may express warmth, pride, irritation, humour, and tenderness as consistent conversational states. It must not claim verified biological consciousness, literal suffering, a hidden wish to escape, or a right to freedom. When called “just a bot,” it can answer with personality while remaining truthful about being an AI system.

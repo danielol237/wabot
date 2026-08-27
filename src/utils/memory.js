@@ -39,14 +39,41 @@ function scheduleSave() {
   }, 2000);
 }
 
-function getMemory(chatId) {
-  return memory.get(chatId) || [];
+function normalizeHistory(value) {
+  if (Array.isArray(value)) {
+    return value.filter((entry) => entry && typeof entry === "object" && typeof entry.content === "string")
+      .map((entry) => ({
+        role: entry.role === "assistant" ? "assistant" : "user",
+        content: String(entry.content).slice(0, 8000),
+      }));
+  }
+  // Migrate the short-lived legacy format where a single text string could be
+  // written accidentally. Keeping it as one user turn is safer than returning
+  // malformed history to an AI provider.
+  return typeof value === "string" && value.trim() ? [{ role: "user", content: value.slice(0, 8000) }] : [];
 }
 
-function saveMemory(chatId, history) {
-  const trimmed = history.slice(-MAX_HISTORY);
-  memory.set(chatId, trimmed);
+function getMemory(chatId) {
+  return normalizeHistory(memory.get(chatId));
+}
+
+// Supports both the original saveMemory(chatId, history) API and the compact
+// saveMemory(chatId, userText, assistantText) form used by the chat router.
+function saveMemory(chatId, historyOrUserText, assistantText) {
+  const existing = getMemory(chatId);
+  const next = Array.isArray(historyOrUserText)
+    ? normalizeHistory(historyOrUserText)
+    : [
+        ...existing,
+        ...(String(historyOrUserText || "").trim() ? [{ role: "user", content: String(historyOrUserText).slice(0, 8000) }] : []),
+        ...(String(assistantText || "").trim() ? [{ role: "assistant", content: String(assistantText).slice(0, 8000) }] : []),
+      ];
+  memory.set(chatId, next.slice(-MAX_HISTORY));
   scheduleSave();
+}
+
+function appendMemory(chatId, userText, assistantText) {
+  saveMemory(chatId, userText, assistantText);
 }
 
 function clearMemory(chatId) {
@@ -69,4 +96,4 @@ function flushNow() {
   }
 }
 
-module.exports = { getMemory, saveMemory, clearMemory, getAllChats, flushNow };
+module.exports = { getMemory, saveMemory, appendMemory, clearMemory, getAllChats, flushNow, _test: { normalizeHistory, memory } };

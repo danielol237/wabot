@@ -2716,6 +2716,8 @@ async function handleAIResponse(sock, msg, text, ctx) {
   const { buildUserContext } = require("../utils/userProfile");
   const profileCtx = buildUserContext(ctx.senderJid, text);
   const memory = getMemory(ctx.chatId);
+  let dialogueAwareness = "";
+  try { dialogueAwareness = require("../tools/conversationAwareness").buildDialogueAwareness(memory, text); } catch (_) {}
   
   // Owner gets special treatment — AI knows who built her
   const { isOwner } = require("../utils/permissions");
@@ -2751,7 +2753,7 @@ async function handleAIResponse(sock, msg, text, ctx) {
   try { revenueContextText = require("../core/productBridge").formatRevenueContext(ctx.revenueContext); } catch (_) {}
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: profileCtx.context + ownerContext + moodContext + personaContext + toneContext + mediaContext + personalizationContext + researchContext + selfModelContext + revenueContextText,
+    userContext: profileCtx.context + ownerContext + moodContext + personaContext + toneContext + mediaContext + personalizationContext + researchContext + selfModelContext + revenueContextText + dialogueAwareness,
     preferences: profileCtx.profile.preferences,
     facts: profileCtx.profile.facts,
   });

@@ -22,6 +22,40 @@ function asksHowVisionWorks(question) {
   return /\b(?:how|why)\s+(?:can|do|are you able to)\s+(?:you|aria)\s+(?:read|see|understand|know)|how did you read|are you seeing this|can you actually see/i.test(String(question || ""));
 }
 
+function fallbackReaction(kind = "image") {
+  return kind === "sticker" ? "Nahhh 😭" : "I see it 😭";
+}
+
+function stripInternalReasoning(value) {
+  let text = String(value || "").replace(/\u0000/g, "").trim();
+  // Some vision endpoints expose hidden reasoning as an XML-style block. If
+  // the provider omits the closing tag, everything after <think> is internal.
+  text = text.replace(/<think\b[^>]*>[\s\S]*?(?:<\/think>|$)/gi, "");
+  text = text.replace(/<analysis\b[^>]*>[\s\S]*?(?:<\/analysis>|$)/gi, "");
+  text = text.replace(/```(?:analysis|reasoning|thinking)[\s\S]*?```/gi, "");
+  return text.replace(/^[ \t]*<(?:think|analysis|reasoning)>[\s\S]*$/gim, "").trim();
+}
+
+function compactVisualReply(value, kind) {
+  const text = stripInternalReasoning(value);
+  if (!text) return fallbackReaction(kind);
+  const reasoningLeak = /(?:the user sent|given the previous context|i need to respond|i should respond|possible angles|possible replies|let me think|the sticker is|the image is likely a reaction)/i.test(text);
+  if (reasoningLeak) {
+    const quoted = text.match(/[“"]([^“”"]{2,220})[”"]/);
+    if (quoted && !/(?:possible|angle|option|should|need to)/i.test(quoted[1])) return quoted[1].trim();
+    return fallbackReaction(kind);
+  }
+  const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
+  const compact = sentences.slice(0, 2).join(" ").trim().slice(0, 280).trim();
+  return compact || fallbackReaction(kind);
+}
+
+function sanitizeVisionReply(value, { kind = "image", question = "" } = {}) {
+  const clean = stripInternalReasoning(value);
+  if (!asksForDetails(question) && !asksHowVisionWorks(question)) return compactVisualReply(clean, kind);
+  return clean.slice(0, 4000).trim() || fallbackReaction(kind);
+}
+
 function buildVisionPrompt({ question = "", kind = "image", history = [], quotedContext = "" } = {}) {
   const userQuestion = cleanText(question, 1200);
   const detailMode = asksForDetails(userQuestion);
@@ -91,7 +125,7 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
 
   if (zai.configured()) {
     const result = await zai.analyzeImage(base64Image, mimeType, prompt, { maxTokens: 1800 });
-    if (result.success) return result.text;
+    if (result.success) return sanitizeVisionReply(result.text, { kind, question });
     console.warn("Z.AI vision error:", result.error);
   }
 
@@ -111,7 +145,7 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
           temperature: 0.65,
         });
         const text = res.choices[0]?.message?.content;
-        if (text) return text.trim();
+        if (text) return sanitizeVisionReply(text, { kind, question });
       } catch (error) {
         console.warn(`Vision AI error (${model}):`, error.message);
         if (!/decommissioned|does not exist|not found/i.test(error.message || "")) break;
@@ -120,7 +154,7 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
   }
 
   const openRouterText = await analyzeWithOpenRouter(base64Image, mimeType, prompt);
-  if (openRouterText) return openRouterText;
+  if (openRouterText) return sanitizeVisionReply(openRouterText, { kind, question });
 
   return "❌ I couldn't read that visual right now. The media reached me, but no vision provider is available or responding.";
 }
@@ -137,5 +171,5 @@ module.exports = {
   analyzeImage,
   respondToMedia,
   extractText,
-  _test: { buildVisionPrompt, asksForDetails, asksHowVisionWorks, OPENROUTER_VISION_MODEL },
+  _test: { buildVisionPrompt, asksForDetails, asksHowVisionWorks, stripInternalReasoning, compactVisualReply, sanitizeVisionReply, fallbackReaction, OPENROUTER_VISION_MODEL },
 };

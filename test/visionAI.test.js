@@ -22,6 +22,21 @@ test("vision prompt explains media interpretation honestly", () => {
   assert.match(prompt, /Do not claim human eyesight/i);
 });
 
+test("leaked reasoning is stripped and bare sticker replies stay short", () => {
+  const leaked = "<think>Possible angles: I should describe the sticker. The user sent a sticker.</think>\n\nThe sticker is a shocked Pepe frog with an open mouth.";
+  const reply = vision._test.sanitizeVisionReply(leaked, { kind: "sticker", question: "" });
+  assert.equal(reply, "Nahhh 😭");
+  assert.equal(reply.includes("<think>"), false);
+  assert.ok(reply.length < 40);
+});
+
+test("detail requests keep useful visual text but remove reasoning markers", () => {
+  const leaked = "<think>Need to inspect carefully.</think>\nIt is a green frog with a wide open mouth and large tearful eyes.";
+  const reply = vision._test.sanitizeVisionReply(leaked, { kind: "sticker", question: "What exactly is in this sticker?" });
+  assert.match(reply, /green frog/i);
+  assert.equal(reply.includes("<think>"), false);
+});
+
 test("vision model selection keeps the visual route separate from coding", () => {
   assert.equal(vision._test.OPENROUTER_VISION_MODEL, "google/gemini-3.1-pro-preview");
 });

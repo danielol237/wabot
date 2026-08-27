@@ -3,6 +3,11 @@ const axios = require("axios");
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 const zai = require("./zaiMedia");
+const providerHealth = require("./providerHealth");
+
+function providerAvailable(name) {
+  try { return providerHealth.isAvailable(name); } catch (_) { return true; }
+}
 
 const VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct", "qwen/qwen3.6-27b"];
 const OPENROUTER_VISION_MODEL = "google/gemini-3.1-pro-preview";
@@ -114,6 +119,7 @@ async function analyzeWithOpenRouter(base64Image, mimeType, prompt) {
     const text = response.data?.choices?.[0]?.message?.content;
     return typeof text === "string" && text.trim() ? text.trim() : null;
   } catch (error) {
+    providerHealth.recordFailure("OpenRouter", error);
     console.warn("OpenRouter vision error:", error.response?.data?.error?.message || error.message);
     return null;
   }
@@ -123,14 +129,20 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
   const kind = options.kind || "image";
   const prompt = options.prompt || buildVisionPrompt({ question, kind, history: options.history, quotedContext: options.quotedContext });
 
-  if (zai.configured()) {
+  if (zai.configured() && providerAvailable("Z.AI")) {
+    const startedAt = Date.now();
     const result = await zai.analyzeImage(base64Image, mimeType, prompt, { maxTokens: 1800 });
-    if (result.success) return sanitizeVisionReply(result.text, { kind, question });
+    if (result.success) {
+      providerHealth.recordSuccess("Z.AI", { latency: Date.now() - startedAt });
+      return sanitizeVisionReply(result.text, { kind, question });
+    }
+    providerHealth.recordFailure("Z.AI", result.error, { latency: Date.now() - startedAt });
     console.warn("Z.AI vision error:", result.error);
   }
 
-  if (groq) {
+  if (groq && providerAvailable("Groq")) {
     for (const model of VISION_MODELS) {
+      const startedAt = Date.now();
       try {
         const res = await groq.chat.completions.create({
           model,
@@ -145,18 +157,28 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
           temperature: 0.65,
         });
         const text = res.choices[0]?.message?.content;
-        if (text) return sanitizeVisionReply(text, { kind, question });
+        if (text) {
+          providerHealth.recordSuccess("Groq", { latency: Date.now() - startedAt });
+          return sanitizeVisionReply(text, { kind, question });
+        }
+        throw new Error("Groq vision returned an empty response");
       } catch (error) {
+        providerHealth.recordFailure("Groq", error);
         console.warn(`Vision AI error (${model}):`, error.message);
-        if (!/decommissioned|does not exist|not found/i.test(error.message || "")) break;
+        continue;
       }
     }
   }
 
   const openRouterText = await analyzeWithOpenRouter(base64Image, mimeType, prompt);
-  if (openRouterText) return sanitizeVisionReply(openRouterText, { kind, question });
-
-  return "❌ I couldn't read that visual right now. The media reached me, but no vision provider is available or responding.";
+  if (openRouterText) {
+    providerHealth.recordSuccess("OpenRouter", { latency: 0 });
+    return sanitizeVisionReply(openRouterText, { kind, question });
+  }
+  if (String(process.env.ZHIPU_API_KEY || process.env.GROQ_API_KEY || process.env.OPENROUTER_API_KEY || "").trim()) {
+    return "I received the visual, but the vision routes are unavailable right now. Send it again in a moment.";
+  }
+  return "I received the visual, but visual analysis is not configured on this deployment yet.";
 }
 
 async function respondToMedia(base64Image, mimeType, options = {}) {

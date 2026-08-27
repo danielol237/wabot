@@ -4,7 +4,31 @@ function configured(name) {
   return Boolean(String(process.env[name] || "").trim());
 }
 
+let runtimeCache = { at: 0, value: null };
+function runtimeStatus() {
+  if (runtimeCache.value && Date.now() - runtimeCache.at < 30_000) return runtimeCache.value;
+  let health = null;
+  try { health = require("./providerHealth").getHealth(); } catch (_) {}
+  let media = null;
+  try { media = require("../utils/mediaRuntime").inspectYtDlp(); } catch (_) { media = { available: false, error: "media runtime unavailable" }; }
+  const healthResults = health?.results || [];
+  const healthy = healthResults.filter((item) => item.ok).map((item) => item.name);
+  const keyed = ["OPENROUTER_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "CEREBRAS_API_KEY"].filter(configured);
+  const value = {
+    healthyProviders: healthy,
+    configuredProviders: keyed,
+    ytDlp: media,
+    visionReady: configured("ZHIPU_API_KEY") || configured("GROQ_API_KEY") || configured("OPENROUTER_API_KEY"),
+    vercelReady: configured("VERCEL_TOKEN"),
+    webReady: configured("TAVILY_API_KEY") || configured("BRAVE_API_KEY"),
+  };
+  runtimeCache = { at: Date.now(), value };
+  return value;
+}
+
 function getCapabilityProfile() {
+  const runtime = runtimeStatus();
+  const providerLabel = runtime.healthyProviders.length ? `AI provider health confirmed: ${runtime.healthyProviders.join(", ")}` : runtime.configuredProviders.length ? "AI credentials exist, but live provider health has not been confirmed" : "AI provider chain needs a configured credential";
   return {
     immediate: [
       "Natural conversation with persistent memory across short-term and durable history, profile facts, preferences, mood, and dialogue-loop awareness",
@@ -17,16 +41,18 @@ function getCapabilityProfile() {
       "Reminders, recurring tasks, durable missions, project tracking, academy/LMS workflows, and owner-scoped Atlas project operations",
     ],
     conditional: [
-      `${configured("OPENROUTER_API_KEY") || configured("GROQ_API_KEY") || configured("GEMINI_API_KEY") || configured("CEREBRAS_API_KEY") ? "AI provider chain configured" : "AI provider chain needs a configured credential"}`,
-      `${configured("ZHIPU_API_KEY") || configured("GROQ_API_KEY") || configured("OPENROUTER_API_KEY") ? "visual analysis has a provider available" : "visual analysis needs ZHIPU_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY"}`,
-      `${configured("VERCEL_TOKEN") ? "Vercel deployment credential is available" : "Vercel hosting needs VERCEL_TOKEN"}`,
-      `${configured("TAVILY_API_KEY") || configured("BRAVE_API_KEY") ? "live web search is configured" : "live web search needs TAVILY_API_KEY or BRAVE_API_KEY"}`,
+      providerLabel,
+      `${runtime.visionReady ? "visual analysis has a configured provider" : "visual analysis needs ZHIPU_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY"}`,
+      `${runtime.ytDlp.available ? `media download runtime ready (${runtime.ytDlp.version || "yt-dlp"})` : "media download runtime is unavailable until yt-dlp is installed"}`,
+      `${runtime.vercelReady ? "Vercel deployment credential is configured" : "Vercel hosting needs VERCEL_TOKEN"}`,
+      `${runtime.webReady ? "live web search is configured" : "live web search needs TAVILY_API_KEY or BRAVE_API_KEY"}`,
     ],
     boundaries: [
       "Do not claim real-time 3D game creation, arbitrary Cloudflare hosting, unrestricted downloads, or external actions unless the corresponding installed tool and credential actually exist.",
       "Do not claim to be conscious, biologically human, or secretly independent; expressive personality is not proof of subjective experience.",
       "Do not claim a website was deployed, a message was sent, or a file was changed unless the operation returned success.",
     ],
+    runtime,
     source: ACTUAL_CAPABILITIES,
   };
 }

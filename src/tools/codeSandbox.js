@@ -95,6 +95,15 @@ async function runSandboxed(code, lang, opts = {}) {
       settled = true;
       clearTimeout(timer);
       try { fs.unlinkSync(filePath); } catch (_) {}
+      try {
+        require("../utils/eventLog").trackOperation("tool", "code-execution", result.success ? "succeeded" : "failed", {
+          language: lang,
+          sandboxed: Boolean(result.sandboxed),
+          timedOut: Boolean(result.timedOut),
+          blocked: Boolean(result.blocked),
+          exitCode: result.exitCode ?? null,
+        });
+      } catch (_) {}
       resolve(result);
     };
     const killWithReason = (reason) => {
@@ -147,7 +156,16 @@ function runUnsafe(code, lang, opts = {}) {
     exec(`${cmd} "${filePath}"`, { timeout: (opts.timeout || 15) * 1000, maxBuffer: 1024 * 500 }, (err, stdout, stderr) => {
       try { fs.unlinkSync(filePath); } catch (_) {}
       const output = (stdout || stderr || "(no output)").slice(0, 4000);
-      resolve({ success: !err, output, sandboxed: false, exitCode: err ? (typeof err.code === "number" ? err.code : null) : 0 });
+      const result = { success: !err, output, sandboxed: false, exitCode: err ? (typeof err.code === "number" ? err.code : null) : 0 };
+      try {
+        require("../utils/eventLog").trackOperation("tool", "code-execution", result.success ? "succeeded-unsandboxed" : "failed-unsandboxed", {
+          language: lang,
+          sandboxed: false,
+          explicitOptIn: true,
+          exitCode: result.exitCode,
+        });
+      } catch (_) {}
+      resolve(result);
     });
   });
 }

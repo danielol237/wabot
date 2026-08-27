@@ -2,11 +2,22 @@ const Groq = require("groq-sdk");
 const axios = require("axios");
 const minimax = require("./minimax");
 const { log, error, warn } = require("../utils/logger");
+const providerHealth = require("./providerHealth");
 
 // Tracks which provider ACTUALLY answered the last AI call (set right before each
 // successful return in getAIResponseImpl). The dashboard telemetry reads this so
 // it reports the real responder, not just the first configured key.
 let lastProvider = "unknown";
+
+function markProviderSuccess(name, startedAt) {
+  try { providerHealth.recordSuccess(name, { latency: Date.now() - startedAt }); } catch (_) {}
+}
+function markProviderFailure(name, errorValue, startedAt) {
+  try { providerHealth.recordFailure(name, errorValue, { latency: Date.now() - startedAt }); } catch (_) {}
+}
+function providerAvailable(name) {
+  try { return providerHealth.isAvailable(name); } catch (_) { return true; }
+}
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 
@@ -183,6 +194,7 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
   const requestNeedsLargeOutput = needsLargeOutput(String(userMessage || ""));
   const maxTokens = requestNeedsLargeOutput ? 12000 : 2048;
   let lastError = null;
+  const requestStartedAt = Date.now();
 const { chatGPT } = require("./gpt5Cli");
 
 // GPT-5 remains the first provider by default. Set GPT5_ENABLED=0 only to skip it.
@@ -193,14 +205,17 @@ const { chatGPT } = require("./gpt5Cli");
       if (isUsableProviderText(result.text)) {
         const content = withTruncationNotice(result.text, null, "length", requestNeedsLargeOutput);
         lastProvider = "gpt5";
+        markProviderSuccess("GPT-5", requestStartedAt);
         return content;
       } else if (result.error) {
         error("GPT-5 error:", result.error);
         lastError = result.error;
+        markProviderFailure("GPT-5", result.error, requestStartedAt);
       }
     } catch (err) {
       error("GPT-5 exception:", err.message);
       lastError = err.message;
+      markProviderFailure("GPT-5", err, requestStartedAt);
     }
   }
 
@@ -216,12 +231,14 @@ const { chatGPT } = require("./gpt5Cli");
       if (isUsableProviderText(result.text)) {
         const content = withTruncationNotice(result.text, result.finishReason, "length", requestNeedsLargeOutput);
         lastProvider = "minimax";
+        markProviderSuccess("MiniMax", requestStartedAt);
         return content;
       }
       throw new Error("MiniMax returned an unusable response");
     } catch (err) {
       const errMsg = err.response?.data?.error?.message || err.response?.data?.message || err.message || "unknown MiniMax error";
       lastError = errMsg;
+      markProviderFailure("MiniMax", errMsg, requestStartedAt);
       error("MiniMax error:", errMsg);
     }
   }
@@ -234,11 +251,14 @@ const { chatGPT } = require("./gpt5Cli");
     if (isUsableProviderText(geminiResult.text)) {
       const content = withTruncationNotice(geminiResult.text, null, "length", requestNeedsLargeOutput);
       lastProvider = "gemini-unofficial";
+      markProviderSuccess("Gemini", requestStartedAt);
       return content;
     } else if (geminiResult.error) {
+      markProviderFailure("Gemini", geminiResult.error, requestStartedAt);
       error("Gemini unofficial error:", geminiResult.error);
     }
   } catch (err) {
+    markProviderFailure("Gemini", err, requestStartedAt);
     error("Gemini unofficial exception:", err.message);
   }
 
@@ -253,18 +273,21 @@ const { chatGPT } = require("./gpt5Cli");
     if (isUsableProviderText(openapisResult.text)) {
       const content = withTruncationNotice(openapisResult.text, null, "length", requestNeedsLargeOutput);
       lastProvider = "openapis";
+      markProviderSuccess("OpenAPIs", requestStartedAt);
       return content;
-    } else if (openapisResult.retry) {
+    } else if (openapisResult.retry || openapisResult.error) {
+      markProviderFailure("OpenAPIs", openapisResult.error || "retry requested", requestStartedAt);
       error("OpenAPIs failing, will try next provider");
     }
   } catch (err) {
+    markProviderFailure("OpenAPIs", err, requestStartedAt);
     error("OpenAPIs exception:", err.message);
   }
 
   // Try Cerebras first — 1M tokens/day free, the highest ceiling of any free
   // provider we've found, added after Gemini's daily quota kept getting hit
   // during normal testing/usage.
-  if (process.env.CEREBRAS_API_KEY) {
+  if (process.env.CEREBRAS_API_KEY && providerAvailable("Cerebras")) {
     for (const model of CEREBRAS_MODELS) {
       try {
         const res = await axios.post(
@@ -294,10 +317,12 @@ const { chatGPT } = require("./gpt5Cli");
         if (!isUsableProviderText(rawContent)) throw new Error("Cerebras returned an unusable response");
         const content = withTruncationNotice(rawContent, finishReason, "length", requestNeedsLargeOutput);
         lastProvider = "cerebras";
+        markProviderSuccess("Cerebras", requestStartedAt);
         return content;
       } catch (err) {
         error(`Cerebras error (${model}):`, err.response?.data?.error?.message || err.message);
         lastError = err.response?.data?.error?.message || err.message || "Cerebras request failed";
+        markProviderFailure("Cerebras", lastError, requestStartedAt);
         // Try every Cerebras model before falling through to Gemini.
         continue;
       }
@@ -307,7 +332,7 @@ const { chatGPT } = require("./gpt5Cli");
   // Try Gemini second — bigger context window (1M tokens) than Groq,
   // genuinely useful for the app builder which needs to track a lot of project context.
   // Uses the NATIVE generateContent API so the newer AQ.Ab8... keys work.
-  if (process.env.GEMINI_API_KEY) {
+  if (process.env.GEMINI_API_KEY && providerAvailable("Gemini")) {
     for (const model of GEMINI_MODELS) {
       try {
         // Build the native Gemini "contents" array from the OpenAI-style messages.
@@ -340,10 +365,12 @@ const { chatGPT } = require("./gpt5Cli");
         if (!isUsableProviderText(rawContent)) throw new Error("Gemini returned an unusable response");
         const content = withTruncationNotice(rawContent, candidate?.finishReason, "MAX_TOKENS", requestNeedsLargeOutput);
         lastProvider = "gemini";
+        markProviderSuccess("Gemini", requestStartedAt);
         return content;
       } catch (err) {
         error(`Gemini error (${model}):`, err.response?.data?.error?.message || err.message);
         lastError = err.response?.data?.error?.message || err.message || "Gemini request failed";
+        markProviderFailure("Gemini", lastError, requestStartedAt);
         // Continue through every configured Gemini model, then fall through.
         continue;
       }
@@ -357,7 +384,7 @@ const { chatGPT } = require("./gpt5Cli");
   // gets a safer, lower cap than Gemini, which has much more headroom.
   const groqMaxTokens = Math.min(maxTokens, 6000);
 
-  if (groq) {
+  if (groq && providerAvailable("Groq")) {
     for (const model of GROQ_MODELS) {
       try {
         const res = await groq.chat.completions.create({
@@ -371,10 +398,12 @@ const { chatGPT } = require("./gpt5Cli");
         if (!isUsableProviderText(rawContent)) throw new Error("Groq returned an unusable response");
         const content = withTruncationNotice(rawContent, finishReason, "length", requestNeedsLargeOutput);
         lastProvider = "groq";
+        markProviderSuccess("Groq", requestStartedAt);
         return content;
       } catch (err) {
         error(`Groq error (${model}):`, err.message);
         lastError = err.message || "Groq request failed";
+        markProviderFailure("Groq", lastError, requestStartedAt);
         // Try every Groq model before continuing to OpenRouter.
         continue;
       }
@@ -384,7 +413,7 @@ const { chatGPT } = require("./gpt5Cli");
   // Fallback to OpenRouter — the previous model ID (rouge-rose) was retired.
   // Free OpenRouter models rate-limit hard (shared quota), so the module-scope
   // OPENROUTER_MODELS chain lets a rate-limited model fall through to the next.
-  if (process.env.OPENROUTER_API_KEY) {
+  if (process.env.OPENROUTER_API_KEY && providerAvailable("OpenRouter")) {
     for (const model of OPENROUTER_MODELS) {
       try {
         const res = await axios.post(
@@ -405,10 +434,12 @@ const { chatGPT } = require("./gpt5Cli");
         const rawContent = res.data.choices[0]?.message?.content;
         if (!isUsableProviderText(rawContent)) throw new Error("OpenRouter returned an unusable response");
         lastProvider = "openrouter";
+        markProviderSuccess("OpenRouter", requestStartedAt);
         return withTruncationNotice(rawContent, null, "length", requestNeedsLargeOutput);
       } catch (err) {
         error(`OpenRouter error (${model}):`, err.response?.data?.error?.message || err.message);
         lastError = (err.response?.data?.error?.message || err.message || "") + ` [${model}]`;
+        markProviderFailure("OpenRouter", lastError, requestStartedAt);
         // Keep trying every OpenRouter model; quota, auth, network, and model
         // failures should not prevent the remaining fallback routes.
         continue;

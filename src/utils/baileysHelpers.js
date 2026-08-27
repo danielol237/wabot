@@ -132,22 +132,35 @@ function shouldSelfMention(inputText, responseText) {
   return openingSelfReference || userSummoning;
 }
 
+function sanitizeOutboundText(text) {
+  return String(text || "")
+    .replace(/<think\b[^>]*>[\s\S]*?(?:<\/think>|$)/gi, "")
+    .replace(/<analysis\b[^>]*>[\s\S]*?(?:<\/analysis>|$)/gi, "")
+    .trim();
+}
+
 async function reply(sock, msg, text, options = {}) {
-  if (!text) return;
+  const cleanText = sanitizeOutboundText(text);
+  if (!cleanText) return { success: false, error: "empty outbound text" };
   const chatId = msg.key.remoteJid;
   const mentions = options.mentions || [];
   try {
-    if (text.length <= 4000) {
-      await sock.sendMessage(chatId, { text, mentions }, { quoted: msg });
-      return;
+    if (cleanText.length <= 4000) {
+      await sock.sendMessage(chatId, { text: cleanText, mentions }, { quoted: msg });
+      return { success: true, chunks: 1 };
     }
-    const chunks = splitMessage(text, 3900);
+    const chunks = splitMessage(cleanText, 3900);
     for (let i = 0; i < chunks.length; i++) {
       await sock.sendMessage(chatId, { text: chunks[i], mentions: i === 0 ? mentions : [] });
-      await sleep(400);
     }
+    return { success: true, chunks: chunks.length };
   } catch (err) {
-    error("Reply error:", err.message);
+    const safeError = String(err?.message || "send failed").slice(0, 240);
+    error("Reply error:", safeError);
+    try {
+      require("./eventLog").trackOperation("whatsapp-reply", "send", "failed", { chatId, error: safeError });
+    } catch (_) {}
+    return { success: false, error: safeError };
   }
 }
 
@@ -264,4 +277,5 @@ module.exports = {
   isQuotingBotMessage, getQuotedMessageText,
   hasMedia, hasVoiceNote, downloadMediaFromMsg, downloadQuotedMedia,
   findQuotedMediaReference,
+  _test: { sanitizeOutboundText },
 };

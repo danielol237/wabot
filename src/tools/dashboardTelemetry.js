@@ -126,6 +126,9 @@ function liveStatus() {
     errors5m: errs,
     messages: stats?.messages || 0,
     commands: stats?.commands || 0,
+    providerHealth: (() => {
+      try { return require("./providerHealth").getHealth(); } catch (_) { return { results: [], runtime: {}, lastCheckedAt: null, checking: false }; }
+    })(),
   };
 }
 

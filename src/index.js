@@ -119,6 +119,7 @@ function htmlEsc(value) {
 // WhatsApp reconnect (audit #35). Reconnects only need to re-wire the socket-
 // dependent services (autonomous, missions, scheduler, heartbeat, ...).
 let servicesStarted = false;
+let providerHealthStarted = false;
 // Centralized heartbeat tracking — the interval is attached to a socket for
 // convenience, but we clear the previous one on close/reconnect so repeated
 // reconnects never stack up orphaned ping timers.
@@ -247,6 +248,16 @@ async function startBot() {
         } catch (e) {
           error("Memory curator init error:", e.message);
         }
+      }
+
+      // Probe configured AI providers once per process. This is asynchronous and
+      // never delays WhatsApp readiness or message handling.
+      if (!providerHealthStarted) {
+        providerHealthStarted = true;
+        require("./tools/providerHealth").checkAll().then((results) => {
+          const summary = results.map((item) => `${item.name}:${item.ok ? "ok" : item.error || "failed"}`).join(", ");
+          try { require("./utils/eventLog").track("provider-health", "AI provider health checked", { summary }); } catch (_) {}
+        }).catch((e) => error("Provider health check error:", e.message));
       }
 
       // Start autonomous mode — ARIA sends proactive messages

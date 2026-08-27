@@ -61,8 +61,17 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // "Aria"/"ARIA" should not start multiple AI calls in the same group.
   if (!claimInboundMessage(msg.key?.id, chatId, senderJid, text)) return;
 
-  // ── Dashboard telemetry (real inbound messages only) ────────
+  // ── Dashboard telemetry and structured event memory ─────────
   try { require("../tools/dashboardTelemetry").record("message"); } catch (_) {}
+  try {
+    require("../utils/eventLog").trackConversationEvent(chatId, "inbound", isGroup ? "Group message received" : "Direct message received", {
+      senderJid,
+      hasText: Boolean(text),
+      hasMedia: hasMedia(msg),
+      hasVoice: hasVoiceNote(msg),
+      addressed: Boolean(triggeredByName(text)),
+    });
+  } catch (_) {}
 
   // ── Platform identity + usage bridge ───────────────────────
   // Contacts are normalized into platform identities, while message usage is

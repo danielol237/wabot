@@ -2794,11 +2794,18 @@ async function handleAIResponse(sock, msg, text, ctx) {
       extractFromMessage(ctx.senderJid, ctx.senderName, text);
     } catch (_) {}
 
-    // Humanized send (reactions, splitting, typos, occasional delay). When
-    // ARIA is naturally summoned or names herself, carry a real WhatsApp
-    // mention payload without putting an @number in the visible text.
+    // Immediate single-message send. When ARIA is naturally summoned or names
+    // herself, carry a real WhatsApp mention payload without visible @ text.
     const selfMentions = ctx.isGroup && shouldSelfMention(text, response) ? getBotMentionJids(sock) : [];
-    humanizeAndSend(sock, msg, response, ctx.senderJid, ctx.senderName, isOwnerCtx, { mentions: selfMentions });
+    await humanizeAndSend(sock, msg, response, ctx.senderJid, ctx.senderName, isOwnerCtx, { mentions: selfMentions });
+    try {
+      require("./eventLog").trackConversationEvent(ctx.chatId, "outbound", "ARIA replied", {
+        senderJid: ctx.senderJid,
+        providerResponse: true,
+        intent: intent || "conversation",
+        selfMention: selfMentions.length > 0,
+      });
+    } catch (_) {}
     saveMemory(ctx.chatId, text, response);
     trackInteraction(ctx.senderJid, text);
     if (process.env.DEBUG_REPLIES === "true") {

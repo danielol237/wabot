@@ -4,20 +4,38 @@ const axios = require("axios");
 // Brave second (2k free queries/month, good general quality), DuckDuckGo scraping
 // as last resort (known unreliable — kept only so search never fully dies if
 // both real APIs are unavailable).
-async function searchWeb(query) {
-  if (process.env.TAVILY_API_KEY) {
-    const result = await tavilySearch(query);
+const { runOperation } = require("../utils/operationGuard");
+
+async function guardedSearch(name, task) {
+  try {
+    return await runOperation(name, task, {
+      timeoutMs: 15_000,
+      attempts: 2,
+      retryIf: (value) => value?.success === false,
+      retryDelayMs: 250,
+    });
+  } catch (error) {
+    return { success: false, error: error?.message || "search provider failed" };
+  }
+}
+
+async function searchWeb(query, dependencies = {}) {
+  const tavilyTask = dependencies.tavily;
+  const braveTask = dependencies.brave;
+  const fallbackTask = dependencies.fallback || searchWebFallback;
+  if (tavilyTask || process.env.TAVILY_API_KEY) {
+    const result = await guardedSearch("web-search:tavily", tavilyTask || (() => tavilySearch(query)));
     if (result.success) return result.output;
     console.error("Tavily failed, trying Brave:", result.error);
   }
 
-  if (process.env.BRAVE_API_KEY) {
-    const result = await braveSearch(query);
+  if (braveTask || process.env.BRAVE_API_KEY) {
+    const result = await guardedSearch("web-search:brave", braveTask || (() => braveSearch(query)));
     if (result.success) return result.output;
     console.error("Brave failed, falling back to scraping:", result.error);
   }
 
-  return await searchWebFallback(query);
+  return await fallbackTask(query);
 }
 
 async function tavilySearch(query) {
@@ -103,5 +121,5 @@ async function searchWebFallback(query) {
   }
 }
 
-module.exports = { searchWeb };
+module.exports = { searchWeb, _test: { guardedSearch, searchWithProviders: searchWeb } };
 

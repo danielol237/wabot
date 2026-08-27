@@ -25,11 +25,34 @@ function codingProviderError(message, code = "CODING_PROVIDER_ERROR") {
   return error;
 }
 
+function credentialLooksUsable() {
+  const key = String(process.env.OPENROUTER_API_KEY || "").trim();
+  return /^sk-or-v1-[A-Za-z0-9_-]{20,}$/.test(key);
+}
+
+function normalizeProviderFailure(error) {
+  const status = error?.response?.status;
+  const detail = String(error?.response?.data?.error?.message || error?.response?.data?.message || error?.message || "request failed").trim();
+  if (status === 401 || /user not found|invalid api key|invalid authentication|unauthorized|authentication failed/i.test(detail)) {
+    return codingProviderError("OpenRouter rejected the coding credential. Set a valid OPENROUTER_API_KEY (an OpenRouter key normally starts with sk-or-v1-) in Render, then redeploy ARIA.", "CODING_PROVIDER_AUTH_FAILED");
+  }
+  if (status === 404 || /model.*(?:not found|does not exist)|unknown model/i.test(detail)) {
+    return codingProviderError(`OpenRouter could not access the configured coding model ${CODING_MODEL}. Check the account/model route and retry.`, "CODING_PROVIDER_MODEL_UNAVAILABLE");
+  }
+  return codingProviderError(`The dedicated coding provider failed: ${detail.slice(0, 500)}`, "CODING_PROVIDER_REQUEST_FAILED");
+}
+
 async function generateCodingText(prompt, options = {}) {
   if (!configured()) {
     throw codingProviderError(
       "The dedicated coding provider is not configured. Set OPENROUTER_API_KEY in the bot runtime, then retry the build.",
       "CODING_PROVIDER_NOT_CONFIGURED"
+    );
+  }
+  if (!credentialLooksUsable()) {
+    throw codingProviderError(
+      "OPENROUTER_API_KEY is present but does not look like a valid OpenRouter key. Replace it with a real key beginning with sk-or-v1- and redeploy the bot.",
+      "CODING_PROVIDER_INVALID_KEY"
     );
   }
 
@@ -75,11 +98,7 @@ async function generateCodingText(prompt, options = {}) {
     return content.trim();
   } catch (error) {
     if (error?.provider === CODING_PROVIDER) throw error;
-    const providerMessage = error.response?.data?.error?.message || error.message || "request failed";
-    throw codingProviderError(
-      `The dedicated coding provider failed: ${String(providerMessage).slice(0, 500)}`,
-      "CODING_PROVIDER_REQUEST_FAILED"
-    );
+    throw normalizeProviderFailure(error);
   }
 }
 
@@ -87,5 +106,5 @@ module.exports = {
   configured,
   providerStatus,
   generateCodingText,
-  _test: { CODING_PROVIDER, CODING_MODEL, CODING_ENDPOINT, codingProviderError },
+  _test: { CODING_PROVIDER, CODING_MODEL, CODING_ENDPOINT, codingProviderError, credentialLooksUsable, normalizeProviderFailure },
 };

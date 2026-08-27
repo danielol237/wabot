@@ -48,7 +48,8 @@ test("commandRouter: natural hidetag and tag-all requests resolve to group comma
 
   const builderSource = require("fs").readFileSync(require("path").join(__dirname, "../src/utils/commandRouter.js"), "utf8");
   assert.match(builderSource, /buildProject\(request, ctx\.senderName, ctx\.chatId, onProgress\)/);
-  assert.match(builderSource, /buildProject\(text, ctx\.senderName, ctx\.chatId, onProgress\)/);
+  assert.match(builderSource, /buildProject\(request, ctx\.senderName, ctx\.chatId, onProgress\)/);
+  assert.match(builderSource, /build: async \(sock, msg, text, ctx\) => handleBuild\(sock, msg, text, ctx\)/);
 });
 
 test("commandRouter: hidetag sends hidden mentions when ARIA is a group admin", async () => {
@@ -85,4 +86,24 @@ test("commandRouter: zero command collisions (audit #1)", () => {
   assert.strictEqual(collisions.length, 0, `expected 0 command collisions, got ${collisions.length}: ${collisions.join("; ")}`);
   // Sanity: registry is non-empty.
   assert.ok(commands.length > 10, "registry has a healthy number of commands");
+});
+
+test("project reporting formatters produce useful WhatsApp text", () => {
+  const { formatProjectStatus, formatProjectList, formatProjectMutation, formatBuildResult } = require("../src/utils/commandRouter")._test;
+  const status = formatProjectStatus({
+    project: { id: "a1b2c3d4", goal: "FarmShield", status: "done", files: [{ path: "index.html", status: "done" }], deployment: { target: "preview", url: "https://example.vercel.app" } },
+    progress: { done: 1, total: 1, percent: 100 },
+  });
+  assert.match(status, /a1b2c3d4/);
+  assert.match(status, /FarmShield/);
+  assert.match(status, /https:\/\/example\.vercel\.app/);
+  assert.match(formatProjectList([{ id: "a1b2c3d4", status: "done", goal: "FarmShield", progress: { done: 1, total: 1 } }]), /1\/1 files/);
+  assert.equal(formatProjectMutation(true, "ok"), "ok");
+  assert.match(formatBuildResult({ success: true, projectId: "a1b2c3d4", fileCount: 3, browserSmoke: { success: true }, buildVerification: "passed", downloadUrl: "https://files.example/project.zip" }), /a1b2c3d4/);
+});
+
+test("commandRouter: direct GitHub delivery follow-up resolves to deploy", () => {
+  const { detectIntent, resolveNaturalAction } = require("../src/utils/commandRouter");
+  assert.equal(detectIntent("push the verified project to GitHub"), "deploy");
+  assert.equal(resolveNaturalAction("ARIA, push the verified project to GitHub")?.command?.name, "deploy");
 });

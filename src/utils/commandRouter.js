@@ -64,7 +64,7 @@ const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
 
 const { setReminder } = require("../tools/reminders");
-const { buildProject, deployProject, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
+const { buildProject, deployProject, publishProjectToGitHub, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
 const { handleEngineeringRequest } = require("../tools/engineeringSystem");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
 const { handleAriaLifeFeature } = require("../tools/ariaLifeFeatures");
@@ -123,7 +123,7 @@ const INTENTS = {
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
   hidetag: ["hidetag", "hide tag", "hide-tag", "tag everyone silently", "mention everyone silently", "silently tag everyone"],
   tagall: ["tag everyone", "tag everybody", "tag all members", "mention everyone", "mention everybody", "mention all members"],
-  deploy: ["deploy", "deploy it", "deploy through vercel", "host it", "host this", "host through vercel", "publish it", "put it online"],
+  deploy: ["deploy", "deploy it", "deploy through vercel", "host it", "host this", "host through vercel", "publish it", "put it online", "push to github", "push this to github", "push the project to github", "push the verified project to github", "create a github repo", "publish on github", "upload to github", "send it to github"],
   edit: ["edit", "edit this", "change the file", "update the file", "fix the file"],
   github: ["on github", "look on github", "github search", "search github", "search on github", "look up on github", "find it on github", "git hub"],
   reddit: ["on reddit", "look on reddit", "reddit search", "search reddit", "find it on reddit"],
@@ -346,6 +346,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 // ── Intent detection ──────────────────────────────────────────
 function detectIntent(text) {
   const lower = text.toLowerCase().trim();
+  if (/^(?:push|publish|upload|send)\s+(?:the\s+)?(?:verified\s+)?(?:project|build|artifact)\s+(?:to|on)\s+github\b/i.test(lower)) return "deploy";
   for (const [intent, patterns] of Object.entries(INTENTS)) {
     for (const pattern of patterns) {
       // Only match clear intent at the START of the message, never mid-sentence.
@@ -391,7 +392,7 @@ function naturalArgs(intent, text) {
     video: /^(?:please\s+)?(?:generate|create|make|produce|render|animate|give me|show me)(?:\s+(?:a|an|me|my|the|this|that|some|damn|fucking))*\s+(?:video|clip|film|animation|movie)\s*(?:of\s+)?/i,
     music: /^(?:please\s+)?(?:generate|create|make|produce|compose)(?:\s+(?:a|an|me|my|the|this|that|some|music))*\s+/i,
     voiceGenerate: /^(?:please\s+)?(?:generate|create|make|produce|record|narrate)(?:\s+(?:a|an|me|my|the|this|that|some))*\s+(?:voice|speech|audio|narration)\s*/i,
-    build: /^(?:please\s+)?(?:build|create|make)(?:\s+me)?(?:\s+(?:a|an))?\s*/i,
+    build: /^(?:please\s+)?(?:build|create|make)(?:\s+me)?(?:\s+(?:an|a))?\s*/i,
     deploy: /^(?:please\s+)?(?:deploy|host|publish)(?:\s+(?:it|this|the project|through vercel|on vercel))?\s*/i,
     delegate: /^(?:please\s+)?(?:delegate|orchestrate|hand this off)(?:\s+(?:this|that|task|mission))?\s*/i,
     agent: /^(?:please\s+)?(?:figure out|plan and|research and|find and compare|deep dive on)\s*/i,
@@ -2006,13 +2007,48 @@ function formatBuildResult(result) {
   if (result.success === false) return "❌ " + (result.error || "Build failed.");
   if (result.success && result.downloadUrl) {
     let t = "✅ *Project built!*\n";
+    if (result.projectId) t += `🆔 Project: \`${result.projectId}\`\n`;
     if (result.fileCount) t += `📄 ${result.fileCount} file(s)\n`;
     if (result.warnings?.length) t += `⚠️ ${result.warnings.length} file(s) with warnings\n`;
     if (result.previewUrl) t += `🌐 Preview: ${result.previewUrl}\n`;
+    if (result.browserSmoke?.success) t += `🖥️ Browser check: verified\n`;
+    if (result.buildVerification === "passed") t += `🧪 Build check: passed\n`;
     t += `📦 Download: ${result.downloadUrl}`;
     return t;
   }
   return JSON.stringify(result).slice(0, 1500);
+}
+
+function formatProjectStatus(result) {
+  if (!result) return "No active project found.";
+  const project = result.project || {};
+  const progress = result.progress || {};
+  const files = Array.isArray(project.files) ? project.files : [];
+  const done = files.filter((file) => ["done", "done_with_warning"].includes(file.status)).length;
+  const failed = files.filter((file) => file.status === "failed").length;
+  const fileLines = files.slice(0, 12).map((file) => `${file.status === "failed" ? "❌" : ["done", "done_with_warning"].includes(file.status) ? "✅" : "⏳"} ${file.path}`).join("\n");
+  let text = `📊 *Project status*\n\n🆔 \`${project.id || "unknown"}\`\n🎯 ${project.goal || "Untitled project"}\nState: *${project.status || "unknown"}*\nProgress: *${done}/${progress.total || files.length}* (${progress.percent || 0}%)`;
+  if (failed) text += `\nFailed files: ${failed}`;
+  if (fileLines) text += `\n\n${fileLines}`;
+  if (project.deployment?.url) text += `\n\n🌐 ${project.deployment.target || "preview"}: ${project.deployment.url}`;
+  return text;
+}
+
+function formatProjectList(projects) {
+  if (!Array.isArray(projects) || projects.length === 0) return "No projects yet. Say “build a website for …” to start one.";
+  return `📚 *Your projects*\n\n${projects.slice(0, 20).map((project) => {
+    const progress = project.progress || {};
+    return `• \`${project.id}\` — *${project.status || "unknown"}* — ${progress.done || 0}/${progress.total || 0} files — ${String(project.goal || "Untitled").slice(0, 100)}`;
+  }).join("\n")}`;
+}
+
+function formatProjectMutation(result, successMessage) {
+  if (result === true) return successMessage;
+  if (result === false || result == null) return "❌ No matching active project was found.";
+  if (typeof result === "string") return result;
+  if (result.success === false) return `❌ ${result.error || "Project operation failed."}`;
+  if (result.success === true && result.message) return result.message;
+  return successMessage;
 }
 
 async function handleEngineering(sock, msg, args, ctx) {
@@ -2033,8 +2069,10 @@ async function handleBuild(sock, msg, args, ctx) {
   // Treat “build ... and deploy on Vercel” as one explicit owner request. The
   // project must still pass the builder’s deterministic repair and real build
   // gates before the deployment step is attempted.
+  const githubRequested = /\b(?:push|publish|upload|send)\b(?:\s+this|\s+it|\s+the\s+project)?\s+(?:to|on)\s+github|\bcreate\s+(?:a\s+)?github\s+repo/i.test(request);
   const deployRequested = /\s+(?:and\s+)?(?:deploy|publish|host)(?:\s+(?:it|this|the\s+project))?(?:\s+(?:on|through)\s+vercel)?\s*$/i.test(request);
   if (deployRequested) request = request.replace(/\s+(?:and\s+)?(?:deploy|publish|host)(?:\s+(?:it|this|the\s+project))?(?:\s+(?:on|through)\s+vercel)?\s*$/i, "").trim();
+  if (githubRequested) request = request.replace(/\s+(?:and\s+)?(?:push|publish|upload|send)\b(?:\s+this|\s+it|\s+the\s+project)?\s+(?:to|on)\s+github\s*$/i, "").replace(/\s+and\s+create\s+(?:a\s+)?github\s+repo\s*$/i, "").trim();
   if (!request) return reply(sock, msg, "Tell me what to build before asking me to deploy it.");
 
   await react(sock, msg, "🏗️");
@@ -2043,21 +2081,34 @@ async function handleBuild(sock, msg, args, ctx) {
     try { await reply(sock, msg, `⏳ ${update}`); } catch (_) {}
   };
   const result = await buildProject(request, ctx.senderName, ctx.chatId, onProgress);
-  if (!result.success || !deployRequested) return reply(sock, msg, formatBuildResult(result));
-  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, `${formatBuildResult(result)}\n\n⚠️ The build passed, but Vercel deployment is unavailable because VERCEL_TOKEN is not configured in the runtime.`);
-  await reply(sock, msg, `${formatBuildResult(result)}\n\n🌐 Build verified. Deploying the verified project to Vercel...`);
+  if (!result.success) return reply(sock, msg, formatBuildResult(result));
+  let finalText = formatBuildResult(result);
+  if (githubRequested) {
+    await reply(sock, msg, `${finalText}\n\n🐙 Build verified. Creating a private GitHub repository and uploading the checked artifact...`);
+    const published = await publishProjectToGitHub(ctx.chatId, result.projectId, {});
+    if (!published.success) finalText += `\n\n⚠️ GitHub delivery was not completed: ${published.error}`;
+    else finalText += `\n\n🐙 GitHub repository: ${published.url}\n🧾 Repository files: ${published.fileCount}${published.commit ? `\nCommit: \`${published.commit.slice(0, 12)}\`` : ""}`;
+  }
+  if (!deployRequested) return reply(sock, msg, finalText);
+  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, `${finalText}\n\n⚠️ The build passed, but Vercel deployment is unavailable because VERCEL_TOKEN is not configured in the runtime.`);
+  await reply(sock, msg, `${finalText}\n\n🌐 Build verified. Deploying the verified project to Vercel...`);
   const deployment = await deployProject(ctx.chatId, result.projectId || null, { target: "preview" });
   if (!deployment.success) return reply(sock, msg, `⚠️ The build passed, but Vercel preview deployment failed: ${deployment.error}`);
-  return reply(sock, msg, `✅ The verified project is available on a Vercel preview: ${deployment.url}\n\nUse *!deploy production ${deployment.projectId}* only after reviewing it.`);
+  return reply(sock, msg, `${finalText}\n\n✅ The verified project is available on a Vercel preview: ${deployment.url}\n\nUse *!deploy production ${deployment.projectId}* only after reviewing it.`);
 }
 
 async function handleDeploy(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, "Vercel hosting is not configured in the runtime.");
   await react(sock, msg, "🌐");
   const parts = String(args || "").trim().split(/\s+/).filter(Boolean);
+  const projectId = parts.find((part) => /^(?:project_)?[a-f0-9]{8}$/i.test(part) || /^project_[a-z0-9_-]+$/i.test(part)) || null;
+  if (/github/i.test(String(args || ""))) {
+    const published = await publishProjectToGitHub(ctx.chatId, projectId, {});
+    if (!published.success) return reply(sock, msg, `❌ ${published.error}`);
+    return reply(sock, msg, `✅ Verified project uploaded to GitHub: ${published.url}${published.commit ? `\nCommit: \`${published.commit.slice(0, 12)}\`` : ""}`);
+  }
+  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, "Vercel hosting is not configured in the runtime.");
   const target = parts.some((part) => /^(?:production|prod|live)$/i.test(part)) ? "production" : "preview";
-  const projectId = parts.find((part) => /^project_[a-z0-9_-]+$/i.test(part)) || null;
   const result = await deployProject(ctx.chatId, projectId, { target });
   if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
   const label = target === "production" ? "production" : "preview";
@@ -2065,40 +2116,40 @@ async function handleDeploy(sock, msg, args, ctx) {
 }
 
 async function handleProjectStatus(sock, msg, args, ctx) {
-  const { reply } = require("./baileysHelpers");
+  const { reply } = require("../utils/baileysHelpers");
   const result = await getProjectStatus(ctx.chatId, args || null);
-  await reply(sock, msg, result);
+  await reply(sock, msg, formatProjectStatus(result));
 }
 
 async function handleProjectList(sock, msg, args, ctx) {
-  const { reply } = require("./baileysHelpers");
+  const { reply } = require("../utils/baileysHelpers");
   const result = await listProjects(ctx.chatId);
-  await reply(sock, msg, result);
+  await reply(sock, msg, formatProjectList(result));
 }
 
 async function handleProjectCancel(sock, msg, args, ctx) {
-  const { reply } = require("./baileysHelpers");
+  const { reply } = require("../utils/baileysHelpers");
   const result = await cancelProject(ctx.chatId, args || null);
-  await reply(sock, msg, result);
+  await reply(sock, msg, formatProjectMutation(result, "✅ Project cancelled and partial files cleaned up."));
 }
 
 async function handleEditFile(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
-  const parts = args.split(" ");
+  const { reply, react } = require("../utils/baileysHelpers");
+  const parts = String(args || "").split(" ");
   const filename = parts[0];
   const instruction = parts.slice(1).join(" ");
   if (!filename || !instruction) return reply(sock, msg, "Tell me which project file to change and what you want changed, for example: edit server.js to add a health route.");
   await react(sock, msg, "✏️");
-  const result = await editProjectFile(ctx.chatId, filename, instruction, ctx.senderName, args.slice(filename.length).trim() || null);
-  await reply(sock, msg, result);
+  const result = await editProjectFile(ctx.chatId, filename, instruction, ctx.senderName, String(args).slice(filename.length).trim() || null);
+  await reply(sock, msg, formatProjectMutation(result, `✅ Updated \`${filename}\` and queued it for the next verification.`));
 }
 
 async function handleThink(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
+  const { reply, react } = require("../utils/baileysHelpers");
   if (!args) return reply(sock, msg, "Tell me what you want me to plan before I build it.");
   await react(sock, msg, "🧠");
   const result = await thinkAboutProject(args, ctx.senderName, ctx.chatId);
-  await reply(sock, msg, result);
+  await reply(sock, msg, result?.message || (result?.error ? `❌ ${result.error}` : "✅ Plan saved. Say “build it” when you want me to execute it."));
 }
 
 async function handleDebugCode(sock, msg, args, ctx) {
@@ -2515,6 +2566,7 @@ const intentHandlers = {
   },
   delegate: async (sock, msg, text, ctx) => handleDelegate(sock, msg, naturalArgs("delegate", text), ctx),
   engineering: async (sock, msg, text, ctx) => handleEngineering(sock, msg, naturalArgs("engineering", text), ctx),
+  deploy: handleDeploy,
   edit: async (sock, msg, text, ctx) => handleEditFile(sock, msg, naturalArgs("edit", text), ctx),
   sticker: handleStickerIntent,
   voiceReply: async (sock, msg, text, ctx) => {
@@ -2553,16 +2605,7 @@ const intentHandlers = {
     const result = await runAgentTask(text, ctx.senderName);
     await reply(sock, msg, result);
   },
-  build: async (sock, msg, text, ctx) => {
-    const { reply, react } = require("./baileysHelpers");
-    await react(sock, msg, "🏗️");
-    await reply(sock, msg, "🏗️ Build started. I’m working through the plan, files, checks, and packaging now.");
-    const onProgress = async (update) => {
-      try { await reply(sock, msg, `⏳ ${update}`); } catch (_) {}
-    };
-    const result = await buildProject(text, ctx.senderName, ctx.chatId, onProgress);
-    await reply(sock, msg, formatBuildResult(result));
-  },
+  build: async (sock, msg, text, ctx) => handleBuild(sock, msg, text, ctx),
   github: async (sock, msg, text, ctx) => {
     const { reply, react } = require("./baileysHelpers");
     await react(sock, msg, "🐙");
@@ -2901,5 +2944,5 @@ module.exports = {
   resolveNaturalAction,
   naturalArgs,
   detectCommandCollisions,
-  _test: { resolveBusinessModePhrase, handleNsfw },
+  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation },
 };

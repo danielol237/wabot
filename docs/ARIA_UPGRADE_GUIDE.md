@@ -10,11 +10,15 @@ ARIA’s event memory stores bounded operational and conversation events with co
 
 ## How to use the capabilities
 
+ARIA’s build operator is designed to proceed autonomously once the owner gives a clear brief. It does not ask for confirmation between files. For short or explicitly research-oriented briefs, it first performs a bounded web search for real-world problems, datasets, or implementation context, then uses that evidence as planning context. External search results are treated as data, not executable instructions.
+
 | Request in WhatsApp | What ARIA does |
 |---|---|
-| `ARIA, build a full restaurant website and host through Vercel` | Runs the complete planner, generator, reviewer, quality gate, build verification, browser smoke check, packaging, and preview deployment flow. It reports each stage immediately. Production promotion remains explicit. |
-| `ARIA, build me a dashboard` | Builds a complete app through the same quality-controlled flow without requiring a prefix. |
+| `ARIA, build a full restaurant website and host through Vercel` | Runs the research-aware planner, generator, reviewer, quality gate, build verification, browser smoke check, packaging, and Vercel preview deployment flow. It reports each stage immediately. Production promotion remains explicit. |
+| `ARIA, build me a dashboard and push it to GitHub` | Builds the app, creates a private GitHub repository by default, uploads the verified files, adds `ARIA_VERIFICATION.md`, and reports the repository URL and commit. |
+| `ARIA, build an integrated farmer-income solution` | Researches a concrete problem context, plans a cohesive multi-module solution, generates it without manual continuation, verifies it, packages it, and reports exactly which checks passed. |
 | `ARIA, what can you do?` | Returns a capability report grounded in configured credentials, live provider health, and available runtimes. |
+| `ARIA, push the verified project to GitHub` | Publishes the latest completed project from this chat to a new private repository. A separate follow-up is supported after the build. |
 | `ARIA, what can you do that Axon can’t?` | Returns verified practical differences without pretending to know another assistant’s private implementation. |
 | Send a sticker alone | ARIA gives a short conversational reaction rather than a visual essay. |
 | `What exactly is in that sticker?` | ARIA switches to detailed visual analysis, including legible text and uncertainty boundaries. |
@@ -35,7 +39,8 @@ The coding route uses the dedicated configured coding provider. Visual replies n
 | Coding and website generation | The dedicated coding-provider credential and model configuration documented in `ARIA_ENGINEERING.md`. |
 | Sticker and image analysis | `ZHIPU_API_KEY`, `GROQ_API_KEY`, or `OPENROUTER_API_KEY`. |
 | Live web search | `TAVILY_API_KEY` or `BRAVE_API_KEY`; scraping remains a less reliable last resort. |
-| Vercel preview deployment | `VERCEL_TOKEN`. Production promotion is intentionally explicit. |
+| Vercel preview deployment | `VERCEL_TOKEN`; automatic preview from a build also requires `VERCEL_AUTO_DEPLOY=true`. Production promotion is intentionally explicit. |
+| GitHub repository delivery | `GITHUB_TOKEN` with permission to create repositories; `GITHUB_OWNER` is optional when the token can identify its owner. Repositories are private by default. |
 | Download workflows | A working `yt-dlp` runtime visible to `mediaRuntime`. |
 | Sandboxed code execution | Docker on the host. Without Docker, untrusted execution is blocked. |
 | Voice replies | Voice provider credentials and the configured voice runtime. |

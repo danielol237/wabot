@@ -38,6 +38,8 @@ function createProject(chatId, goal, plannedFiles, metadata = {}) {
     status: "running", // running | paused | done | failed | cancelled
     createdAt: Date.now(),
     ...(metadata.templateKey ? { templateKey: metadata.templateKey } : {}),
+    ...(metadata.workflow ? { workflow: String(metadata.workflow).slice(0, 40) } : {}),
+    ...(metadata.research ? { research: { query: String(metadata.research.query || "").slice(0, 240), notes: String(metadata.research.notes || "").slice(0, 5000), unavailable: Boolean(metadata.research.unavailable) } } : {}),
   };
   save();
   return projects[id];
@@ -133,7 +135,7 @@ function recordDeployment(projectId, deployment = {}) {
   if (!project) return null;
   project.deployment = {
     ...(project.deployment || {}),
-    provider: "vercel",
+    provider: deployment.provider || project.deployment?.provider || "vercel",
     deploymentId: deployment.deploymentId || project.deployment?.deploymentId || null,
     vercelProjectId: deployment.vercelProjectId || project.deployment?.vercelProjectId || null,
     url: deployment.url || project.deployment?.url || null,
@@ -146,7 +148,7 @@ function recordDeployment(projectId, deployment = {}) {
 }
 
 function getProgress(project) {
-  const done = project.files.filter((f) => f.status === "done").length;
+  const done = project.files.filter((f) => ["done", "done_with_warning"].includes(f.status)).length;
   return { done, total: project.files.length, percent: Math.round((done / project.files.length) * 100) };
 }
 

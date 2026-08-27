@@ -81,3 +81,8 @@ test("build flow runs all files without a continuation prompt or command", () =>
   assert.doesNotMatch(builderSource, /continue the project|reply ["']continue["']/i);
   assert.doesNotMatch(routerSource, /name:\s*["']continue["']/);
 });
+
+test("autonomous builder identifies briefs that benefit from research", () => {
+  assert.equal(builderTest.shouldResearchBuild("build an integrated farmer income solution"), true);
+  assert.equal(builderTest.shouldResearchBuild("build a polished static landing page for a neighborhood coffee shop with a warm editorial visual system and accessible interactions"), false);
+});

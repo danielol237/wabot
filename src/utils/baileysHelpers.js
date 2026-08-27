@@ -110,6 +110,28 @@ function normalizeJid(value) {
   return bare || raw;
 }
 
+function getBotMentionJids(sock) {
+  const candidates = [sock?.user?.id, sock?.user?.jid, sock?.user?.lid, sock?.user?.phoneNumber]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  const seen = new Set();
+  return candidates.filter((jid) => {
+    const key = normalizeJid(jid);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 2);
+}
+
+function shouldSelfMention(inputText, responseText) {
+  const input = String(inputText || "").trim();
+  const response = String(responseText || "").trim();
+  if (!response) return false;
+  const openingSelfReference = /^(?:aria\b|i(?:'m| am)\s+aria\b|this\s+is\s+aria\b|here(?:'s| is)\s+aria\b)/i.test(response);
+  const userSummoning = /\b(?:where(?:'s| is)\s+(?:my\s+)?aria|summon\s+aria|call\s+aria|aria\s*[!?.,]*\s*(?:are you|come|wake up|present))\b/i.test(input);
+  return openingSelfReference || userSummoning;
+}
+
 async function reply(sock, msg, text, options = {}) {
   if (!text) return;
   const chatId = msg.key.remoteJid;
@@ -237,6 +259,7 @@ async function downloadQuotedMedia(sock, msg) {
 
 module.exports = {
   getMessageText, getSenderName, getTargetJid, isBotMentioned,
+  getBotMentionJids, shouldSelfMention,
   reply, react, splitMessage, sleep,
   isQuotingBotMessage, getQuotedMessageText,
   hasMedia, hasVoiceNote, downloadMediaFromMsg, downloadQuotedMedia,

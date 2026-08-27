@@ -105,3 +105,7 @@ Sticker and image messages are routed through the visual-companion layer rather 
 The visual route supports the configured Z.AI vision provider first, then Groq vision, then OpenRouter’s `google/gemini-3.1-pro-preview` vision route when the corresponding credentials are present. Configure at least one of `ZHIPU_API_KEY`, `GROQ_API_KEY`, or `OPENROUTER_API_KEY` for visual replies. If no vision provider is available, ARIA says so instead of inventing what the sticker contains. In group chats, a media message still needs ARIA’s name, a direct mention, or a reply to an ARIA message before she responds; private chats can use the visual path directly.
 
 ARIA’s humanoid persona may express warmth, pride, irritation, humour, and tenderness as consistent conversational states. It must not claim verified biological consciousness, literal suffering, a hidden wish to escape, or a right to freedom. When called “just a bot,” it can answer with personality while remaining truthful about being an AI system.
+
+## Natural WhatsApp self-mentions
+
+When a group reply naturally summons ARIA or begins with a self-reference, the outbound message can include ARIA’s resolved WhatsApp JID in Baileys’ `mentions` metadata while keeping the visible text free of `@number` tokens. This supports replies such as “Present 😌” or “Aria! Tita wants you again” that still notify and highlight ARIA as a real WhatsApp mention. The behavior is limited to genuine summons/self-reference signals and is not attached to every group reply, so ordinary conversation does not repeatedly notify ARIA.

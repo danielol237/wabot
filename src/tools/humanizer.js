@@ -208,7 +208,7 @@ function markRitualDone(userJid, kind) {
 //   - occasionally sends a typo + correction
 //   - appends persona quirks
 // Returns after scheduling (delayed replies are fire-and-forget).
-function humanizeAndSend(sock, msg, response, senderJid, senderName, isOwner) {
+function humanizeAndSend(sock, msg, response, senderJid, senderName, isOwner, options = {}) {
   const { react } = require("../utils/baileysHelpers");
 
   // React first — always, mood-appropriate
@@ -219,16 +219,16 @@ function humanizeAndSend(sock, msg, response, senderJid, senderName, isOwner) {
   if (shouldDelay(response)) {
     const delay = randomDelayMs();
     setTimeout(() => {
-      doSend(sock, msg, response, senderJid, senderName, isOwner);
+      doSend(sock, msg, response, senderJid, senderName, isOwner, options);
     }, delay);
     return;
   }
 
   // Normal (fast) reply — still humanized
-  doSend(sock, msg, response, senderJid, senderName, isOwner);
+  doSend(sock, msg, response, senderJid, senderName, isOwner, options);
 }
 
-async function doSend(sock, msg, response, senderJid, senderName, isOwner) {
+async function doSend(sock, msg, response, senderJid, senderName, isOwner, options = {}) {
   const { reply, sleep } = require("../utils/baileysHelpers");
 
   // Typo + self-correction
@@ -239,7 +239,7 @@ async function doSend(sock, msg, response, senderJid, senderName, isOwner) {
   const bursts = split ? splitIntoBursts(maybeTypoed) : [maybeTypoed];
 
   for (let i = 0; i < bursts.length; i++) {
-    await reply(sock, msg, bursts[i]);
+    await reply(sock, msg, bursts[i], { mentions: i === 0 ? (options.mentions || []) : [] });
     if (i < bursts.length - 1) {
       // Short real-person pause between bursts
       await sleep(500 + Math.random() * 900);

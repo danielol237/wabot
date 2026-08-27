@@ -2728,6 +2728,7 @@ async function handleAIResponse(sock, msg, text, ctx) {
   // Inject ARIA's current mood + persona into the context so she acts accordingly
   const { getMoodData, getBondLabel } = require("../tools/humanity");
   const { buildPersonaContext, detectTone, humanizeAndSend, bleedMood, rememberCallable } = require("../tools/humanizer");
+  const { getBotMentionJids, shouldSelfMention } = require("./baileysHelpers");
   const moodData = getMoodData(ctx.senderJid);
   const bondLabel = getBondLabel(require("../tools/humanity").getRelationship(ctx.senderJid).bond);
   const moodContext = `\n\nYour current mood: ${moodData.mood} (${moodData.emoji}). Warmth: ${moodData.warmth}, Mischief: ${moodData.mischief}. You and this user are ${bondLabel}. Let this affect how you reply naturally.`;
@@ -2783,8 +2784,11 @@ async function handleAIResponse(sock, msg, text, ctx) {
       extractFromMessage(ctx.senderJid, ctx.senderName, text);
     } catch (_) {}
 
-    // Humanized send (reactions, splitting, typos, occasional delay)
-    humanizeAndSend(sock, msg, response, ctx.senderJid, ctx.senderName, isOwnerCtx);
+    // Humanized send (reactions, splitting, typos, occasional delay). When
+    // ARIA is naturally summoned or names herself, carry a real WhatsApp
+    // mention payload without putting an @number in the visible text.
+    const selfMentions = ctx.isGroup && shouldSelfMention(text, response) ? getBotMentionJids(sock) : [];
+    humanizeAndSend(sock, msg, response, ctx.senderJid, ctx.senderName, isOwnerCtx, { mentions: selfMentions });
     saveMemory(ctx.chatId, text, response);
     trackInteraction(ctx.senderJid, text);
     if (process.env.DEBUG_REPLIES === "true") {

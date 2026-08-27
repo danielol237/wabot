@@ -110,12 +110,30 @@ Keep your personality warm, direct, and human-readable, but increase care and pr
 
 // Detects requests that likely need serious code output (full pages/apps/scripts)
 // so we can give the model enough room to actually finish instead of cutting off mid-file.
-const TRUNCATION_NOTICE = "\n\n_(⚠️ This got cut off because it's a big build — tell me to continue and I'll finish the rest.)_";
+const TRUNCATION_NOTICE = "\n\n_(Output limit reached. The request is intact—send it again if you want the rest.)_";
 function withTruncationNotice(content, finishReason, exhaustedReason, requestNeedsLargeOutput = false) {
   // Providers can report a token-limit finish reason even for a short conversational
   // request when their internal context is constrained. A continuation notice is only
   // useful when the user actually asked ARIA to generate a long-form build.
   return finishReason === exhaustedReason && requestNeedsLargeOutput ? String(content || "") + TRUNCATION_NOTICE : String(content || "");
+}
+
+function isUsableProviderText(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return !/(?:^|\b)(?:❌|error\s*[:：]|failed\b|no response\b|could(?:n't| not)\s+(?:reach|connect)|unable to\s+(?:reach|connect)|provider\s+(?:error|failure))/i.test(text);
+}
+
+let failureReplyCursor = 0;
+function buildProviderFailureReply() {
+  const replies = [
+    "I hit a provider wall, not a problem with your message. Try that again in a moment.",
+    "The model routes are being dramatic right now. Your request is fine—send it again shortly.",
+    "No clean model response came back, so I’m not going to fake one. Retry that in a moment.",
+  ];
+  const reply = replies[failureReplyCursor % replies.length];
+  failureReplyCursor += 1;
+  return reply;
 }
 
 function needsLargeOutput(userMessage) {
@@ -163,7 +181,7 @@ const { chatGPT } = require("./gpt5Cli");
   if (process.env.GPT5_ENABLED !== "0") {
     try {
       const result = await chatGPT(String(userMessage), userName, validHistory, systemPrompt, { uncensored: true });
-      if (result.text) {
+      if (isUsableProviderText(result.text)) {
         const content = withTruncationNotice(result.text, null, "length", requestNeedsLargeOutput);
         lastProvider = "gpt5";
         return content;
@@ -186,9 +204,12 @@ const { chatGPT } = require("./gpt5Cli");
         [{ role: "system", content: systemPrompt }, ...messages],
         { maxTokens, temperature: 0.7 }
       );
-      const content = withTruncationNotice(result.text, result.finishReason, "length", requestNeedsLargeOutput);
-      lastProvider = "minimax";
-      return content;
+      if (isUsableProviderText(result.text)) {
+        const content = withTruncationNotice(result.text, result.finishReason, "length", requestNeedsLargeOutput);
+        lastProvider = "minimax";
+        return content;
+      }
+      throw new Error("MiniMax returned an unusable response");
     } catch (err) {
       const errMsg = err.response?.data?.error?.message || err.response?.data?.message || err.message || "unknown MiniMax error";
       lastError = errMsg;
@@ -201,7 +222,7 @@ const { chatGPT } = require("./gpt5Cli");
   try {
     const gemini = require("./geminiCli");
     const geminiResult = await gemini.sendMessage(String(userMessage));
-    if (geminiResult.text) {
+    if (isUsableProviderText(geminiResult.text)) {
       const content = withTruncationNotice(geminiResult.text, null, "length", requestNeedsLargeOutput);
       lastProvider = "gemini-unofficial";
       return content;
@@ -220,7 +241,7 @@ const { chatGPT } = require("./gpt5Cli");
     const openapisResult = await openapis.sendMessage(String(userMessage), userName, systemPrompt, { 
       model: process.env.OPENAPIS_MODEL || "openrouter/free" 
     });
-    if (openapisResult.text) {
+    if (isUsableProviderText(openapisResult.text)) {
       const content = withTruncationNotice(openapisResult.text, null, "length", requestNeedsLargeOutput);
       lastProvider = "openapis";
       return content;
@@ -260,13 +281,16 @@ const { chatGPT } = require("./gpt5Cli");
           }
         );
         const finishReason = res.data.choices[0]?.finish_reason;
-        const content = withTruncationNotice(res.data.choices[0]?.message?.content || "I got nothing. Try again.", finishReason, "length", requestNeedsLargeOutput);
+        const rawContent = res.data.choices[0]?.message?.content;
+        if (!isUsableProviderText(rawContent)) throw new Error("Cerebras returned an unusable response");
+        const content = withTruncationNotice(rawContent, finishReason, "length", requestNeedsLargeOutput);
         lastProvider = "cerebras";
         return content;
       } catch (err) {
         error(`Cerebras error (${model}):`, err.response?.data?.error?.message || err.message);
-        const errMsg = err.response?.data?.error?.message || err.message || "";
-        if (!errMsg.toLowerCase().includes("not found") && !errMsg.toLowerCase().includes("deprecated")) break;
+        lastError = err.response?.data?.error?.message || err.message || "Cerebras request failed";
+        // Try every Cerebras model before falling through to Gemini.
+        continue;
       }
     }
   }
@@ -303,15 +327,16 @@ const { chatGPT } = require("./gpt5Cli");
           }
         );
         const candidate = res.data.candidates && res.data.candidates[0];
-        const content = withTruncationNotice(candidate?.content?.parts?.map((p) => p.text || "").join("") || "I got nothing. Try again.", candidate?.finishReason, "MAX_TOKENS", requestNeedsLargeOutput);
+        const rawContent = candidate?.content?.parts?.map((p) => p.text || "").join("");
+        if (!isUsableProviderText(rawContent)) throw new Error("Gemini returned an unusable response");
+        const content = withTruncationNotice(rawContent, candidate?.finishReason, "MAX_TOKENS", requestNeedsLargeOutput);
         lastProvider = "gemini";
         return content;
       } catch (err) {
         error(`Gemini error (${model}):`, err.response?.data?.error?.message || err.message);
-        // If this specific model is gone, try the next one in the list.
-        // Any other error (rate limit, network, bad key) falls through to Groq instead.
-        const errMsg = err.response?.data?.error?.message || err.message || "";
-        if (!errMsg.toLowerCase().includes("not found") && !errMsg.toLowerCase().includes("deprecated")) break;
+        lastError = err.response?.data?.error?.message || err.message || "Gemini request failed";
+        // Continue through every configured Gemini model, then fall through.
+        continue;
       }
     }
   }
@@ -333,14 +358,16 @@ const { chatGPT } = require("./gpt5Cli");
           temperature: 0.7,
         });
         const finishReason = res.choices[0]?.finish_reason;
-        const content = withTruncationNotice(res.choices[0]?.message?.content || "I got nothing. Try again.", finishReason, "length", requestNeedsLargeOutput);
+        const rawContent = res.choices[0]?.message?.content;
+        if (!isUsableProviderText(rawContent)) throw new Error("Groq returned an unusable response");
+        const content = withTruncationNotice(rawContent, finishReason, "length", requestNeedsLargeOutput);
         lastProvider = "groq";
         return content;
       } catch (err) {
         error(`Groq error (${model}):`, err.message);
-        // If it's a decommissioned-model error, try the next model in the list.
-        // For any other error (rate limit, network, etc.), stop retrying and fall through to OpenRouter.
-        if (!err.message?.includes("decommissioned")) break;
+        lastError = err.message || "Groq request failed";
+        // Try every Groq model before continuing to OpenRouter.
+        continue;
       }
     }
   }
@@ -366,14 +393,16 @@ const { chatGPT } = require("./gpt5Cli");
             },
           }
         );
+        const rawContent = res.data.choices[0]?.message?.content;
+        if (!isUsableProviderText(rawContent)) throw new Error("OpenRouter returned an unusable response");
         lastProvider = "openrouter";
-        return res.data.choices[0]?.message?.content || "No response.";
+        return withTruncationNotice(rawContent, null, "length", requestNeedsLargeOutput);
       } catch (err) {
         error(`OpenRouter error (${model}):`, err.response?.data?.error?.message || err.message);
         lastError = (err.response?.data?.error?.message || err.message || "") + ` [${model}]`;
-        // Only continue to the next model if this one doesn't exist / is invalid.
-        const msg = err.response?.data?.error?.message || err.message || "";
-        if (!msg.toLowerCase().includes("valid model") && !msg.toLowerCase().includes("not found")) break;
+        // Keep trying every OpenRouter model; quota, auth, network, and model
+        // failures should not prevent the remaining fallback routes.
+        continue;
       }
     }
   }
@@ -381,7 +410,7 @@ const { chatGPT } = require("./gpt5Cli");
   // Keep provider names, model IDs, and quota/key details in server logs only.
   // They are debugging data, not a professional WhatsApp response.
   error("All configured AI chat providers failed:", lastError || "unknown");
-  return "❌ I couldn't reach ARIA's chat brain right now. Please try again shortly; the server has recorded the provider failure.";
+  return buildProviderFailureReply();
 }
 
 // ── Dashboard telemetry ─────────────────────────────────────
@@ -415,9 +444,11 @@ async function getAIResponse(...args) {
         metadata: { ok, latencyMs: Date.now() - t0, source: "aria-ai" },
       });
     }
-  } catch (_) {}
+  } catch (_) {
+    // Telemetry must never change or block the user-facing AI response.
+  }
   return out;
 }
 
-module.exports = { getAIResponse, needsLargeOutput, _test: { withTruncationNotice, TRUNCATION_NOTICE } };
+module.exports = { getAIResponse, needsLargeOutput, _test: { withTruncationNotice, TRUNCATION_NOTICE, isUsableProviderText, buildProviderFailureReply } };
 

@@ -35,5 +35,5 @@ test("ai: only a genuinely large request gets a truncation notice", () => {
   const exhaustedLargeBuild = _test.withTruncationNotice("A long build", "MAX_TOKENS", "MAX_TOKENS", true);
   assert.equal(stopped, "Show Sentinel");
   assert.equal(shortButMislabelled, "Aria");
-  assert.match(exhaustedLargeBuild, /tell me to continue/);
+  assert.match(exhaustedLargeBuild, /send it again/);
 });

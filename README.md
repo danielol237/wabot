@@ -46,7 +46,6 @@ Pair WhatsApp from the owner dashboard. Open `/dashboard`, sign in with `DASHBOA
 | `ANIME_PUBLIC_ACTIVE_LIMIT` | No | Maximum active public jobs per client; default 3 |
 | `ANIME_PUBLIC_QUEUE_LIMIT` | No | Global public queue ceiling; default 100 |
 | `ARIA_HUMANIZER_TYPOS` | No | Opt-in presentation experiment; default `false` |
-| `ARIA_HUMANIZER_DELAY` | No | Opt-in short response delay experiment; default `false` |
 | `ARIA_RANDOM_MOOD` | No | Opt-in random mood variation; default `false` |
 | `PHONE_NUMBER` | No | If set, enables pairing-code mode instead of QR |
 

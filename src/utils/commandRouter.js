@@ -719,7 +719,12 @@ async function handleAlive(sock, msg, args, ctx) {
 
 async function handleHelp(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
+  const { isCapabilityQuestion, formatCapabilityReport } = require("../tools/capabilityProfile");
+  const requestText = String(ctx.text || args || "").trim();
   await react(sock, msg, "✨");
+  if (isCapabilityQuestion(requestText) && /\b(?:axon|another|better|can'?t|difference)\b/i.test(requestText)) {
+    return reply(sock, msg, formatCapabilityReport());
+  }
   const owner = isOwner(ctx.senderJid);
   const base = String(process.env.BASE_URL || "").replace(/\/$/, "");
   const lines = [
@@ -2752,9 +2757,14 @@ async function handleAIResponse(sock, msg, text, ctx) {
   const personalizationContext = "\n\n[Personalization] Learn their name if they give it, match their communication style naturally, and remember important things they share.\n";
   let revenueContextText = "";
   try { revenueContextText = require("../core/productBridge").formatRevenueContext(ctx.revenueContext); } catch (_) {}
+  let capabilityContext = "";
+  try {
+    const { isCapabilityQuestion, formatCapabilityContext } = require("../tools/capabilityProfile");
+    if (isCapabilityQuestion(text)) capabilityContext = formatCapabilityContext();
+  } catch (_) {}
 
   const response = await getAIResponse(text, ctx.senderName, memory, null, quotedText, {
-    userContext: profileCtx.context + ownerContext + moodContext + personaContext + toneContext + mediaContext + personalizationContext + researchContext + selfModelContext + revenueContextText + dialogueAwareness,
+    userContext: profileCtx.context + ownerContext + moodContext + personaContext + toneContext + mediaContext + personalizationContext + researchContext + selfModelContext + revenueContextText + dialogueAwareness + capabilityContext,
     preferences: profileCtx.profile.preferences,
     facts: profileCtx.profile.facts,
   });

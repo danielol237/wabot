@@ -109,22 +109,9 @@ function maybeTypo(text) {
   return { text, typo: null };
 }
 
-// ── 4. Delayed replies (2–5 min, occasional) ──────────────────
-// Sometimes reply after a short real-person delay instead of instantly.
-// Capped at 2–5 min as requested. Only fires occasionally and never for
-// commands/urgent intents. Reacts first so the user knows she "saw" it.
-function shouldDelay(text) {
-  // Instant replies are the default. If enabled for a deliberate product
-  // experiment, keep the delay short and never apply it to commands or urgent text.
-  if (process.env.ARIA_HUMANIZER_DELAY !== "true") return false;
-  if (/^[!.]/.test(text.trim()) || text.length < 8) return false;
-  return Math.random() < 0.03;
-}
-
-function randomDelayMs() {
-  // 1–5 seconds; long delays belong in explicit reminders/tasks, not replies.
-  return (1 + Math.random() * 4) * 1000;
-}
+// ── 4. Immediate replies (permanent policy) ───────────────────
+// ARIA never delays an ordinary response. Delayed delivery belongs only to
+// explicit reminders, scheduled tasks, or background missions—not chat.
 
 // ── 5. Callbacks / running jokes ──────────────────────────────
 // Persist memorable facts/jokes and occasionally reference them later.
@@ -215,16 +202,7 @@ function humanizeAndSend(sock, msg, response, senderJid, senderName, isOwner, op
   const reaction = pickReaction(senderJid, response);
   react(sock, msg, reaction).catch(() => {});
 
-  // Occasional delayed reply
-  if (shouldDelay(response)) {
-    const delay = randomDelayMs();
-    setTimeout(() => {
-      doSend(sock, msg, response, senderJid, senderName, isOwner, options);
-    }, delay);
-    return;
-  }
-
-  // Normal (fast) reply — still humanized
+  // Immediate reply — still humanized, but never scheduled for later.
   doSend(sock, msg, response, senderJid, senderName, isOwner, options);
 }
 

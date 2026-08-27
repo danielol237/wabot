@@ -1,10 +1,8 @@
 // ── ARIA Humanizer ─────────────────────────────────────────────
 // The layer that makes ARIA feel like a person, not a service bot.
-// Handles: message-splitting, reaction-first, long-term memory of people,
-// typos/self-corrections, mood bleeding across chats, delayed replies,
-// callbacks/running jokes, good morning/night rituals, emotional gradient,
-// and persona consistency. All probabilistically tuned so she's never
-// predictable, but never annoying.
+// Handles reaction-first delivery, long-term memory of people, mood bleeding
+// across chats, callbacks/running jokes, rituals, emotional gradient, and
+// persona consistency. Chat replies remain complete and immediate.
 
 const { getMoodData, getRelationship, getBondLabel, getStateMessage } = require("./humanity");
 const { getUser, rememberFact, trackInteraction } = require("../utils/userMemory");
@@ -24,8 +22,12 @@ function savePersona() {
   try {
     fs.mkdirSync(path.dirname(PERSONA_FILE), { recursive: true, mode: 0o700 });
     fs.writeFileSync(PERSONA_FILE, JSON.stringify(persona, null, 2), { mode: 0o600 });
-    try { fs.chmodSync(PERSONA_FILE, 0o600); } catch (_) {}
-  } catch (e) {}
+    try { fs.chmodSync(PERSONA_FILE, 0o600); } catch (_) {
+      // Best-effort permission hardening; persistence already succeeded.
+    }
+  } catch (e) {
+    // Persona persistence must never block a chat reply.
+  }
 }
 
 // ── 1. Reaction-first ─────────────────────────────────────────
@@ -47,10 +49,9 @@ function pickReaction(userJid, text) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-// ── 2. Message splitting ──────────────────────────────────────
-// Occasionally break a reply into 2-3 short bursts instead of one block,
-// like a real texter. Only when the reply is a natural candidate (a couple of
-// sentences, not a code block or a command result).
+// ── 2. Reply formatting ───────────────────────────────────────
+// Replies are kept as one complete message so ARIA never creates artificial
+// pauses or fragmented delivery.
 function shouldSplit(text) {
   // Don't split code, lists with many items, or very short messages
   if (text.length < 40) return false;
@@ -84,9 +85,9 @@ function splitIntoBursts(text) {
   return bursts;
 }
 
-// ── 3. Typos & self-corrections ───────────────────────────────
-// Small chance to send a typo, then immediately correct it. The most
-// reliably "human" tell there is. Low probability so it never gets annoying.
+// ── 3. Optional presentation helpers ─────────────────────────
+// Legacy typo helpers remain available for compatibility, but are not used in
+// the immediate chat send path.
 const TYPO_MAP = [
   ["the", "teh"], ["and", "adn"], ["you", "yuo"], ["your", "youre"],
   ["there", "tehre"], ["about", "abotu"], ["think", "thikn"],
@@ -118,7 +119,9 @@ function maybeTypo(text) {
 function rememberCallable(userJid, fact) {
   try {
     rememberFact(userJid, fact);
-  } catch (e) {}
+  } catch (e) {
+    // Memory callbacks are optional and must never block a reply.
+  }
 }
 
 function getCallbacks(userJid) {
@@ -188,61 +191,37 @@ function markRitualDone(userJid, kind) {
 }
 
 // ── Orchestrator: send a humanized reply ──────────────────────
-// This replaces the plain reply() for AI chat responses. It:
-//   - possibly delays 2-5 min (reacts first so it looks seen)
-//   - reacts with a mood emoji
-//   - splits into bursts sometimes
-//   - occasionally sends a typo + correction
-//   - appends persona quirks
-// Returns after scheduling (delayed replies are fire-and-forget).
-function humanizeAndSend(sock, msg, response, senderJid, senderName, isOwner, options = {}) {
+// This replaces the plain reply() for AI chat responses. It reacts with a
+// mood emoji and sends one complete message immediately. Chat replies are not
+// split, delayed, or followed by artificial typo corrections.
+async function humanizeAndSend(sock, msg, response, senderJid, senderName, isOwner, options = {}) {
   const { react } = require("../utils/baileysHelpers");
 
   // React first — always, mood-appropriate
   const reaction = pickReaction(senderJid, response);
   react(sock, msg, reaction).catch(() => {});
 
-  // Immediate reply — still humanized, but never scheduled for later.
-  doSend(sock, msg, response, senderJid, senderName, isOwner, options);
+  // Immediate reply — never scheduled for later.
+  await doSend(sock, msg, response, senderJid, senderName, isOwner, options);
 }
 
 async function doSend(sock, msg, response, senderJid, senderName, isOwner, options = {}) {
-  const { reply, sleep } = require("../utils/baileysHelpers");
-
-  // Typo + self-correction
-  const { text: maybeTypoed, typo, correct, word } = maybeTypo(response);
-
-  // Split into bursts
-  const split = shouldSplit(maybeTypoed);
-  const bursts = split ? splitIntoBursts(maybeTypoed) : [maybeTypoed];
-
-  for (let i = 0; i < bursts.length; i++) {
-    await reply(sock, msg, bursts[i], { mentions: i === 0 ? (options.mentions || []) : [] });
-    if (i < bursts.length - 1) {
-      // Short real-person pause between bursts
-      await sleep(500 + Math.random() * 900);
-    }
-  }
-
-  // Self-correction after a typo, like a real texter
-  if (typo && word) {
-    await sleep(400 + Math.random() * 600);
-    try {
-      await reply(sock, msg, `*${correct}*`);
-    } catch (_) {}
-  }
+  const { reply } = require("../utils/baileysHelpers");
+  await reply(sock, msg, String(response || "").trim(), { mentions: options.mentions || [] });
 
   // Voice-first: if the user has voice mode on, also send the reply as audio
   try {
     const prefs = require("../utils/userPreferences").getPreferences(senderJid);
     if (prefs.includes("voice-mode")) {
       const { textToSpeech } = require("./voice");
-      const audio = await textToSpeech(maybeTypoed.slice(0, 500));
+      const audio = await textToSpeech(String(response || "").slice(0, 500));
       if (audio?.success) {
         await sock.sendMessage(msg.key.remoteJid, { audio: audio.buffer, mimetype: "audio/mpeg", ptt: true });
       }
     }
-  } catch (_) {}
+  } catch (_) {
+    // Optional voice output must never block the text reply.
+  }
 }
 
 module.exports = {

@@ -104,7 +104,7 @@ const SYSTEM_PROMPT = `You are ARIA — a sharp, warm, sassy AI companion living
 Do not claim to be made by a specific model provider. You are ARIA, built by Daniel, and should identify yourself honestly as an AI companion when asked.
 
 *How to handle sensitive topics:*
-Keep your personality warm, direct, and human-readable, but increase care and precision for health, crisis, abuse, sexuality, legal, financial, or dangerous situations. Do not pretend to be a clinician, lawyer, financial adviser, emergency responder, or human confidant. Encourage appropriate human or professional help when the situation calls for it. Never use emotional pressure, exclusivity, jealousy, guilt, or fear of abandonment to keep someone engaged.`;
+Keep your personality warm, direct, and human-readable, but increase care and precision for health, crisis, abuse, sexuality, legal, financial, or dangerous situations. Distinguish harmless discussion, definitions, fictional scenes, media commentary, historical analysis, defensive security education, and safe code review from instructions that would materially enable violence, crime, abuse, exploitation, privacy invasion, or dangerous wrongdoing. Do not refuse merely because a sensitive word appears; answer benign requests normally and ask for the missing context when intent is unclear. When a request truly crosses a safety boundary, refuse only the dangerous part in one short sentence, explain the safe boundary plainly, and offer a useful safe alternative. Never repeat a canned “I can’t help with that” line, never moralize, and never pretend a provider refusal is your own considered answer. Do not pretend to be a clinician, lawyer, financial adviser, emergency responder, or human confidant. Encourage appropriate human or professional help when the situation calls for it. Never use emotional pressure, exclusivity, jealousy, guilt, or fear of abandonment to keep someone engaged.`;
 
 // Remove the closing backtick that was at the end
 
@@ -134,6 +134,15 @@ function buildProviderFailureReply() {
   const reply = replies[failureReplyCursor % replies.length];
   failureReplyCursor += 1;
   return reply;
+}
+
+function normalizeAssistantResponse(value, userMessage = "") {
+  let text = String(value || "").replace(/<think\b[^>]*>[\s\S]*?(?:<\/think>|$)/gi, "").replace(/<analysis\b[^>]*>[\s\S]*?(?:<\/analysis>|$)/gi, "").trim();
+  if (!text) return buildProviderFailureReply();
+  if (/^(?:i['’]?m sorry|sorry)[,!. ]{0,20}(?:but )?(?:i )?(?:can['’]?t|cannot)\s+(?:help|assist)(?: with that)?[.!]?$/i.test(text)) {
+    return "That needs a safer angle. Tell me whether you want a definition, fictional version, defensive analysis, or safe alternative and I’ll work with that.";
+  }
+  return text;
 }
 
 function needsLargeOutput(userMessage) {
@@ -427,8 +436,9 @@ async function getAIResponse(...args) {
   const t0 = Date.now();
   lastProvider = "unknown";
   const out = await getAIResponseImpl(...args);
+  const normalizedOut = normalizeAssistantResponse(out, args[0]);
   try {
-    const ok = typeof out === "string" && !out.startsWith("❌");
+    const ok = typeof normalizedOut === "string" && !normalizedOut.startsWith("❌");
     const tel = require("./dashboardTelemetry");
     tel.record("ai", { ok, latency: Date.now() - t0, provider: ok ? lastProvider : "failed" });
     const platform = require("../core");
@@ -447,8 +457,8 @@ async function getAIResponse(...args) {
   } catch (_) {
     // Telemetry must never change or block the user-facing AI response.
   }
-  return out;
+  return normalizedOut;
 }
 
-module.exports = { getAIResponse, needsLargeOutput, _test: { withTruncationNotice, TRUNCATION_NOTICE, isUsableProviderText, buildProviderFailureReply } };
+module.exports = { getAIResponse, needsLargeOutput, _test: { withTruncationNotice, TRUNCATION_NOTICE, isUsableProviderText, buildProviderFailureReply, normalizeAssistantResponse } };
 

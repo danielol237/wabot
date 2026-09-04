@@ -408,6 +408,30 @@ function renderHealthPane() {
     </div>`;
 }
 
+function renderPairingPane() {
+  return `<div class="pane" id="pane-pairing"><div class="page-title">Pair WhatsApp</div><div class="page-sub">link ARIA by phone number or use the QR fallback · owner-only</div>
+    <div class="hero command-hero"><div class="hrow"><div class="quick-icon" style="width:52px;height:52px;font-size:16px">WA</div><div><h2>Connect a WhatsApp number</h2><p class="sub">Enter the full international number for the account that should run ARIA. WhatsApp will issue a short-lived code; enter it in WhatsApp to link this device.</p></div></div></div>
+    <div class="grid2">
+      <div class="card"><div class="h"><span>Phone-number pairing</span><span class="badge b-accent">secure</span></div>
+        <form id="pairing-form" onsubmit="requestPairingCode(event)">
+          <label for="pairing-number" style="display:block;color:var(--muted);font-size:12px;font-weight:700;margin:0 0 7px">WhatsApp number with country code</label>
+          <input id="pairing-number" name="phoneNumber" type="tel" inputmode="tel" autocomplete="tel" placeholder="+234 801 234 5678" maxlength="32" required style="width:100%;min-height:46px;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:11px 12px;border-radius:11px;font:inherit;outline:none" />
+          <button id="pairing-submit" class="qbtn purple" type="submit" style="margin-top:12px;width:100%">Request WhatsApp code</button>
+        </form>
+        <p id="pairing-result" class="sub" role="status" aria-live="polite" style="margin-top:12px">Waiting for a number.</p>
+      </div>
+      <div class="card"><div class="h"><span>Connection status</span><span id="pairing-badge" class="badge b-muted">checking</span></div>
+        <div class="row"><span class="k">Session</span><span id="pairing-connection" class="v">checking</span></div>
+        <div class="row"><span class="k">Number</span><span id="pairing-phone" class="v">—</span></div>
+        <div class="row"><span class="k">Code validity</span><span id="pairing-expiry" class="v">—</span></div>
+        <div id="pairing-code-wrap" style="display:none;margin-top:16px"><div style="color:var(--muted);font-size:12px;font-weight:700">Enter this code in WhatsApp</div><code id="pairing-code" class="mono" style="display:block;margin-top:8px;padding:16px;border:1px solid var(--line2);border-radius:12px;background:var(--panel2);color:var(--accent);font-size:28px;font-weight:800;letter-spacing:.16em;text-align:center;word-break:break-word"></code><p class="sub" style="margin-top:10px">WhatsApp → Linked devices → Link a device → Link with phone number instead.</p></div>
+        <a class="qbtn" style="display:inline-flex;margin-top:14px;text-decoration:none" href="/qr" target="_blank" rel="noreferrer">Open QR pairing fallback</a>
+        <button id="pairing-reset" class="qbtn" type="button" style="margin:14px 0 0 8px;display:none" onclick="resetPairing()">Clear pending code</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 // Logs pane — live console fed by the SSE stream, with severity filter + search.
 function renderLogsPane() {
   let logs = [];
@@ -499,7 +523,7 @@ function renderLiveStrip(ls) {
       <div class="quick-grid">
         <a class="quick-card" href="/anime"><span class="quick-icon">A</span><span><b>Open anime</b><small>Search, watch, and download episodes</small></span><strong>→</strong></a>
         <a class="quick-card" href="/portal/login"><span class="quick-icon">L</span><span><b>Open learner portal</b><small>View progress and link WhatsApp history</small></span><strong>→</strong></a>
-        <a class="quick-card" href="/qr"><span class="quick-icon">QR</span><span><b>Pair WhatsApp</b><small>Open the protected QR or pairing-code screen</small></span><strong>→</strong></a>
+        <button class="quick-card" data-pane="pairing"><span class="quick-icon">WA</span><span><b>Pair WhatsApp</b><small>Enter a number for a pairing code or open the QR fallback</small></span><strong>→</strong></button>
         <button class="quick-card" data-pane="health"><span class="quick-icon">H</span><span><b>Check system health</b><small>Inspect media runtimes and provider status</small></span><strong>→</strong></button>
       </div>
       ${configured ? "" : `<div class="card callout-warning"><strong>AI is not configured yet.</strong><span>Add at least one AI provider key in the deployment environment, then restart ARIA. The rest of the cockpit can be explored, but replies will fail until a model is available.</span></div>`}
@@ -1001,7 +1025,8 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">01</span><span>Command center</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">01</span><span>Command center</span></div>`}
     <div class="navitem" data-pane="business"><span class="ico">02</span><span>Business OS</span></div>
     <div class="navitem" data-pane="integrations"><span class="ico">03</span><span>Integrations</span></div>
-    <a class="navitem" href="/dashboard/atlas"><span class="ico">04</span><span>Atlas projects</span></a>
+    <div class="navitem" data-pane="pairing"><span class="ico">04</span><span>Pair WhatsApp</span></div>
+    <a class="navitem" href="/dashboard/atlas"><span class="ico">05</span><span>Atlas projects</span></a>
     <div class="navitem" data-pane="activity"><span class="ico">04</span><span>Activity</span></div>
     <div class="navitem" data-pane="analytics"><span class="ico">05</span><span>Analytics</span></div>
     <div class="sb-group">Intelligence</div>
@@ -1031,13 +1056,13 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     ${passwordNeeded ? `<div class="card"><div class="empty">Set DASHBOARD_PASSWORD in env to access.</div></div>` : content}
   </main>
 </div>
-<nav class="mobile-nav" aria-label="Primary navigation"><a href="/dashboard"><span>01</span>Command</a><a href="/dashboard/atlas"><span>02</span>Atlas</a><a href="/dashboard?pane=missions"><span>10</span>Missions</a><a href="/dashboard?pane=downloads"><span>11</span>Downloads</a><a href="/dashboard?pane=health"><span>14</span>Health</a></nav>
+<nav class="mobile-nav" aria-label="Primary navigation"><a href="/dashboard"><span>01</span>Command</a><a href="/dashboard?pane=pairing"><span>04</span>Pair</a><a href="/dashboard/atlas"><span>05</span>Atlas</a><a href="/dashboard?pane=missions"><span>10</span>Missions</a><a href="/dashboard?pane=health"><span>14</span>Health</a></nav>
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};
 const STANDALONE_PANE=${JSON.stringify(standalonePane)};
 const INITIAL_PANE=${JSON.stringify(initialPane)};
-const titles={home:['Command',"ARIA core · live telemetry"],business:['Business OS','customers · pipeline · revenue'],integrations:['Integrations','cross-product readiness · safe defaults'],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
+const titles={home:['Command',"ARIA core · live telemetry"],business:['Business OS','customers · pipeline · revenue'],integrations:['Integrations','cross-product readiness · safe defaults'],pairing:['Pair WhatsApp','phone-number pairing · QR fallback · owner-only'],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
 const htmlEscClient=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function showPane(p){
@@ -1046,6 +1071,7 @@ function showPane(p){
   const el=document.getElementById('pane-'+p); if(el)el.classList.add('show');
   const t=titles[p]||['','']; const pt=document.querySelector('.page-title'); const ps=document.querySelector('.page-sub');
   if(pt)pt.textContent=t[0]; if(ps)ps.textContent=t[1];
+  if(p==='pairing') refreshPairing();
 }
 if(!STANDALONE_PANE){
   navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
@@ -1151,6 +1177,28 @@ async function checkProviders(){
     setTimeout(()=>location.reload(),600);
   }catch(_){}
 }
+function setPairingStatus(d){
+  const badge=document.getElementById('pairing-badge'), connection=document.getElementById('pairing-connection'), phone=document.getElementById('pairing-phone'), expiry=document.getElementById('pairing-expiry'), wrap=document.getElementById('pairing-code-wrap'), code=document.getElementById('pairing-code'), reset=document.getElementById('pairing-reset');
+  if(!badge||!connection)return;
+  const mode=String(d?.mode||'unknown'), labels={'connected':'connected','pairing-code':'code ready','reconnecting':'reconnecting','qr':'QR waiting','starting':'starting','connecting':'connecting'};
+  badge.textContent=labels[mode]||mode; badge.className='badge '+(mode==='connected'?'b-green':mode==='pairing-code'?'b-accent':mode==='reconnecting'?'b-amber':'b-muted');
+  connection.textContent=d?.ready?'Connected':(d?.connection||'Waiting'); phone.textContent=d?.phoneNumber||'—';
+  expiry.textContent=d?.secondsRemaining>0?('expires in '+d.secondsRemaining+'s'):(d?.lastError||'—');
+  if(wrap)wrap.style.display=d?.code?'block':'none'; if(code)code.textContent=d?.code||''; if(reset)reset.style.display=d?.pending?'inline-flex':'none';
+}
+async function refreshPairing(){
+  const pane=document.getElementById('pane-pairing'); if(!pane||!pane.classList.contains('show'))return;
+  try{const r=await fetch('/dashboard/api/pairing',{headers:{'Accept':'application/json'}}); if(!r.ok)throw new Error('Could not read pairing status.'); setPairingStatus(await r.json());}catch(error){const result=document.getElementById('pairing-result');if(result)result.textContent=error.message;}
+}
+async function requestPairingCode(event){
+  event.preventDefault(); const input=document.getElementById('pairing-number'), button=document.getElementById('pairing-submit'), result=document.getElementById('pairing-result'); if(!input||!button)return;
+  button.disabled=true; button.textContent='Requesting code…'; if(result)result.textContent='Contacting WhatsApp securely…';
+  try{const r=await fetch('/dashboard/api/pairing/code',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({_csrf:CSRF,phoneNumber:input.value})});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'WhatsApp could not issue a pairing code.');setPairingStatus(d);if(result)result.textContent=d.reused?'The existing code is still active.':'Code ready. Enter it in WhatsApp → Linked devices → Link with phone number instead.';}catch(error){if(result)result.textContent=error.message;}finally{button.disabled=false;button.textContent='Request WhatsApp code';}
+}
+async function resetPairing(){
+  const result=document.getElementById('pairing-result'); try{const r=await fetch('/dashboard/api/pairing/reset',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({_csrf:CSRF})});const d=await r.json();if(!r.ok)throw new Error(d.error||'Could not clear the pending code.');setPairingStatus(d);if(result)result.textContent='Pending pairing code cleared.';}catch(error){if(result)result.textContent=error.message;}
+}
+setInterval(refreshPairing,5000);
 // Live log console — SSE stream + client-side filter.
 const fmtT=(t)=>new Date(t).toLocaleTimeString();
 const lvlBadge=(l)=>l==='error'?'<span class="badge b-red">ERROR</span>':l==='warn'?'<span class="badge b-amber">WARN</span>':l==='debug'?'<span class="badge b-muted">DEBUG</span>':'<span class="badge b-accent">INFO</span>';
@@ -1282,6 +1330,36 @@ router.get("/api/live", checkAuth, (req, res) => {
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
+});
+
+// WhatsApp phone-number pairing — owner session + CSRF protected. The shared
+// controller keeps the code in memory only; this router never logs or persists it.
+function pairingActorId(req) {
+  return hashToken(req.cookies?.["aria_session"] || req.ip || "dashboard");
+}
+router.get("/api/pairing", checkAuth, (req, res) => {
+  try {
+    const pairing = require("./utils/whatsappPairing");
+    return res.json(pairing.getStatus({ includeCode: true }));
+  } catch (e) { return res.status(500).json({ error: "Pairing status unavailable" }); }
+});
+router.post("/api/pairing/code", checkAuth, async (req, res) => {
+  try {
+    const pairing = require("./utils/whatsappPairing");
+    const result = await pairing.requestPairingCode(req.body?.phoneNumber || req.body?.number, { actorId: pairingActorId(req), source: "dashboard" });
+    try { require("./utils/eventLog").track("pairing", result.success ? "Pairing code issued" : "Pairing request rejected", { status: result.code || "issued", phoneNumber: result.phoneNumber || undefined }); } catch (_) {}
+    if (result.success) return res.json(result);
+    const status = result.code === "rate_limited" || result.code === "cooldown" ? 429 : result.code === "pairing_in_progress" || result.code === "already_connected" ? 409 : result.code === "socket_unavailable" || result.code === "socket_not_open" ? 503 : 400;
+    return res.status(status).json(result);
+  } catch (e) { return res.status(500).json({ error: "Pairing request failed" }); }
+});
+router.post("/api/pairing/reset", checkAuth, (req, res) => {
+  try {
+    const pairing = require("./utils/whatsappPairing");
+    pairing.resetPending();
+    try { require("./utils/eventLog").track("pairing", "Pending pairing code cleared", { actor: pairingActorId(req) }); } catch (_) {}
+    return res.json(pairing.getStatus({ includeCode: true }));
+  } catch (e) { return res.status(500).json({ error: "Could not clear pairing state" }); }
 });
 
 // Health endpoints — anime sources + AI providers (auth-protected).
@@ -1709,6 +1787,7 @@ router.get("/", checkAuth, (req, res) => {
     let content = renderLiveStrip(ls);
     content += renderBusinessPane();
     content += renderIntegrationsPane(Boolean(req.app.locals.whatsappReady));
+    content += renderPairingPane();
     content += renderAnalyticsPane(a);
     content += renderAcademyPane(ad, selfUid, profile);
     try {
@@ -1789,7 +1868,7 @@ router.get("/", checkAuth, (req, res) => {
     content += renderHealthPane();
     content += renderLogsPane();
 
-    const requestedPane = ["home","business","integrations","activity","analytics","brain","memory","media","academy","learnerspace","missions","downloads","sources","incidents","health","logs","system","household","admin"].includes(String(req.query.pane || "")) ? String(req.query.pane) : "home";
+    const requestedPane = ["home","business","integrations","pairing","activity","analytics","brain","memory","media","academy","learnerspace","missions","downloads","sources","incidents","health","logs","system","household","admin"].includes(String(req.query.pane || "")) ? String(req.query.pane) : "home";
     res.send(renderPage("Home", content, false, false, csrfFor(req), false, requestedPane));
   } catch (e) {
     res.send(renderPage("Error", `<div class="card"><div class="empty">${e.message}</div></div>`));

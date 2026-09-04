@@ -163,3 +163,31 @@ test("telemetry: brain metrics have calculable definitions", () => {
   if (b.reliability.value != null) assert.ok(b.reliability.value >= 0 && b.reliability.value <= 100);
   assert.ok(Array.isArray(b.recurringFailures), "recurring failures is a list");
 });
+
+test("dashboard: renders the WhatsApp phone-number pairing pane", async () => {
+  const srv = await listen(makeApp());
+  const cookie = await login(srv);
+  const r = await req(srv, "GET", "/dashboard/?pane=pairing", { headers: { Cookie: cookie } });
+  assert.strictEqual(r.status, 200);
+  assert.ok(r.body.includes("Pair WhatsApp"), "pairing pane should be present");
+  assert.ok(r.body.includes("pairing-number"), "phone-number input should be present");
+  assert.ok(r.body.includes("Open QR pairing fallback"), "QR fallback should remain available");
+  await close(srv);
+});
+
+test("dashboard: pairing status requires auth and code requests require CSRF", async () => {
+  const srv = await listen(makeApp());
+  const anon = await req(srv, "GET", "/dashboard/api/pairing");
+  assert.strictEqual(anon.status, 401, "pairing status must be owner-authenticated");
+  const cookie = await login(srv);
+  const status = await req(srv, "GET", "/dashboard/api/pairing", { headers: { Cookie: cookie } });
+  assert.strictEqual(status.status, 200);
+  assert.equal(status.json.code, undefined, "status must not expose a code when none is active");
+  const missingCsrf = await req(srv, "POST", "/dashboard/api/pairing/code", { headers: { Cookie: cookie, "Content-Type": "application/json" }, body: { phoneNumber: "+2348012345678" } });
+  assert.strictEqual(missingCsrf.status, 403, "pairing mutation must require CSRF");
+  const csrf = dashboard.csrfFor({ cookies: { aria_session: cookie.slice("aria_session=".length) } });
+  const unavailable = await req(srv, "POST", "/dashboard/api/pairing/code", { headers: { Cookie: cookie, "Content-Type": "application/json" }, body: { _csrf: csrf, phoneNumber: "+2348012345678" } });
+  assert.strictEqual(unavailable.status, 503, "request should report unavailable socket rather than crash");
+  assert.doesNotMatch(unavailable.body, /2348012345678/);
+  await close(srv);
+});

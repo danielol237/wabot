@@ -11,7 +11,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Pair WhatsApp from the owner dashboard. Open `/dashboard`, sign in with `DASHBOARD_PASSWORD`, then choose **Pair WhatsApp**. The protected `/qr` screen shows either the QR or the phone-number pairing code; pairing is still available without exposing the credential to public visitors.
+Pair WhatsApp from the owner dashboard. Open `/dashboard`, sign in with `DASHBOARD_PASSWORD`, then choose **Pair WhatsApp**. Enter the complete international number, select **Request WhatsApp code**, and enter the displayed one-time code in WhatsApp under **Linked devices → Link a device → Link with phone number instead**. The protected `/qr` screen remains available as a QR or legacy pairing-code fallback; pairing codes are kept in memory and are never written to logs or disk.
 
 ## Environment Variables
 
@@ -47,7 +47,7 @@ Pair WhatsApp from the owner dashboard. Open `/dashboard`, sign in with `DASHBOA
 | `ANIME_PUBLIC_QUEUE_LIMIT` | No | Global public queue ceiling; default 100 |
 | `ARIA_HUMANIZER_TYPOS` | No | Opt-in presentation experiment; default `false` |
 | `ARIA_RANDOM_MOOD` | No | Opt-in random mood variation; default `false` |
-| `PHONE_NUMBER` | No | If set, enables pairing-code mode instead of QR |
+| `PHONE_NUMBER` | No | Optional unattended startup pairing number; dashboard phone-number pairing does not require this variable |
 
 ## Features
 

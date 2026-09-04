@@ -16,6 +16,7 @@ const { handleMessage } = require("./handlers/messageHandler");
 const { loadPlugins } = require("./utils/pluginLoader");
 const { log, error, warn } = require("./utils/logger");
 const { startTaskPoller } = require("./tools/taskPoller");
+const whatsappPairing = require("./utils/whatsappPairing");
 
 const TEMP_DIR = path.join(__dirname, "../temp");
 const SESSIONS_DIR = path.join(__dirname, "../sessions");
@@ -111,6 +112,10 @@ let pairingCodeRequested = false; // prevents re-requesting a new code on every 
 let isReady = false;
 let lastError = null;
 let sock = null;
+whatsappPairing.setRuntime({
+  getSocket: () => sock,
+  requestPairingCode: (phoneNumber) => sock?.requestPairingCode(phoneNumber),
+});
 function htmlEsc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -165,6 +170,10 @@ function pairingPage(title, content, refresh = 0) {
 app.get("/qr", checkAuth, (req, res) => {
   if (isReady) return res.send(pairingPage("WhatsApp connected", `<span class="status">Connected</span><h1>ARIA is online</h1><p class="sub">WhatsApp pairing is complete. Return to the dashboard to manage the bot.</p><a href="/dashboard">Back to dashboard</a>`));
   if (lastError) return res.send(pairingPage("Pairing error", `<span class="status error">Needs attention</span><h1>Pairing needs attention</h1><p class="sub">${htmlEsc(lastError)}</p><p class="sub">This page will retry automatically.</p>`, 5));
+  const sharedPairing = whatsappPairing.getStatus({ includeCode: true });
+  if (sharedPairing.code) {
+    return res.send(pairingPage("Pair with a code", `<span class="status">Secure owner pairing</span><h1>Enter this code in WhatsApp</h1><code class="code">${htmlEsc(sharedPairing.code)}</code><div class="steps">WhatsApp → Linked devices → Link a device → Link with phone number instead</div>`));
+  }
   if (USE_PAIRING_CODE) {
     if (!pairingCode) return res.send(pairingPage("Preparing pairing code", `<h1>Preparing pairing code</h1><p class="sub">Keep this page open. A new code will appear shortly.</p>`, 2));
     return res.send(pairingPage("Pair with a code", `<span class="status">Secure owner pairing</span><h1>Enter this code in WhatsApp</h1><code class="code">${htmlEsc(pairingCode)}</code><div class="steps">WhatsApp → Linked devices → Link a device → Link with phone number instead</div>`));
@@ -176,6 +185,7 @@ app.get("/qr", checkAuth, (req, res) => {
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
+  whatsappPairing.updateConnection("connecting", { ready: false, registered: !!state.creds.registered });
   const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
@@ -220,7 +230,11 @@ async function startBot() {
 
     if (connection === "open") {
       log("✅ ARIA is online and ready!");
-      isReady = true;
+      isReady = !!sock.authState.creds.registered;
+      whatsappPairing.updateConnection("open", {
+        ready: isReady,
+        registered: !!sock.authState.creds.registered,
+      });
       latestQrDataUrl = null;
       lastError = null;
       // Rebind socket-dependent delivery to the newest live connection on every reconnect.
@@ -294,12 +308,16 @@ async function startBot() {
       // Request pairing code once the connection is open and if not yet registered
       if (USE_PAIRING_CODE && !sock.authState.creds.registered && !pairingCodeRequested) {
         pairingCodeRequested = true;
-        sock.requestPairingCode(process.env.PHONE_NUMBER.replace(/[^0-9]/g, "")).then(code => {
-          pairingCode = code;
-          log(`\n📱 Pairing code: ${code}\n(Enter this in WhatsApp → Linked Devices → Link with phone number instead)\n`);
+        whatsappPairing.requestPairingCode(process.env.PHONE_NUMBER, { actorId: "env", source: "environment" }).then(result => {
+          if (result.success) pairingCode = result.code;
+          if (!result.success) {
+            error("Pairing code failed:", result.error);
+            pairingCodeRequested = false;
+          }
         }).catch(err => {
           error("Pairing code failed:", err.message);
           pairingCodeRequested = false;
+          whatsappPairing.setError(err);
         });
       } // safe to call again on reconnect — it clears any previous interval first
 
@@ -346,6 +364,10 @@ async function startBot() {
 
     if (connection === "close") {
       isReady = false;
+      whatsappPairing.updateConnection("close", {
+        ready: false,
+        registered: !!sock?.authState?.creds?.registered,
+      });
       if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
@@ -355,7 +377,7 @@ async function startBot() {
       // If we're mid-pairing (code issued, not yet registered), DON'T reconnect
       // immediately — that's what caused the loop. Give the person time to actually
       // type the code into WhatsApp before trying again.
-      const isPendingPairing = USE_PAIRING_CODE && !sock.authState.creds.registered && pairingCodeRequested;
+      const isPendingPairing = whatsappPairing.isPending() || (USE_PAIRING_CODE && !sock.authState.creds.registered && pairingCodeRequested);
       const reconnectDelay = isPendingPairing ? 45000 : 3000;
 
       if (isPendingPairing && statusCode !== DisconnectReason.loggedOut) {
@@ -369,11 +391,13 @@ async function startBot() {
           startBot().catch((err) => {
             error("Reconnect failed:", err.message);
             lastError = err.message;
+            whatsappPairing.setError(err);
           });
         }, reconnectDelay);
       } else {
         log("❌ Logged out. Need a fresh QR scan — clearing session.");
         lastError = "Logged out — restart the service to get a fresh QR.";
+        whatsappPairing.setError(lastError);
         pairingCodeRequested = false;
         // Clear session files so next boot generates a fresh QR
         try {
@@ -385,6 +409,7 @@ async function startBot() {
         setTimeout(() => startBot().catch((err) => {
           error("Restart after logout failed:", err.message);
           lastError = err.message;
+          whatsappPairing.setError(err);
         }), 5000);
       }
     }

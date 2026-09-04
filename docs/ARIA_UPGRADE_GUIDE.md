@@ -29,6 +29,9 @@ ARIA’s build operator is designed to proceed autonomously once the owner gives
 | `ARIA, run this JavaScript` | Uses the Docker-isolated code runner when available. Untrusted code is blocked if Docker is unavailable; host execution requires an explicit trusted opt-in. |
 | `ARIA, remind me tomorrow at 9` | Uses the existing reminder scheduler. Scheduled and background tasks may wait by design; ordinary chat replies never do. |
 
+## WhatsApp pairing from the dashboard
+Open the protected `/dashboard` route and sign in with `DASHBOARD_PASSWORD`. Choose **Pair WhatsApp**, enter the complete international number with country code (for example `+2348012345678`), and select **Request WhatsApp code**. In the WhatsApp application for that number, open **Linked devices → Link a device → Link with phone number instead**, then enter the code shown by ARIA. The code is kept in memory only, expires after a short window, is never written to logs or disk, and is rate-limited to prevent accidental or abusive repeated requests. If the code expires, request a new one; if the session is already connected, the dashboard will report that rather than issuing another code. The **Open QR pairing fallback** link remains available. Restart or redeploy ARIA after changing code or session configuration.
+
 ## Required deployment configuration
 
 The coding route uses the dedicated configured coding provider. Visual replies need at least one visual provider. Search, Vercel, voice, downloads, and scheduled delivery each depend on their corresponding credential or runtime.

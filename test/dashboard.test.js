@@ -191,3 +191,30 @@ test("dashboard: pairing status requires auth and code requests require CSRF", a
   assert.doesNotMatch(unavailable.body, /2348012345678/);
   await close(srv);
 });
+
+
+test("dashboard: command quick actions wire pairing and health cards to pane navigation", async () => {
+  const srv = await listen(makeApp());
+  const cookie = await login(srv);
+  const r = await req(srv, "GET", "/dashboard/", { headers: { Cookie: cookie } });
+  assert.strictEqual(r.status, 200);
+  assert.match(r.body, /class="quick-card" data-pane="pairing"/);
+  assert.match(r.body, /class="quick-card" data-pane="health"/);
+  assert.match(r.body, /const paneTriggers=document\.querySelectorAll\('\[data-pane\]'\)/);
+  assert.match(r.body, /paneTriggers\.forEach\(n=>n\.addEventListener\('click'/);
+  await close(srv);
+});
+
+
+test("dashboard: environment table exposes shared provider readiness without secrets", async () => {
+  const srv = await listen(makeApp());
+  const cookie = await login(srv);
+  const r = await req(srv, "GET", "/dashboard/?pane=system", { headers: { Cookie: cookie } });
+  assert.strictEqual(r.status, 200);
+  assert.match(r.body, /OPENROUTER_API_KEY/);
+  assert.match(r.body, /BRAVE_API_KEY/);
+  assert.match(r.body, /ZHIPU_API_KEY/);
+  assert.match(r.body, /Coding route/);
+  assert.doesNotMatch(r.body, /sk-or-v1-[A-Za-z0-9_-]{10,}/);
+  await close(srv);
+});

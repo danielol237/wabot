@@ -9,7 +9,7 @@ test("coding provider is locked to the selected high-quality model", () => {
   assert.match(codingProvider._test.CODING_ENDPOINT, /openrouter\.ai\/api\/v1\/chat\/completions$/);
 });
 
-test("coding provider recognizes valid OpenRouter key shape", () => {
+test("coding provider recognizes a valid OpenRouter key through the canonical variable", () => {
   const previous = process.env.OPENROUTER_API_KEY;
   process.env.OPENROUTER_API_KEY = "sk-or-v1-abcdefghijklmnopqrstuvwxyz";
   try {
@@ -17,6 +17,23 @@ test("coding provider recognizes valid OpenRouter key shape", () => {
   } finally {
     if (previous === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = previous;
+  }
+});
+
+test("coding provider recognizes an OpenRouter alias when the canonical variable is absent", () => {
+  const previousCanonical = process.env.OPENROUTER_API_KEY;
+  const previousAlias = process.env.OPENROUTER_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_KEY = "sk-or-v1-abcdefghijklmnopqrstuvwxyz";
+  try {
+    assert.equal(codingProvider.configured(), true);
+    assert.equal(codingProvider._test.credentialLooksUsable(), true);
+    assert.equal(codingProvider.providerStatus().keySource, "OPENROUTER_KEY");
+  } finally {
+    if (previousCanonical === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previousCanonical;
+    if (previousAlias === undefined) delete process.env.OPENROUTER_KEY;
+    else process.env.OPENROUTER_KEY = previousAlias;
   }
 });
 

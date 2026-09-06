@@ -32,6 +32,16 @@ ARIA’s build operator is designed to proceed autonomously once the owner gives
 ## WhatsApp pairing from the dashboard
 Open the protected `/dashboard` route and sign in with `DASHBOARD_PASSWORD`. Choose **Pair WhatsApp**, enter the complete international number with country code (for example `+2348012345678`), and select **Request WhatsApp code**. In the WhatsApp application for that number, open **Linked devices → Link a device → Link with phone number instead**, then enter the code shown by ARIA. The code is kept in memory only, expires after a short window, is never written to logs or disk, and is rate-limited to prevent accidental or abusive repeated requests. If the code expires, request a new one; if the session is already connected, the dashboard will report that rather than issuing another code. The **Open QR pairing fallback** link remains available. Restart or redeploy ARIA after changing code or session configuration.
 
+## Provider environment and coding readiness
+
+The dashboard’s **System** pane now uses the same runtime resolver as ARIA’s provider adapters. It lists OpenRouter, Groq, Cerebras, Gemini, Z.AI, MiniMax, Tavily, Brave Search, and ElevenLabs, including the detected variable name when a compatibility alias is used. Prefer the canonical names in `.env.example`, especially `OPENROUTER_API_KEY`; `OPENROUTER_KEY` and `OPEN_ROUTER_API_KEY` are accepted only for compatibility. After changing Render environment variables, restart or redeploy the service because the running process cannot see newly added values until it starts again. The dedicated coding route reports whether a credential was detected, whether its shape is usable, and which variable supplied it without revealing the key.
+
+## Long-term website memory and auto-upgrade
+
+Completed website projects retain a stable name, slug, chat ownership, saved verified file contents, revision history, deployment history, repository metadata, and last-used timestamps. Set `ARIA_PROJECT_DATA_DIR` to a mounted persistent-disk directory on Render when you need local project state to survive service replacement. Publishing the verified project to GitHub is still recommended as the durable source backup.
+
+After a project has been built, use natural language. For example, say `ARIA, remember the restaurant website we built`, `ARIA, reopen the restaurant website`, or `ARIA, what did we build last week?` to retrieve its saved identity, revision, files, and deployment links. Then say `ARIA, auto upgrade the restaurant website`, `ARIA, improve this website: remove the generic hero copy`, or `ARIA, polish the design and make the empty states useful`. ARIA reopens the stored files, changes only a bounded set of relevant files, runs the existing source safety checks, records a new revision, and redeploys a Vercel preview automatically when the project already has a Vercel deployment and `VERCEL_AUTO_DEPLOY=true`.
+
 ## Required deployment configuration
 
 The coding route uses the dedicated configured coding provider. Visual replies need at least one visual provider. Search, Vercel, voice, downloads, and scheduled delivery each depend on their corresponding credential or runtime.

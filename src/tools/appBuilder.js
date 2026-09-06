@@ -14,6 +14,8 @@ const {
   getProject,
   getActiveProjectForChat,
   getAllProjectsForChat,
+  resolveProjectForChat,
+  recordRevision,
   markFileStatus,
   advanceProject,
   setProjectStatus,
@@ -949,8 +951,8 @@ async function deployProject(chatId, projectId = null, options = {}) {
   }
 }
 
-function getProjectStatus(chatId, projectId = null) {
-  const project = projectId ? getProject(projectId) : getActiveProjectForChat(chatId);
+function getProjectStatus(chatId, projectReference = null) {
+  const project = projectReference ? resolveProjectForChat(chatId, projectReference) : (getActiveProjectForChat(chatId) || resolveProjectForChat(chatId));
   if (!project) return null;
   return { project, progress: getProgress(project) };
 }
@@ -1013,6 +1015,78 @@ Apply this change and return the COMPLETE updated file content. No explanations,
     content: newContent,
     warning: verification.valid ? null : `Heads up — this edit may have introduced an issue: ${verification.error}`,
   };
+}
+
+async function autoUpgradeProject(chatId, instruction, senderName, projectReference = null, onProgress = null) {
+  const project = resolveProjectForChat(chatId, projectReference);
+  if (!project) return { success: false, error: "I couldn't find that website in this chat's saved projects." };
+  const candidates = (project.files || []).filter((file) => ["done", "done_with_warning"].includes(file.status) && getFileContent(project.id, file.path) !== null);
+  if (!candidates.length) return { success: false, error: `Project ${project.id} has no saved files available to upgrade.` };
+  const request = String(instruction || "").trim() || "Improve the overall visual quality, specificity, responsiveness, accessibility, and interaction polish. Remove generic AI-slop patterns without changing the product's core purpose.";
+  const lower = request.toLowerCase();
+  const mentioned = candidates.filter((file) => lower.includes(file.path.toLowerCase()) || lower.includes(path.basename(file.path).toLowerCase()));
+  const targets = (mentioned.length ? mentioned : candidates).slice(0, 6);
+  const projectSummary = candidates.map((file) => `${file.path}: ${file.description}`).join("\\n");
+  const changed = [];
+  const updates = new Map();
+  const warnings = [];
+  for (const file of targets) {
+    if (onProgress) await onProgress(`✨ *Auto-upgrade:* improving ${file.path}...`);
+    const current = getFileContent(project.id, file.path);
+    const prompt = `You are upgrading an existing website project called "${project.name || project.goal}".\\n\\nProject files:\\n${projectSummary}\\n\\nTarget file: ${file.path}\\nCurrent content:\\n${current}\\n\\nOwner request: ${request}\\n\\nReturn the COMPLETE updated file only. Preserve working APIs and neighboring file contracts. Make the design intentional and specific: remove generic AI-slop copy, empty sections, fake testimonials, excessive gradients, arbitrary rounded cards, and boilerplate marketing language. Add useful states and accessible responsive behavior where appropriate. Do not add dependencies or secrets unless the existing project already uses them.`;
+    try {
+      const response = await generateCodingText(prompt, { system: CODE_SYSTEM_PROMPT, maxTokens: 16000, temperature: 0.18 });
+      const content = response.replace(/^```[\\w]*\\n?/, "").replace(/```$/, "").trim();
+      if (!content || hasProviderFailureText(content)) throw new Error("provider returned unusable source content");
+      const verification = verifyFile(file.path, content);
+      if (!verification.valid) {
+        warnings.push(`${file.path}: ${verification.error}`);
+        continue;
+      }
+      updates.set(file.path, content);
+      changed.push(file.path);
+    } catch (err) {
+      warnings.push(`${file.path}: ${String(err.message || err).slice(0, 240)}`);
+    }
+  }
+  if (!changed.length) return { success: false, projectId: project.id, error: "The upgrade made no safe verified changes.", warnings };
+
+  const upgradeDir = path.join(TEMP_DIR, `upgrade_${project.id}_${Date.now()}`);
+  cleanupDir(upgradeDir);
+  try {
+    fs.mkdirSync(upgradeDir, { recursive: true });
+    for (const file of candidates) {
+      const safeRel = safeRelativePath(file.path);
+      if (!safeRel) throw new Error(`unsafe stored project path: ${file.path}`);
+      const fullPath = path.join(upgradeDir, safeRel);
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      fs.writeFileSync(fullPath, updates.get(file.path) || getFileContent(project.id, file.path) || "", "utf8");
+    }
+    const storedPaths = candidates.map((file) => file.path);
+    const staticIssues = checkFrontendConsistency(upgradeDir, storedPaths);
+    const quality = checkWebsiteQuality(upgradeDir, storedPaths);
+    const blocking = [
+      ...staticIssues.filter((issue) => /no matching CSS rule|theme may do nothing|never expand|fake image|crashes on load|features won't work|Typo:|Missing <meta name=['\"]viewport/i.test(issue.issue)),
+      ...(quality.blocking || []),
+    ];
+    if (quality.all?.length || staticIssues.length) {
+      warnings.push(`Quality review: ${[...staticIssues, ...(quality.all || [])].length} issue(s) remain after the upgrade.`);
+    }
+    if (blocking.length) return { success: false, projectId: project.id, error: "The proposed upgrade failed the website quality gate, so the previous saved version was kept.", warnings: [...warnings, ...blocking.slice(0, 5).map((issue) => `${issue.file}: ${issue.issue}`)] };
+    for (const [filePath, content] of updates) saveFileContent(project.id, filePath, content);
+  } catch (err) {
+    return { success: false, projectId: project.id, error: `The proposed upgrade could not be verified: ${String(err.message || err).slice(0, 240)}`, warnings };
+  } finally {
+    cleanupDir(upgradeDir);
+  }
+
+  recordRevision(project.id, "auto-upgrade", request, changed);
+  let deployment = null;
+  if (project.deployment?.provider === "vercel" && process.env.VERCEL_TOKEN && process.env.VERCEL_AUTO_DEPLOY === "true") {
+    if (onProgress) await onProgress("🌐 *Auto-upgrade:* redeploying the updated verified project to Vercel preview...");
+    deployment = await deployProject(chatId, project.id, { target: "preview" });
+  }
+  return { success: true, projectId: project.id, projectName: project.name || project.goal, revision: getProject(project.id)?.revision || null, changed, warnings, deployment: deployment?.success ? deployment : null };
 }
 
 // ── Real build verification: actually runs npm install + npm run build ──
@@ -1220,6 +1294,6 @@ async function publishProjectToGitHub(chatId, projectId, options = {}) {
 
 module.exports = {
   buildProject, continueProject, deployProject, publishProjectToGitHub, getProjectStatus, listProjects, cancelProject,
-  thinkAboutProject, getPendingPlan, editProjectFile,
+  thinkAboutProject, getPendingPlan, editProjectFile, autoUpgradeProject,
   _test: { mergePlannedFiles, safeRelativePath, checkFrontendConsistency, runBuildVerification, matchTemplate, scaffoldFromTemplate, shouldResearchBuild, slugify },
 };

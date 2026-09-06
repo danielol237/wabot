@@ -156,3 +156,22 @@ test("natural routing resolves V8 connected-delivery controls without a prefix",
   ];
   for (const phrase of phrases) assert.equal(router.resolveNaturalAction(phrase).intent, "atlas", phrase);
 });
+
+
+test("natural routing resolves named website recall and auto-upgrade requests", () => {
+  const recall = router.resolveNaturalAction("ARIA remember the restaurant website we built");
+  assert.equal(recall.intent, "projectrecall");
+  assert.match(recall.args, /restaurant website/i);
+  const upgrade = router.resolveNaturalAction("ARIA auto upgrade the restaurant website");
+  assert.equal(upgrade.intent, "projectupgrade");
+  assert.match(upgrade.args, /restaurant website/i);
+  const polish = router.resolveNaturalAction("ARIA improve this website: remove the generic hero copy");
+  assert.equal(polish.intent, "projectupgrade");
+  assert.match(polish.args, /generic hero copy/i);
+});
+
+
+test("natural routing keeps project improvement follow-ups in the project-upgrade flow", () => {
+  assert.equal(router.resolveNaturalAction("ARIA improve the design").intent, "projectupgrade");
+  assert.equal(router.resolveNaturalAction("ARIA make some changes").intent, "projectupgrade");
+});

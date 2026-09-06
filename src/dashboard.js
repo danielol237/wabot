@@ -244,10 +244,14 @@ function collectData() {
   try { const mm = tryLoad("./tools/mediaMemory"); mediaMem = mm && mm.getAllMedia ? mm.getAllMedia("*", 10) : []; } catch (_) {}
   let households = [];
   try { const hh = tryLoad("./tools/household"); households = hh && hh.listHouseholds ? hh.listHouseholds() : []; } catch (_) {}
-  const aiKeys = ["OPENROUTER_API_KEY","GROQ_API_KEY","CEREBRAS_API_KEY","GEMINI_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"];
-  const keysSet = aiKeys.filter((k) => process.env[k]).length;
+  const providerConfig = tryLoad("./utils/providerConfig");
+  const providerStatuses = providerConfig?.listStatus ? providerConfig.listStatus() : [];
+  const aiKeys = providerStatuses.length ? providerStatuses.map((item) => item.key) : ["OPENROUTER_API_KEY","GROQ_API_KEY","CEREBRAS_API_KEY","GEMINI_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"];
+  const keysSet = providerStatuses.length ? providerStatuses.filter((item) => item.configured).length : aiKeys.filter((k) => process.env[k]).length;
+  let codingStatus = null;
+  try { codingStatus = require("./tools/codingProvider").providerStatus(); } catch (_) {}
 
-  return { os, hrs, mins, memMB, stats, errors, missions, activeMissions, memories, mediaMem, households, keysSet, aiKeys };
+  return { os, hrs, mins, memMB, stats, errors, missions, activeMissions, memories, mediaMem, households, keysSet, aiKeys, providerStatuses, codingStatus };
 }
 
 // Anime download job panel — reads live state from the anime job manager.
@@ -1064,6 +1068,7 @@ const STANDALONE_PANE=${JSON.stringify(standalonePane)};
 const INITIAL_PANE=${JSON.stringify(initialPane)};
 const titles={home:['Command',"ARIA core · live telemetry"],business:['Business OS','customers · pipeline · revenue'],integrations:['Integrations','cross-product readiness · safe defaults'],pairing:['Pair WhatsApp','phone-number pairing · QR fallback · owner-only'],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
 const navs=document.querySelectorAll('.navitem');
+const paneTriggers=document.querySelectorAll('[data-pane]');
 const htmlEscClient=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function showPane(p){
   navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
@@ -1074,7 +1079,7 @@ function showPane(p){
   if(p==='pairing') refreshPairing();
 }
 if(!STANDALONE_PANE){
-  navs.forEach(n=>n.addEventListener('click',()=>showPane(n.dataset.pane)));
+  paneTriggers.forEach(n=>n.addEventListener('click',(event)=>{event.preventDefault();showPane(n.dataset.pane);}));
   showPane(INITIAL_PANE);
 }else{
   document.getElementById('pane-atlas')?.classList.add('show');
@@ -1849,8 +1854,9 @@ router.get("/", checkAuth, (req, res) => {
         <div class="row"><span class="k">Platform</span><span class="v">${d.os.platform?.()||"?"} ${d.os.arch?.()||""}</span></div>
         <div class="row"><span class="k">CPU</span><span class="v">${d.os.cpus?.().length||"?"} cores</span></div>
       </div>
-      <div class="card"><div class="h">AI Providers</div>
-        ${d.aiKeys.map(k=>`<div class="row"><span class="k mono">${k}</span><span class="badge ${process.env[k]?"b-green":"b-muted"}">${process.env[k]?"on":"off"}</span></div>`).join("")}
+      <div class="card"><div class="h">AI Providers <span class="badge b-accent">${esc(d.keysSet)} ready</span></div>
+        ${(d.providerStatuses || []).map(item=>`<div class="row"><span class="k"><span class="mono">${esc(item.key)}</span><small style="display:block;color:var(--faint);font-size:10px">${esc(item.role || "")}${item.source && item.source !== item.key ? ` · detected via ${esc(item.source)}` : ""}</small></span><span class="badge ${item.configured?"b-green":"b-muted"}">${item.configured?"ready":"off"}</span></div>`).join("") || d.aiKeys.map(k=>`<div class="row"><span class="k mono">${k}</span><span class="badge ${process.env[k]?"b-green":"b-muted"}">${process.env[k]?"on":"off"}</span></div>`).join("")}
+        ${d.codingStatus ? `<div class="feed-item" style="margin-top:10px"><div class="feed-ico">⌘</div><div class="feed-body"><div class="t">Coding route · ${esc(d.codingStatus.model)}</div><div class="s">${d.codingStatus.configured ? `credential ${esc(d.codingStatus.keySource || d.codingStatus.keyName)} detected · ${esc(d.codingStatus.keyShape)}` : "credential not detected; restart after changing Render environment variables"}</div></div></div>` : ""}
       </div>
     </div>`;
 

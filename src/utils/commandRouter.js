@@ -64,7 +64,7 @@ const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
 
 const { setReminder } = require("../tools/reminders");
-const { buildProject, deployProject, publishProjectToGitHub, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile } = require("../tools/appBuilder");
+const { buildProject, deployProject, publishProjectToGitHub, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile, autoUpgradeProject } = require("../tools/appBuilder");
 const { handleEngineeringRequest } = require("../tools/engineeringSystem");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
 const { handleAriaLifeFeature } = require("../tools/ariaLifeFeatures");
@@ -293,6 +293,8 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
   registerCommand({ name: "projects", aliases: ["mylist"], category: "dev", description: "List projects", handler: handleProjectList, ownerOnly: false });
   registerCommand({ name: "cancelbuild", aliases: ["cancel"], category: "dev", description: "Cancel a project", handler: handleProjectCancel, ownerOnly: true });
   registerCommand({ name: "edit", aliases: [], category: "dev", description: "Edit a project file", handler: handleEditFile, ownerOnly: true });
+  registerCommand({ name: "projectrecall", aliases: ["site", "website"], category: "dev", description: "Recall a saved website project", handler: handleProjectRecall, ownerOnly: true });
+  registerCommand({ name: "projectupgrade", aliases: ["autoupgrade", "polishsite"], category: "dev", description: "Auto-upgrade a saved website", handler: handleProjectUpgrade, ownerOnly: true });
   registerCommand({ name: "think", aliases: [], category: "dev", description: "Think about a project", handler: handleThink, ownerOnly: true });
   registerCommand({ name: "fix", aliases: ["debug"], category: "dev", description: "Debug code", handler: handleDebugCode, ownerOnly: true });
   registerCommand({ name: "remember", aliases: [], category: "dev", description: "Remember a preference", handler: handleRemember, ownerOnly: false });
@@ -425,6 +427,14 @@ function resolveExplicitNaturalCommand(cleaned) {
     return command ? { handler: command.handler, intent: command.name, args, command } : null;
   };
 
+  const recallPrefix = lower.match(/^(?:remember|reopen|open|load|find|show me)\s+(?:that|the|my)?\s*(.+)$/i);
+  if (recallPrefix && /(?:website|web\s*app|site|project)\b/i.test(recallPrefix[1]) && !/^(?:the\s+)?(?:anime|dashboard)\b/i.test(recallPrefix[1])) {
+    const reference = recallPrefix[1].replace(/\s+(?:that\s+)?(?:we|i)\s+(?:built|made|created)$/i, "").trim();
+    return makeCommand("projectrecall", reference);
+  }
+  const upgradePrefix = lower.match(/^(?:auto[- ]?upgrade|upgrade|improve|polish|modernize|refresh)\s+(.+)$/i);
+  if (upgradePrefix && /(?:website|web\s*app|site|project|it|this)\b/i.test(upgradePrefix[1])) return makeCommand("projectupgrade", upgradePrefix[1].trim());
+  if (/^(?:improve|polish|refresh|modernize)\s+(?:the\s+)?(?:design|ui|ux|look|appearance)\b/i.test(lower) || /^(?:make|do)\s+(?:some|a few)\s+(?:changes|updates)\b/i.test(lower)) return makeCommand("projectupgrade", lower);
   if (/^(?:what|which)\s+(?:modules|packages|capabilities)\b.*\b(?:installed|have|available)\b/i.test(lower) || /^(?:inspect|show)\s+(?:(?:your|aria'?s|the bot'?s)\s+)?(?:system|modules|capabilities|installed)\b/i.test(lower)) return makeCommand("engineering", "status");
   if (/^(?:approve|apply|execute)\s+(?:the\s+)?(?:upgrade|engineering)\s+(upgrade_[a-z0-9_]+)$/i.test(lower)) return makeCommand("engineering", `approve ${lower.match(/(upgrade_[a-z0-9_]+)$/i)[1]}`);
   if (/^(?:verify|check|test)\s+(?:the\s+)?(?:upgrade|engineering)\s+(upgrade_[a-z0-9_]+)$/i.test(lower)) return makeCommand("engineering", `verify ${lower.match(/(upgrade_[a-z0-9_]+)$/i)[1]}`);
@@ -2125,6 +2135,52 @@ async function handleProjectList(sock, msg, args, ctx) {
   const { reply } = require("../utils/baileysHelpers");
   const result = await listProjects(ctx.chatId);
   await reply(sock, msg, formatProjectList(result));
+}
+
+function parseProjectReference(text) {
+  const value = String(text || "").trim();
+  const match = value.match(/^(?:the|my|that|this)\\s+(.+?(?:website|web\\s*app|site|project))(?:\\s+(?:we\\s+)?(?:built|made|created))?$/i);
+  return (match ? match[1] : value).trim();
+}
+
+function formatProjectRecall(result) {
+  if (!result) return "❌ I couldn't find a saved website project for this chat.";
+  const project = result.project || {};
+  const progress = result.progress || {};
+  const history = Array.isArray(project.history) ? project.history.slice(-4) : [];
+  let text = `🧠 *Project remembered*\\n\\n🏷️ ${project.name || project.goal || "Untitled website"}\\n🆔 ${project.id || "unknown"}\\nState: *${project.status || "unknown"}*\\nFiles: ${progress.done || 0}/${progress.total || 0}`;
+  if (project.revision != null) text += `\\nRevision: ${project.revision}`;
+  if (project.deployment?.url) text += `\\n🌐 ${project.deployment.target || "preview"}: ${project.deployment.url}`;
+  if (project.deployment?.repository) text += `\\n🐙 Repository: ${project.deployment.repository}`;
+  if (history.length) text += `\\n\\nRecent history:\\n${history.map((item) => `• r${item.revision} ${item.action}${item.summary ? ` — ${item.summary}` : ""}`).join("\\n")}`;
+  text += "\\n\\nYou can say: *auto upgrade it*, *improve the design*, or tell me the exact change.";
+  return text;
+}
+
+async function handleProjectRecall(sock, msg, args, ctx) {
+  const { reply } = require("../utils/baileysHelpers");
+  const { getProjectStatus } = require("../tools/appBuilder");
+  const reference = parseProjectReference(args);
+  const result = getProjectStatus(ctx.chatId, reference || null);
+  return reply(sock, msg, formatProjectRecall(result));
+}
+
+async function handleProjectUpgrade(sock, msg, args, ctx) {
+  const { reply, react } = require("../utils/baileysHelpers");
+  let request = String(args || "").trim();
+  let reference = null;
+  const match = request.match(/^(?:the|my|that|this)\\s+(.+?(?:website|web\\s*app|site|project))(?:\\s+(?:we\\s+)?(?:built|made|created))?(?:\\s*[:,-]\\s*(.*))?$/i);
+  if (match) { reference = match[1].trim(); request = String(match[2] || "").trim(); }
+  await react(sock, msg, "✨");
+  await reply(sock, msg, "✨ Auto-upgrade started. I’m reopening the saved project, improving it, and checking the result...");
+  const onProgress = async (update) => { try { await reply(sock, msg, `⏳ ${update}`); } catch (_) {} };
+  const result = await autoUpgradeProject(ctx.chatId, request, ctx.senderName, reference, onProgress);
+  if (!result.success) return reply(sock, msg, `❌ ${result.error}${result.warnings?.length ? `\\n\\n${result.warnings.join("\\n")}` : ""}`);
+  let text = `✅ *Auto-upgrade complete*\\n\\n🏷️ ${result.projectName}\\n🆔 ${result.projectId}\\nRevision: ${result.revision}\\nUpdated: ${result.changed.join(", ")}`;
+  if (result.warnings?.length) text += `\\n\\n⚠️ Warnings:\\n${result.warnings.join("\\n")}`;
+  if (result.deployment?.url) text += `\\n\\n🌐 Updated Vercel preview: ${result.deployment.url}`;
+  else if (process.env.VERCEL_TOKEN) text += "\\n\\nℹ️ Changes are saved. Automatic preview redeploy was not enabled or no existing Vercel deployment was recorded.";
+  return reply(sock, msg, text);
 }
 
 async function handleProjectCancel(sock, msg, args, ctx) {

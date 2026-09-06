@@ -1,19 +1,29 @@
 const axios = require("axios");
+const providerConfig = require("../utils/providerConfig");
 
 const CODING_PROVIDER = "openrouter";
 const CODING_MODEL = "anthropic/claude-opus-4.7";
 const CODING_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 const REQUEST_TIMEOUT_MS = 120000;
 
+function resolvedCredential() {
+  return providerConfig.resolve("openrouter");
+}
+
 function configured() {
-  return Boolean(String(process.env.OPENROUTER_API_KEY || "").trim());
+  return resolvedCredential().configured;
 }
 
 function providerStatus() {
+  const credential = resolvedCredential();
   return {
-    configured: configured(),
+    configured: credential.configured,
     provider: CODING_PROVIDER,
     model: CODING_MODEL,
+    keyName: credential.key,
+    keySource: credential.source,
+    keyShape: credential.configured ? (credential.value.length >= 12 ? "present" : "short") : "missing",
+    aliasesChecked: credential.aliases,
   };
 }
 
@@ -26,7 +36,7 @@ function codingProviderError(message, code = "CODING_PROVIDER_ERROR") {
 }
 
 function credentialLooksUsable() {
-  const key = String(process.env.OPENROUTER_API_KEY || "").trim();
+  const key = resolvedCredential().value;
   return /^sk-or-v1-[A-Za-z0-9_-]{20,}$/.test(key);
 }
 
@@ -45,7 +55,7 @@ function normalizeProviderFailure(error) {
 async function generateCodingText(prompt, options = {}) {
   if (!configured()) {
     throw codingProviderError(
-      "The dedicated coding provider is not configured. Set OPENROUTER_API_KEY in the bot runtime, then retry the build.",
+      "The dedicated coding provider is not configured. Set OPENROUTER_API_KEY in the bot runtime (aliases accepted: OPENROUTER_KEY or OPEN_ROUTER_API_KEY), then restart the bot and retry the build.",
       "CODING_PROVIDER_NOT_CONFIGURED"
     );
   }
@@ -82,7 +92,7 @@ async function generateCodingText(prompt, options = {}) {
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          Authorization: `Bearer ${resolvedCredential().value}`,
           "Content-Type": "application/json",
           "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://aria.local",
           "X-Title": "ARIA Coding Builder",
@@ -106,5 +116,5 @@ module.exports = {
   configured,
   providerStatus,
   generateCodingText,
-  _test: { CODING_PROVIDER, CODING_MODEL, CODING_ENDPOINT, codingProviderError, credentialLooksUsable, normalizeProviderFailure },
+  _test: { CODING_PROVIDER, CODING_MODEL, CODING_ENDPOINT, codingProviderError, credentialLooksUsable, normalizeProviderFailure, resolvedCredential },
 };

@@ -305,6 +305,15 @@ async function startBot() {
         require("./utils/eventLog").track("system", "ARIA came online");
       } catch (_) {}
 
+      // A dashboard phone request may have been queued while the QR-mode socket
+      // was connecting. Issue it now that Baileys is open.
+      if (!sock.authState.creds.registered) {
+        whatsappPairing.issuePendingPairingCode().then((result) => {
+          if (result?.success) log("📱 Dashboard phone pairing code is ready.");
+          if (result && !result.success) error("Dashboard pairing code failed:", result.error);
+        }).catch((err) => error("Dashboard pairing code failed:", err.message));
+      }
+
       // Request pairing code once the connection is open and if not yet registered
       if (USE_PAIRING_CODE && !sock.authState.creds.registered && !pairingCodeRequested) {
         pairingCodeRequested = true;

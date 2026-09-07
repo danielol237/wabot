@@ -18,6 +18,8 @@ const state = {
   codeIssuedAt: null,
   codeExpiresAt: null,
   requestSource: null,
+  pendingPhoneNumber: null,
+  pendingActorId: null,
   lastError: null,
   lastUpdatedAt: Date.now(),
 };
@@ -52,6 +54,11 @@ function clearCode() {
   state.codeIssuedAt = null;
   state.codeExpiresAt = null;
   state.requestSource = null;
+}
+
+function clearPendingRequest() {
+  state.pendingPhoneNumber = null;
+  state.pendingActorId = null;
 }
 
 function expireIfNeeded() {
@@ -151,19 +158,26 @@ async function requestPairingCode(value, options = {}) {
   }
   const socket = runtime.getSocket?.();
   if (!socket || typeof runtime.requestPairingCode !== "function") {
-    return { success: false, code: "socket_unavailable", error: "WhatsApp is still starting. Wait for the connection status to become ready, then try again." };
-  }
-  if (state.connection !== "open") {
-    return { success: false, code: "socket_not_open", error: "WhatsApp is not ready to issue a pairing code yet. Wait a moment and try again." };
+    return { success: false, code: "socket_unavailable", error: "WhatsApp is still starting. Keep this page open and try again when the session is online." };
   }
   state.mode = "pairing-code";
   state.phoneNumber = phoneNumber;
   state.requestSource = String(options.source || "dashboard").slice(0, 24);
   state.lastError = null;
   state.lastUpdatedAt = now();
+  if (state.connection !== "open") {
+    state.pendingPhoneNumber = phoneNumber;
+    state.pendingActorId = String(options.actorId || "dashboard").slice(0, 160);
+    return { success: false, pending: true, code: "waiting_for_socket", ...getStatus(), error: "Phone number saved. Waiting for WhatsApp to finish connecting; the code will appear here automatically." };
+  }
+  return issuePairingCode(phoneNumber);
+}
+
+async function issuePairingCode(phoneNumber) {
   try {
     const code = await runtime.requestPairingCode(phoneNumber);
     if (!code) throw new Error("WhatsApp returned an empty pairing code.");
+    clearPendingRequest();
     state.code = String(code).replace(/\s+/g, "").slice(0, 32);
     state.codeIssuedAt = now();
     state.codeExpiresAt = state.codeIssuedAt + CODE_TTL_MS;
@@ -177,9 +191,16 @@ async function requestPairingCode(value, options = {}) {
   }
 }
 
+async function issuePendingPairingCode() {
+  const number = state.pendingPhoneNumber;
+  if (!number || state.ready || state.registered || state.connection !== "open") return null;
+  return issuePairingCode(number);
+}
+
 function resetPending() {
   if (state.ready || state.registered) return false;
   clearCode();
+  clearPendingRequest();
   state.mode = "qr";
   state.lastError = null;
   state.lastUpdatedAt = now();
@@ -193,6 +214,7 @@ module.exports = {
   updateConnection,
   setError,
   requestPairingCode,
+  issuePendingPairingCode,
   resetPending,
   isPending,
   getStatus,
@@ -213,5 +235,6 @@ module.exports._test.reset = () => {
   state.lastError = null;
   state.lastUpdatedAt = now();
   clearCode();
+  clearPendingRequest();
   actorRequests.clear();
 };

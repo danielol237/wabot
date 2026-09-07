@@ -78,3 +78,23 @@ test("pairing request failures return a safe generic error", async () => {
   assert.doesNotMatch(result.error, /private provider detail/i);
   assert.equal(pairing.getStatus().code, undefined);
 });
+
+test("phone pairing queues a number while the socket connects and issues it when open", async () => {
+  reset();
+  let issuedFor = null;
+  pairing.setRuntime({
+    getSocket: () => ({}),
+    requestPairingCode: async (number) => { issuedFor = number; return "ABCD-EFGH"; },
+  });
+  pairing.updateConnection("connecting", { ready: false, registered: false });
+  const pending = await pairing.requestPairingCode("+2348012345678", { actorId: "queue-test" });
+  assert.equal(pending.success, false);
+  assert.equal(pending.pending, true);
+  assert.equal(pending.code, "waiting_for_socket");
+  pairing.updateConnection("open", { ready: false, registered: false });
+  const issued = await pairing.issuePendingPairingCode();
+  assert.equal(issued.success, true);
+  assert.equal(issued.code, "ABCD-EFGH");
+  assert.equal(issuedFor, "2348012345678");
+  reset();
+});

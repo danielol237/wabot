@@ -29,7 +29,8 @@ function providerErrorMessage(error, fallback) {
   return error?.response?.data?.error?.message || error?.response?.data?.message || error?.message || fallback;
 }
 
-const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
+const AI_PROVIDER_TIMEOUT_MS = Math.max(5000, Math.min(Number(process.env.AI_PROVIDER_TIMEOUT_MS) || 20000, 60000));
+const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: AI_PROVIDER_TIMEOUT_MS }) : null;
 
 // Gemini's free tier: ~1,500 requests/day, 1M token context, no credit card.
 // We call Google's NATIVE REST API (generateContent) because the newer
@@ -38,7 +39,7 @@ const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 // Keep this list on currently supported Google API model IDs. Update it from
 // Google's model catalogue before a model retirement reaches production.
-const GEMINI_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
+const GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
 // Groq's free tier caps total tokens-per-minute (prompt + history + response) at
 // 8000 for some models, and Groq retires models without much notice — so this is
 // a fallback chain (primary → next) and Groq gets a safer, lower token cap.
@@ -323,7 +324,7 @@ const { chatGPT } = require("./gpt5Cli");
               Authorization: `Bearer ${process.env.CEREBRAS_API_KEY}`,
               "Content-Type": "application/json",
             },
-            timeout: 30000,
+            timeout: AI_PROVIDER_TIMEOUT_MS,
           }
         );
         const finishReason = res.data.choices[0]?.finish_reason;
@@ -373,7 +374,7 @@ const { chatGPT } = require("./gpt5Cli");
               "x-goog-api-key": process.env.GEMINI_API_KEY,
               "Content-Type": "application/json",
             },
-            timeout: 40000,
+            timeout: AI_PROVIDER_TIMEOUT_MS,
           }
         );
         const candidate = res.data.candidates && res.data.candidates[0];
@@ -445,6 +446,7 @@ const { chatGPT } = require("./gpt5Cli");
               Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
               "Content-Type": "application/json",
             },
+            timeout: AI_PROVIDER_TIMEOUT_MS,
           }
         );
         const rawContent = res.data.choices[0]?.message?.content;

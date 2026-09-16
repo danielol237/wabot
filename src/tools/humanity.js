@@ -136,24 +136,13 @@ function getTypingDelay(userJid, messageLength) {
 }
 
 async function humanDelay(sock, chatId, userJid, messageLength) {
-  // Skip the artificial human-like typing delay so replies feel instant.
-  // (Set HUMAN_DELAY=true if you ever want the old "realism" delays back.)
-  if (process.env.HUMAN_DELAY !== "true") {
-    // No typing indicator, no delay — reply goes out immediately and silently.
-    // This stops the stray "composing" bubble from flashing on every reply.
-    return;
-  }
-  const delay = getTypingDelay(userJid, messageLength);
+  // ARIA is an agent, not a role-play typing simulator: never hold a reply
+  // behind a multi-second artificial sleep. HUMAN_DELAY is retained only as
+  // an opt-in composing indicator for clients that want visible activity.
+  if (process.env.HUMAN_DELAY !== "true") return;
   try {
-    // Show typing indicator
     await sock.sendPresenceUpdate("composing", chatId);
-    await new Promise(r => setTimeout(r, delay * 0.6));
-    // Pause mid-thought (the pause before a reply)
     await sock.sendPresenceUpdate("paused", chatId);
-    await new Promise(r => setTimeout(r, delay * 0.2));
-    // Start typing again
-    await sock.sendPresenceUpdate("composing", chatId);
-    await new Promise(r => setTimeout(r, delay * 0.2));
   } catch (_) {}
 }
 

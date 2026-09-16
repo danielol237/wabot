@@ -225,20 +225,36 @@ async function startBot() {
   // IMPORTANT: requesting a pairing code naturally causes Baileys to close the
 
 
-  sock.ev.on("creds.update", saveCreds);
+  // Pairing emits creds.update immediately before WhatsApp may close the
+  // socket with restartRequired (515). Serialize writes so reconnect never
+  // reloads the old, unregistered auth state.
+  let pendingCredsSave = Promise.resolve();
+  sock.ev.on("creds.update", () => {
+    pendingCredsSave = pendingCredsSave.then(() => saveCreds());
+    pendingCredsSave.catch((err) => error("Credential save failed:", err.message));
+    return pendingCredsSave;
+  });
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr && !USE_PAIRING_CODE) {
-      log("📱 New QR generated! Visit /qr to scan it.");
-      qrcodeTerminal.generate(qr, { small: true });
-      try {
-        latestQrDataUrl = await QRCode.toDataURL(qr, { width: 300 });
-        qrGeneratedAt = Date.now();
-        lastError = null;
-      } catch (err) {
-        error("QR image generation failed:", err.message);
+    if (qr && !sock.authState.creds.registered) {
+      if (!USE_PAIRING_CODE) {
+        log("📱 New QR generated! Visit /qr to scan it.");
+        qrcodeTerminal.generate(qr, { small: true });
+        try {
+          latestQrDataUrl = await QRCode.toDataURL(qr, { width: 300 });
+          qrGeneratedAt = Date.now();
+          lastError = null;
+        } catch (err) {
+          error("QR image generation failed:", err.message);
+        }
+        // Baileys documents the QR update as the readiness point for
+        // requestPairingCode; it is earlier than the post-pairing open event.
+        whatsappPairing.issuePendingPairingCode().then((result) => {
+          if (result?.success) log("📱 Dashboard phone pairing code is ready.");
+          if (result && !result.success) error("Dashboard pairing code failed:", result.error);
+        }).catch((err) => error("Dashboard pairing code failed:", err.message));
       }
     }
 
@@ -386,6 +402,7 @@ async function startBot() {
     }
 
     if (connection === "close") {
+      await pendingCredsSave;
       isReady = false;
       whatsappPairing.updateConnection("close", {
         ready: false,

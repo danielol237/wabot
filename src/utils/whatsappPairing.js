@@ -168,12 +168,7 @@ async function requestPairingCode(value, options = {}) {
   if (state.connection !== "open") {
     state.pendingPhoneNumber = phoneNumber;
     state.pendingActorId = String(options.actorId || "dashboard").slice(0, 160);
-    // The runtime wrapper waits for Baileys' underlying WebSocket. This avoids
-    // depending on the later high-level `connection === "open"` event, which
-    // can be delayed until after phone pairing has already started.
-    const request = issuePairingCode(phoneNumber);
-    clearPendingRequest();
-    return request;
+    return { success: false, pending: true, code: "waiting_for_socket", ...getStatus(), error: "Phone number saved. Waiting for WhatsApp to become ready; the code will appear here automatically." };
   }
   return issuePairingCode(phoneNumber);
 }

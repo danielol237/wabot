@@ -19,6 +19,16 @@ function providerAvailable(name) {
   try { return providerHealth.isAvailable(name); } catch (_) { return true; }
 }
 
+function isRateLimitedError(error) {
+  const status = error?.response?.status || error?.status || error?.statusCode;
+  const message = error?.response?.data?.error?.message || error?.response?.data?.message || error?.message || error;
+  return status === 429 || /(?:rate.?limit|too many requests|quota exceeded|resource exhausted)/i.test(String(message));
+}
+
+function providerErrorMessage(error, fallback) {
+  return error?.response?.data?.error?.message || error?.response?.data?.message || error?.message || fallback;
+}
+
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 
 // Gemini's free tier: ~1,500 requests/day, 1M token context, no credit card.
@@ -197,9 +207,9 @@ async function getAIResponseImpl(userMessage, userName, history = [], systemOver
   const requestStartedAt = Date.now();
 const { chatGPT } = require("./gpt5Cli");
 
-// GPT-5 remains the first provider by default. Set GPT5_ENABLED=0 only to skip it.
-  // The adapter is kept intact because ARIA still supports GPT-5 as requested.
-  if (process.env.GPT5_ENABLED !== "0") {
+  // Unofficial ChatGPT web access is opt-in. Calling it by default caused every
+  // request to hit the same upstream quota before official fallbacks ran.
+  if (process.env.GPT5_ENABLED === "1") {
     try {
       const result = await chatGPT(String(userMessage), userName, validHistory, systemPrompt, { uncensored: true });
       if (isUsableProviderText(result.text)) {
@@ -244,28 +254,32 @@ const { chatGPT } = require("./gpt5Cli");
   }
 
 
-  // Gemini unofficial API — no key needed, free tier
-  try {
-    const gemini = require("./geminiCli");
-    const geminiResult = await gemini.sendMessage(String(userMessage));
-    if (isUsableProviderText(geminiResult.text)) {
-      const content = withTruncationNotice(geminiResult.text, null, "length", requestNeedsLargeOutput);
-      lastProvider = "gemini-unofficial";
-      markProviderSuccess("Gemini", requestStartedAt);
-      return content;
-    } else if (geminiResult.error) {
-      markProviderFailure("Gemini", geminiResult.error, requestStartedAt);
-      error("Gemini unofficial error:", geminiResult.error);
+  // Unofficial browser emulation is opt-in because it is fragile and commonly
+  // rate-limited. Official GEMINI_API_KEY traffic is handled below.
+  if (process.env.UNOFFICIAL_GEMINI_ENABLED === "1") {
+    try {
+      const gemini = require("./geminiCli");
+      const geminiResult = await gemini.sendMessage(String(userMessage));
+      if (isUsableProviderText(geminiResult.text)) {
+        const content = withTruncationNotice(geminiResult.text, null, "length", requestNeedsLargeOutput);
+        lastProvider = "gemini-unofficial";
+        markProviderSuccess("Gemini-web", requestStartedAt);
+        return content;
+      } else if (geminiResult.error) {
+        markProviderFailure("Gemini-web", geminiResult.error, requestStartedAt);
+        error("Gemini unofficial error:", geminiResult.error);
+      }
+    } catch (err) {
+      markProviderFailure("Gemini-web", err, requestStartedAt);
+      error("Gemini unofficial exception:", err.message);
     }
-  } catch (err) {
-    markProviderFailure("Gemini", err, requestStartedAt);
-    error("Gemini unofficial exception:", err.message);
   }
 
 
 
-  // OpenAPIs — Free proxy to GPT-5 + Claude (no key needed)
-  try {
+  // OpenAPIs is also opt-in. It is an unauthenticated third-party proxy and
+  // should never be mistaken for a reliable fallback by default.
+  if (process.env.OPENAPIS_ENABLED === "1") try {
     const openapis = require("./openapisCli");
     const openapisResult = await openapis.sendMessage(String(userMessage), userName, systemPrompt, { 
       model: process.env.OPENAPIS_MODEL || "openrouter/free" 
@@ -277,7 +291,7 @@ const { chatGPT } = require("./gpt5Cli");
       return content;
     } else if (openapisResult.retry || openapisResult.error) {
       markProviderFailure("OpenAPIs", openapisResult.error || "retry requested", requestStartedAt);
-      error("OpenAPIs failing, will try next provider");
+        error("OpenAPIs failing, will try next provider");
     }
   } catch (err) {
     markProviderFailure("OpenAPIs", err, requestStartedAt);
@@ -320,10 +334,12 @@ const { chatGPT } = require("./gpt5Cli");
         markProviderSuccess("Cerebras", requestStartedAt);
         return content;
       } catch (err) {
-        error(`Cerebras error (${model}):`, err.response?.data?.error?.message || err.message);
-        lastError = err.response?.data?.error?.message || err.message || "Cerebras request failed";
+        error(`Cerebras error (${model}):`, providerErrorMessage(err, "Cerebras request failed"));
+        lastError = providerErrorMessage(err, "Cerebras request failed");
         markProviderFailure("Cerebras", lastError, requestStartedAt);
-        // Try every Cerebras model before falling through to Gemini.
+        // A 429 applies to the account/provider, not just one model. Do not
+        // burn time hammering the remaining models before falling through.
+        if (isRateLimitedError(err)) break;
         continue;
       }
     }
@@ -368,10 +384,10 @@ const { chatGPT } = require("./gpt5Cli");
         markProviderSuccess("Gemini", requestStartedAt);
         return content;
       } catch (err) {
-        error(`Gemini error (${model}):`, err.response?.data?.error?.message || err.message);
-        lastError = err.response?.data?.error?.message || err.message || "Gemini request failed";
+        error(`Gemini error (${model}):`, providerErrorMessage(err, "Gemini request failed"));
+        lastError = providerErrorMessage(err, "Gemini request failed");
         markProviderFailure("Gemini", lastError, requestStartedAt);
-        // Continue through every configured Gemini model, then fall through.
+        if (isRateLimitedError(err)) break;
         continue;
       }
     }
@@ -401,10 +417,10 @@ const { chatGPT } = require("./gpt5Cli");
         markProviderSuccess("Groq", requestStartedAt);
         return content;
       } catch (err) {
-        error(`Groq error (${model}):`, err.message);
-        lastError = err.message || "Groq request failed";
+        error(`Groq error (${model}):`, providerErrorMessage(err, "Groq request failed"));
+        lastError = providerErrorMessage(err, "Groq request failed");
         markProviderFailure("Groq", lastError, requestStartedAt);
-        // Try every Groq model before continuing to OpenRouter.
+        if (isRateLimitedError(err)) break;
         continue;
       }
     }
@@ -437,11 +453,10 @@ const { chatGPT } = require("./gpt5Cli");
         markProviderSuccess("OpenRouter", requestStartedAt);
         return withTruncationNotice(rawContent, null, "length", requestNeedsLargeOutput);
       } catch (err) {
-        error(`OpenRouter error (${model}):`, err.response?.data?.error?.message || err.message);
-        lastError = (err.response?.data?.error?.message || err.message || "") + ` [${model}]`;
+        error(`OpenRouter error (${model}):`, providerErrorMessage(err, "OpenRouter request failed"));
+        lastError = providerErrorMessage(err, "OpenRouter request failed") + ` [${model}]`;
         markProviderFailure("OpenRouter", lastError, requestStartedAt);
-        // Keep trying every OpenRouter model; quota, auth, network, and model
-        // failures should not prevent the remaining fallback routes.
+        if (isRateLimitedError(err)) break;
         continue;
       }
     }
@@ -491,5 +506,4 @@ async function getAIResponse(...args) {
   return normalizedOut;
 }
 
-module.exports = { getAIResponse, needsLargeOutput, _test: { withTruncationNotice, TRUNCATION_NOTICE, isUsableProviderText, buildProviderFailureReply, normalizeAssistantResponse } };
-
+module.exports = { getAIResponse, needsLargeOutput, _test: { withTruncationNotice, TRUNCATION_NOTICE, isUsableProviderText, buildProviderFailureReply, normalizeAssistantResponse, isRateLimitedError } };

@@ -8,6 +8,7 @@
 
 const axios = require("axios");
 const { isNsfwEnabled, setNsfw } = require("../src/utils/botSettings");
+const { isOwner, isAdmin } = require("../src/utils/permissions");
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -15,6 +16,14 @@ const NSFW_TYPES = ["waifu", "neko", "trap", "blowjob", "ass", "hentai", "milf",
 
 function isNSFWEnabled(chatId) {
   return isNsfwEnabled(chatId);
+}
+
+function canManageNSFW(senderJid) {
+  return isOwner(senderJid) || isAdmin(senderJid);
+}
+
+function commandInventory() {
+  return NSFW_TYPES.map((type) => `!${type}`).join(", ");
 }
 
 // ── Multi-source image resolver ────────────────────────────────
@@ -94,20 +103,29 @@ module.exports = {
       const chatId = msg.key.remoteJid;
       const sub = args[0]?.toLowerCase();
 
+      if (!canManageNSFW(ctx.senderJid)) {
+        return ctx.reply("❌ NSFW controls are restricted to ARIA's owner and configured admins.");
+      }
+
+      if (!sub || sub === "help" || sub === "list") {
+        const status = isNSFWEnabled(chatId) ? "ON" : "OFF";
+        return ctx.reply(`🔞 *NSFW admin panel*\nStatus: *${status}*\n\nAvailable commands:\n${commandInventory()}\n\nUse *!nsfw on* or *!nsfw off* for this chat.`);
+      }
+
       if (sub === "on") {
         setNsfw(true, chatId);
-        return ctx.reply("🔞 NSFW mode: *ON*\n\nAvailable: waifu, neko, hentai, blowjob, ass, milf, oral, paizuri, ero, yuri, trap, cum, feet, spank, smallboobs");
+        return ctx.reply(`🔞 NSFW mode: *ON*\n\nAvailable commands:\n${commandInventory()}`);
       }
       if (sub === "off") {
         setNsfw(false, chatId);
         return ctx.reply("🔞 NSFW mode: *OFF*");
       }
 
-      const status = isNSFWEnabled(chatId) ? "ON" : "OFF";
-      return ctx.reply(`🔞 NSFW is currently *${status}*\nUse *!nsfw on* or *!nsfw off*`);
+      return ctx.reply("Use *!nsfw*, *!nsfw on*, or *!nsfw off*.");
     },
 
     // Every NSFW category command, generated from the list.
     ...Object.fromEntries(NSFW_TYPES.map((c) => [c, makeNSFWCommand(c)])),
   },
+  _test: { canManageNSFW, commandInventory, NSFW_TYPES },
 };

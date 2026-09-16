@@ -204,7 +204,10 @@ async function startBot() {
     auth: state,
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
-    browser: ["ARIA", "Chrome", "1.0.0"],
+    // WhatsApp rejects phone-number pairing codes for some custom browser
+    // identities even though Baileys successfully generates the code. Use a
+    // known-compatible desktop identity for both pairing and normal sessions.
+    browser: ["Ubuntu", "Chrome", "20.0.04"],
   });
 
   // Wrap sendMessage once here so EVERY message ARIA sends anywhere in the app

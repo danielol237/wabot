@@ -5,7 +5,7 @@ const PROVIDERS = Object.freeze([
   { id: "openrouter", label: "OpenRouter", key: "OPENROUTER_API_KEY", aliases: ["OPENROUTER_KEY", "OPEN_ROUTER_API_KEY"], role: "chat fallback, coding, vision" },
   { id: "groq", label: "Groq", key: "GROQ_API_KEY", aliases: [], role: "chat, vision, transcription" },
   { id: "cerebras", label: "Cerebras", key: "CEREBRAS_API_KEY", aliases: [], role: "chat" },
-  { id: "gemini", label: "Gemini", key: "GEMINI_API_KEY", aliases: ["GOOGLE_GEMINI_API_KEY"], role: "chat" },
+  { id: "gemini", label: "Gemini", key: "GEMINI_API_KEY", aliases: ["GOOGLE_GEMINI_API_KEY"], role: "chat and coding" },
   { id: "zai", label: "Z.AI", key: "ZHIPU_API_KEY", aliases: ["ZAI_API_KEY"], role: "vision and media" },
   { id: "minimax", label: "MiniMax", key: "MINIMAX_API_KEY", aliases: [], role: "media and optional chat" },
   { id: "tavily", label: "Tavily", key: "TAVILY_API_KEY", aliases: [], role: "web search" },

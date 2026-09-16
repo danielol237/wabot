@@ -168,7 +168,12 @@ async function requestPairingCode(value, options = {}) {
   if (state.connection !== "open") {
     state.pendingPhoneNumber = phoneNumber;
     state.pendingActorId = String(options.actorId || "dashboard").slice(0, 160);
-    return { success: false, pending: true, code: "waiting_for_socket", ...getStatus(), error: "Phone number saved. Waiting for WhatsApp to finish connecting; the code will appear here automatically." };
+    // The runtime wrapper waits for Baileys' underlying WebSocket. This avoids
+    // depending on the later high-level `connection === "open"` event, which
+    // can be delayed until after phone pairing has already started.
+    const request = issuePairingCode(phoneNumber);
+    clearPendingRequest();
+    return request;
   }
   return issuePairingCode(phoneNumber);
 }
@@ -184,6 +189,7 @@ async function issuePairingCode(phoneNumber) {
     state.lastUpdatedAt = now();
     return { success: true, reused: false, ...getStatus({ includeCode: true }) };
   } catch (err) {
+    clearPendingRequest();
     state.mode = "qr";
     state.lastError = "WhatsApp could not issue a pairing code. Check the number and try again.";
     state.lastUpdatedAt = now();
@@ -193,7 +199,7 @@ async function issuePairingCode(phoneNumber) {
 
 async function issuePendingPairingCode() {
   const number = state.pendingPhoneNumber;
-  if (!number || state.ready || state.registered || state.connection !== "open") return null;
+  if (!number || state.ready || state.registered || !["connecting", "open"].includes(state.connection)) return null;
   return issuePairingCode(number);
 }
 

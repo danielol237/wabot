@@ -114,7 +114,18 @@ let lastError = null;
 let sock = null;
 whatsappPairing.setRuntime({
   getSocket: () => sock,
-  requestPairingCode: (phoneNumber) => sock?.requestPairingCode(phoneNumber),
+  requestPairingCode: async (phoneNumber) => {
+    const currentSocket = sock;
+    if (!currentSocket) return null;
+    // Baileys documents requestPairingCode immediately after socket creation.
+    // Wait for the underlying WebSocket rather than waiting for the higher-level
+    // `connection === "open"` event, which may only be emitted after pairing.
+    if (typeof currentSocket.waitForSocketOpen === "function") {
+      await currentSocket.waitForSocketOpen();
+    }
+    if (sock !== currentSocket) throw new Error("WhatsApp socket changed while pairing was starting.");
+    return currentSocket.requestPairingCode(phoneNumber);
+  },
 });
 function htmlEsc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

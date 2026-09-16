@@ -79,7 +79,7 @@ test("pairing request failures return a safe generic error", async () => {
   assert.equal(pairing.getStatus().code, undefined);
 });
 
-test("phone pairing queues a number while the socket connects and issues it when open", async () => {
+test("phone pairing issues a code while the socket connects when the runtime waits for WebSocket readiness", async () => {
   reset();
   let issuedFor = null;
   pairing.setRuntime({
@@ -87,12 +87,7 @@ test("phone pairing queues a number while the socket connects and issues it when
     requestPairingCode: async (number) => { issuedFor = number; return "ABCD-EFGH"; },
   });
   pairing.updateConnection("connecting", { ready: false, registered: false });
-  const pending = await pairing.requestPairingCode("+2348012345678", { actorId: "queue-test" });
-  assert.equal(pending.success, false);
-  assert.equal(pending.pending, true);
-  assert.equal(pending.code, "waiting_for_socket");
-  pairing.updateConnection("open", { ready: false, registered: false });
-  const issued = await pairing.issuePendingPairingCode();
+  const issued = await pairing.requestPairingCode("+2348012345678", { actorId: "queue-test" });
   assert.equal(issued.success, true);
   assert.equal(issued.code, "ABCD-EFGH");
   assert.equal(issuedFor, "2348012345678");

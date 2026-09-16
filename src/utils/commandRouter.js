@@ -2464,8 +2464,13 @@ async function handleNsfw(sock, msg, args, ctx) {
   const chatId = msg.key.remoteJid;
   const raw = Array.isArray(args) ? args.join(" ") : String(args || "");
   const value = raw.toLowerCase().replace(/[?!.]+$/g, "").replace(/^nsfw\s+/, "").trim();
+  const nsfwCommands = ["waifu", "neko", "trap", "blowjob", "ass", "hentai", "milf", "oral", "paizuri", "ero", "yuri", "cum", "feet", "spank", "smallboobs"];
   const enabled = /^(?:on|true|enable|enabled|turn\s+on(?:\s+nsfw)?|switch\s+on(?:\s+nsfw)?)$/.test(value) || /^(?:turn|switch)\s+on\s+nsfw$/.test(raw.toLowerCase().trim());
   const disabled = /^(?:off|false|disable|disabled|turn\s+off(?:\s+nsfw)?|switch\s+off(?:\s+nsfw)?)$/.test(value) || /^(?:turn|switch)\s+off\s+nsfw$/.test(raw.toLowerCase().trim());
+
+  if (!isOwner(ctx.senderJid) && !isAdmin(ctx.senderJid)) {
+    return reply(sock, msg, "❌ NSFW controls are restricted to ARIA's owner and configured admins.");
+  }
 
   if (disabled) {
     setNsfw(false, chatId);
@@ -2473,10 +2478,10 @@ async function handleNsfw(sock, msg, args, ctx) {
   }
   if (enabled) {
     setNsfw(true, chatId);
-    return reply(sock, msg, "✅ NSFW mode enabled in this chat.");
+    return reply(sock, msg, `✅ NSFW mode enabled in this chat.\n\nAvailable commands:\n${nsfwCommands.map((command) => `!${command}`).join(", ")}`);
   }
   const current = isNsfwEnabled(chatId);
-  return reply(sock, msg, `🔞 NSFW is currently *${current ? "ON" : "OFF"}* in this chat. Use *!nsfw on* or *!nsfw off*.`);
+  return reply(sock, msg, `🔞 *NSFW admin panel*\nStatus: *${current ? "ON" : "OFF"}*\n\nAvailable commands:\n${nsfwCommands.map((command) => `!${command}`).join(", ")}\n\nUse *!nsfw on* or *!nsfw off*.`);
 }
 
 

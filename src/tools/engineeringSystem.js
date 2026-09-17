@@ -3,6 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const axios = require("axios");
 const { generateCodingText } = require("./codingProvider");
+const githubCredentialVault = require("./githubCredentialVault");
 
 const ROOT = path.join(__dirname, "../..");
 const DATA_DIR = path.join(ROOT, "data");
@@ -36,7 +37,7 @@ function repositoryFromRequest(input) {
 }
 
 function githubToken() {
-  return String(process.env.GITHUB_TOKEN || process.env.SESSION_GITHUB_TOKEN || "").trim();
+  return String(githubCredentialVault.getToken() || process.env.GITHUB_TOKEN || process.env.SESSION_GITHUB_TOKEN || "").trim();
 }
 
 function githubHeaders() {
@@ -300,6 +301,7 @@ function inspectSystem() {
       cerebras: configured("CEREBRAS_API_KEY"),
       openrouter: configured("OPENROUTER_API_KEY"),
       githubEngineering: hasGithubCredential(),
+      githubCredentialSource: githubCredentialVault.status().source || (hasGithubCredential() ? "environment" : null),
       vercelDeployment: configured("VERCEL_TOKEN"),
     },
     controls: {

@@ -523,6 +523,10 @@ function resolveNaturalAction(text) {
 async function routeMessage(sock, msg, context) {
   const { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins } = context;
   const matchedPrefix = getMatchedPrefix(lower);
+
+  // Credential intake is handled before every other route so a token is never
+  // sent to the AI provider, memory layer, or generic chat fallback.
+  if (await handlePrivateGithubCredential(sock, msg, text, { ...context, senderJid, senderName, chatId, isGroup })) return;
   
   // ── MODERATION CHECK ───────────────────────────────────────
   if (isGroup) {
@@ -2074,6 +2078,38 @@ async function handleEngineering(sock, msg, args, ctx) {
   await react(sock, msg, "🛠️");
   const result = await handleEngineeringRequest(request, ctx.senderName, ctx.chatId);
   await reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));
+}
+
+async function handlePrivateGithubCredential(sock, msg, text, ctx) {
+  const raw = String(text || "").trim();
+  if (!/\b(?:github|git hub)\b/i.test(raw)) return false;
+  const { setToken, clearToken } = require("../tools/githubCredentialVault");
+  const { reply } = require("./baileysHelpers");
+
+  if (/\b(?:forget|delete|remove|revoke|clear)\b[\s\S]*\b(?:github|git hub)\b[\s\S]*\b(?:token|access)\b/i.test(raw)) {
+    if (!isOwner(ctx.senderJid)) return false;
+    clearToken();
+    await reply(sock, msg, "✅ The temporary GitHub token has been cleared from ARIA's memory.");
+    return true;
+  }
+
+  const token = raw.match(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/)?.[0];
+  if (!token || !/\b(?:token|access|key|credential)\b/i.test(raw)) return false;
+  if (!isOwner(ctx.senderJid)) return false;
+  if (ctx.isGroup) {
+    await reply(sock, msg, "❌ I will not accept credentials in a group. Send the token only in ARIA's private chat.");
+    return true;
+  }
+
+  const result = setToken(token);
+  try { await sock.sendMessage(ctx.chatId, { delete: msg.key }); } catch (_) {}
+  if (!result.success) {
+    await reply(sock, msg, "❌ I rejected that value because it did not match a supported GitHub token format.");
+    return true;
+  }
+  const minutes = Math.max(1, Math.round((result.expiresAt - Date.now()) / 60000));
+  await reply(sock, msg, `✅ GitHub access is temporarily stored in memory for about ${minutes} minutes. I did not save or repeat the token. Say “ARIA forget my GitHub token” to clear it now.`);
+  return true;
 }
 
 async function handleBuild(sock, msg, args, ctx) {

@@ -61,7 +61,7 @@ When a message contains an explicit `owner/repository` name, that repository is 
 
 The safe way to publish to `main` is the final **merge** stage after GitHub checks pass. This is intentionally not triggered by the word “change” or “push” alone. ARIA will create the reviewable branch/PR first and will merge only after you explicitly request the verified upgrade.
 
-GitHub tokens should remain in the runtime environment. A WhatsApp message is not a secure secret store: it can be retained in backups, logs, quoted messages, or device notifications, and a bot cannot reliably guarantee that a token sent in a chat is not exposed. ARIA therefore does not accept raw tokens as ordinary coding instructions.
+The preferred deployment configuration is still `GITHUB_TOKEN` in the runtime environment. For convenience, the owner can also send a supported GitHub token to ARIA in a one-to-one WhatsApp chat using natural language, for example `ARIA, use this GitHub token for my next repo task: <token>`. ARIA accepts this only from the owner, rejects group chats, attempts to delete the incoming message, never echoes or logs the value, stores it only in process memory, and expires it automatically after 30 minutes. Say `ARIA forget my GitHub token` to clear it sooner. This is a convenience fallback, not a guarantee that WhatsApp itself has erased all copies; rotate the token if the message was sent to the wrong chat or exposed elsewhere. A bot restart clears the temporary credential.
 
 ## Generate a GitHub branch and draft PR
 

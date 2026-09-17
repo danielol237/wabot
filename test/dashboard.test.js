@@ -85,7 +85,8 @@ test("dashboard: authenticated GET / renders the cockpit", async () => {
   const cookie = await login(srv);
   const r = await req(srv, "GET", "/dashboard/", { headers: { Cookie: cookie } });
   assert.strictEqual(r.status, 200);
-  assert.ok(r.body.includes("Command"), "should render Command pane");
+  assert.ok(r.body.includes("Good morning, Daniel"), "should render the daily home greeting");
+  assert.ok(r.body.includes("What do you want to get done?"), "should render the action-led home prompt");
   assert.ok(r.body.includes("Business OS"), "should render Business OS nav and pane");
   assert.ok(r.body.includes("Integrations"), "should render Integrations nav and pane");
   assert.ok(r.body.includes("ARIA PLATFORM SURFACE MAP"), "should render integration readiness content");
@@ -193,13 +194,13 @@ test("dashboard: pairing status requires auth and code requests require CSRF", a
 });
 
 
-test("dashboard: command quick actions wire pairing and health cards to pane navigation", async () => {
+test("dashboard: home actions wire pairing and activity navigation", async () => {
   const srv = await listen(makeApp());
   const cookie = await login(srv);
   const r = await req(srv, "GET", "/dashboard/", { headers: { Cookie: cookie } });
   assert.strictEqual(r.status, 200);
   assert.match(r.body, /class="quick-card" data-pane="pairing"/);
-  assert.match(r.body, /class="quick-card" data-pane="health"/);
+  assert.match(r.body, /href="\?pane=activity"/);
   assert.match(r.body, /const paneTriggers=document\.querySelectorAll\('\[data-pane\]'\)/);
   assert.match(r.body, /paneTriggers\.forEach\(n=>n\.addEventListener\('click'/);
   await close(srv);

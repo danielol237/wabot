@@ -507,30 +507,32 @@ function renderLiveStrip(ls) {
   const fallbackLabel = ls.fallback && ls.fallback !== "none" ? ls.fallback : "—";
   return `
     <div class="pane show" id="pane-home">
-      <div class="page-title">Command center</div><div class="page-sub">A calm overview of ARIA’s current state and the next useful action.</div>
-      <div class="hero command-hero">
-        <div class="hrow">
-          <img class="avatar" src="/aria-mark.png" alt="ARIA" width="42" height="42" />
-          <div><h2>ARIA core <span class="badge ${configured ? "b-green" : "b-amber"}" id="core-badge">● ${configured ? "ONLINE" : "NEEDS AI CONFIG"}</span></h2>
-            <div class="sub">Primary model <b>${modelLabel}</b> · fallback <b>${fallbackLabel}</b></div>
-          </div>
-        </div>
-        <div class="stats" style="margin-top:18px;background:transparent">
-          <div class="stat dark"><div class="n" id="lv-memory">${ls.memoryCount}</div><div class="l">memories</div></div>
-          <div class="stat dark"><div class="n" id="lv-missions">${ls.activeMissions}</div><div class="l">active missions</div></div>
-          <div class="stat dark"><div class="n" id="lv-msg">${ls.msgsPerMin}</div><div class="l">messages / min</div></div>
-          <div class="stat dark"><div class="n" id="lv-lat">${ls.lastLatency}ms</div><div class="l">last latency</div></div>
-          <div class="stat dark"><div class="n" id="lv-err">${ls.errors5m}</div><div class="l">errors / 5m</div></div>
-        </div>
-        <div class="hero-meta">Uptime ${ls.uptimeHrs}h · ${ls.memMB}MB memory · ${ls.cpuCores} CPU cores · <span id="lv-last">Last AI: ${ls.lastProvider} in ${ls.lastLatency}ms</span></div>
+      <div class="page-title">Good morning, Daniel</div><div class="page-sub">Your calm starting point for ARIA, projects, WhatsApp, and the things that need your attention.</div>
+      <section class="welcome-panel">
+        <div class="welcome-copy"><div class="eyebrow">ARIA COMPANION</div><h2>What do you want to get done?</h2><p>Open a workspace, continue a project, or check what ARIA has been doing.</p></div>
+        <div class="welcome-state"><span class="status-dot"></span><div><b>${configured ? "ARIA is online" : "ARIA needs setup"}</b><small>${configured ? `Ready · ${modelLabel}` : "Add an AI provider key to enable replies"}</small></div></div>
+      </section>
+      <div class="section-heading"><h2>Start here</h2><a href="?pane=activity">View activity →</a></div>
+      <div class="quick-grid home-actions">
+        <a class="quick-card primary-action" href="/dashboard/atlas"><span class="quick-icon">+</span><span><b>Open Atlas</b><small>Continue a project or create your next workspace</small></span><strong>→</strong></a>
+        <button class="quick-card" data-pane="pairing"><span class="quick-icon">↗</span><span><b>Pair WhatsApp</b><small>Connect ARIA to your phone and keep conversations moving</small></span><strong>→</strong></button>
+        <a class="quick-card" href="/portal/login"><span class="quick-icon">◎</span><span><b>Open learner portal</b><small>See progress, goals, and learning history</small></span><strong>→</strong></a>
+        <a class="quick-card" href="/anime"><span class="quick-icon">◇</span><span><b>Open anime</b><small>Search, watch, and download episodes</small></span><strong>→</strong></a>
       </div>
-      <div class="quick-grid">
-        <a class="quick-card" href="/anime"><span class="quick-icon">A</span><span><b>Open anime</b><small>Search, watch, and download episodes</small></span><strong>→</strong></a>
-        <a class="quick-card" href="/portal/login"><span class="quick-icon">L</span><span><b>Open learner portal</b><small>View progress and link WhatsApp history</small></span><strong>→</strong></a>
-        <button class="quick-card" data-pane="pairing"><span class="quick-icon">WA</span><span><b>Pair WhatsApp</b><small>Enter a number for a pairing code or open the QR fallback</small></span><strong>→</strong></button>
-        <button class="quick-card" data-pane="health"><span class="quick-icon">H</span><span><b>Check system health</b><small>Inspect media runtimes and provider status</small></span><strong>→</strong></button>
+      <div class="home-columns">
+        <section class="card home-activity"><div class="section-heading"><h2>Recent activity</h2><a href="?pane=activity">See all →</a></div>
+          <div class="feed-item"><div class="feed-ico">↗</div><div class="feed-body"><div class="m">WhatsApp connection and ARIA replies</div><div class="s">Use Pair WhatsApp to check the live connection.</div></div></div>
+          <div class="feed-item"><div class="feed-ico">◆</div><div class="feed-body"><div class="m">Project work lives in Atlas</div><div class="s">Open a workspace to see decisions, tasks, and delivery status.</div></div></div>
+          <div class="feed-item"><div class="feed-ico">✓</div><div class="feed-body"><div class="m">System is ${configured ? "ready" : "waiting for configuration"}</div><div class="s">${configured ? `Last known response: ${ls.lastLatency}ms.` : "Add a provider key, then restart the bot."}</div></div></div>
+        </section>
+        <section class="card home-system"><div class="section-heading"><h2>System</h2><a href="?pane=health">Details →</a></div>
+          <div class="system-status"><span class="status-dot"></span><b>${configured ? "Online and ready" : "Needs attention"}</b></div>
+          <div class="system-list"><div><span>Last response</span><b id="lv-lat">${ls.lastLatency}ms</b></div><div><span>Messages today</span><b id="lv-msg">${ls.msgsPerMin}/min</b></div><div><span>Active projects</span><b id="lv-missions">${ls.activeMissions}</b></div><div><span>Errors, last 5m</span><b id="lv-err">${ls.errors5m}</b></div></div>
+          <div class="system-foot"><span id="lv-last">Last AI: ${ls.lastProvider} in ${ls.lastLatency}ms</span><a href="?pane=analytics">Open analytics</a></div>
+        </section>
       </div>
-      ${configured ? "" : `<div class="card callout-warning"><strong>AI is not configured yet.</strong><span>Add at least one AI provider key in the deployment environment, then restart ARIA. The rest of the cockpit can be explored, but replies will fail until a model is available.</span></div>`}
+      <div class="memory-note"><span class="quick-icon">✦</span><span><b>ARIA remembers ${ls.memoryCount} things</b><small>Memory and intelligence details belong in the Brain area when you need them.</small></span><a href="?pane=memory">Open memory →</a></div>
+      ${configured ? "" : `<div class="card callout-warning"><strong>One setup step left.</strong><span>Add <code>GEMINI_API_KEY</code> or another AI provider key in the deployment environment, then restart ARIA.</span></div>`}
     </div>`;
 }
 
@@ -952,6 +954,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .quick-card:hover{transform:translateY(-1px);border-color:var(--line2);box-shadow:var(--shadow)}
 .quick-card>span:nth-child(2){flex:1;min-width:0}.quick-card b{display:block;font-size:13px}.quick-card small{display:block;color:var(--muted);font-size:11px;margin-top:3px;line-height:1.35}.quick-card>strong{color:var(--accent);font-size:18px}.quick-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--brand-soft);color:var(--accent);font-weight:800;font-size:12px;flex-shrink:0}
 .callout-warning{display:flex;gap:10px;align-items:flex-start;border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.07)}.callout-warning strong{color:var(--amber);font-size:13px;white-space:nowrap}.callout-warning span{color:var(--muted);font-size:12px}
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:800}.welcome-panel{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;padding:30px 32px;margin-bottom:30px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(120deg,var(--brand-soft),var(--panel) 68%);box-shadow:var(--shadow)}.welcome-copy h2{font-family:Georgia,"Times New Roman",serif;font-size:27px;font-weight:500;letter-spacing:-.045em;margin:7px 0 6px}.welcome-copy p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}.welcome-state{display:flex;align-items:center;gap:10px;min-width:190px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.58)}.welcome-state b,.welcome-state small{display:block}.welcome-state b{font-size:12px}.welcome-state small{margin-top:3px;color:var(--muted);font-size:10px}.status-dot{display:block;width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(58,156,142,.14);flex:none}.section-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.section-heading h2{font-size:14px;letter-spacing:-.015em;margin:0}.section-heading a,.system-foot a,.memory-note a{color:var(--accent);font-size:11px;text-decoration:none;font-weight:700}.home-actions{margin-bottom:30px}.home-actions .quick-card{min-height:94px}.home-actions .primary-action{border-color:#cbb9e7;background:linear-gradient(135deg,var(--brand-soft),var(--panel))}.home-columns{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:16px;margin-bottom:16px}.home-activity,.home-system{min-height:230px}.home-activity .feed-item{padding:12px 0}.system-status{display:flex;align-items:center;gap:10px;padding:8px 0 12px;font-size:13px}.system-list{border-top:1px solid var(--line)}.system-list>div{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);font-size:12px}.system-list span{color:var(--muted)}.system-list b{font-weight:700}.system-foot{display:flex;justify-content:space-between;gap:8px;margin-top:13px;color:var(--faint);font-size:10px}.memory-note{display:flex;align-items:center;gap:11px;padding:13px 15px;margin-bottom:16px;border:1px solid var(--line);border-radius:13px;background:var(--panel2)}.memory-note .quick-icon{flex:none}.memory-note b,.memory-note small{display:block}.memory-note b{font-size:12px}.memory-note small{color:var(--muted);font-size:11px;margin-top:3px}.memory-note a{margin-left:auto;white-space:nowrap}
 
 .hero .hrow{display:flex;align-items:center;gap:14px}
 .hero .avatar{display:grid;place-items:center;width:52px;height:52px;overflow:hidden;border-radius:10px;background:var(--brand);color:#fff;font-weight:800;flex-shrink:0}
@@ -1012,7 +1015,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .hint{color:var(--faint);margin-top:12px;font-size:11px}
 
 @media(max-width:820px){
-  .app{display:block;padding-bottom:72px}.sidebar{width:100%;height:58px;position:sticky;top:0;z-index:40;padding:10px 16px;border-right:0;border-bottom:1px solid var(--line);display:flex;flex-direction:row;align-items:center}.sb-brand{padding:0;margin:0}.sb-brand .sb-logo{width:30px;height:30px}.sb-name,.sb-group,.sb-online,.sidebar .navitem,.sidebar .sb-bottom{display:none}.main{max-width:none;padding:0 16px 40px}.topbar{height:64px;margin-bottom:26px}.topbar-kicker{font-size:9px}.topbar-context strong{font-size:13px}.topbar-status span:not(.dot){display:none}.page-title{font-size:26px}.grid2{grid-template-columns:1fr}.quick-grid{grid-template-columns:1fr}.mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);gap:2px;bottom:0;left:0;right:0;z-index:50;padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:rgba(8,13,20,.96);border-top:1px solid var(--line);backdrop-filter:blur(14px)}.mobile-nav a{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);text-decoration:none;font-size:9px;font-weight:650}.mobile-nav a span{font:700 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--faint)}.mobile-nav a:hover,.mobile-nav a:focus{color:var(--accent)}.card{padding:16px}.hero{padding:22px 18px}.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:14px}.stat .n{font-size:22px}
+  .app{display:block;padding-bottom:72px}.sidebar{width:100%;height:58px;position:sticky;top:0;z-index:40;padding:10px 16px;border-right:0;border-bottom:1px solid var(--line);display:flex;flex-direction:row;align-items:center}.sb-brand{padding:0;margin:0}.sb-brand .sb-logo{width:30px;height:30px}.sb-name,.sb-group,.sb-online,.sidebar .navitem,.sidebar .sb-bottom{display:none}.main{max-width:none;padding:0 16px 40px}.topbar{height:64px;margin-bottom:26px}.topbar-kicker{font-size:9px}.topbar-context strong{font-size:13px}.topbar-status span:not(.dot){display:none}.page-title{font-size:26px}.grid2{grid-template-columns:1fr}.quick-grid{grid-template-columns:1fr}.welcome-panel{display:block;padding:22px 18px;margin-bottom:24px}.welcome-copy h2{font-size:23px}.welcome-state{margin-top:18px;min-width:0}.home-columns{grid-template-columns:1fr;gap:12px}.home-activity,.home-system{min-height:0}.system-foot{display:block}.system-foot a{display:block;margin-top:6px}.memory-note{align-items:flex-start}.memory-note a{margin-left:0;margin-top:4px}.mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);gap:2px;bottom:0;left:0;right:0;z-index:50;padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:rgba(8,13,20,.96);border-top:1px solid var(--line);backdrop-filter:blur(14px)}.mobile-nav a{display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);text-decoration:none;font-size:9px;font-weight:650}.mobile-nav a span{font:700 9px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--faint)}.mobile-nav a:hover,.mobile-nav a:focus{color:var(--accent)}.card{padding:16px}.hero{padding:22px 18px}.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:14px}.stat .n{font-size:22px}
 }
 /* ARIA V9 operator system */
 :root{--brand:#8e6bd6;--brand2:#ed7184;--brand-soft:#f1eafa;--green:#3a9c8e;--amber:#b47a31;--red:#c54f66;--cyan:#548fb4;--radius:14px;--radius-sm:10px;--shadow:0 12px 34px rgba(55,36,76,.07);--shadow-lg:0 22px 60px rgba(55,36,76,.12);--bg:#fbfafc;--panel:#fff;--panel2:#f7f3f9;--panel3:#eee8f2;--line:#e7e1eb;--line2:#d7cce0;--text:#1a1720;--muted:#6d6678;--faint:#958b9f;--accent:#8e6bd6;--accent2:#6f50b9}
@@ -1047,7 +1050,7 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
   <aside class="sidebar">
     <div class="sb-brand"><img class="sb-logo" src="/aria-mark.png" alt="ARIA" width="38" height="38" /><div class="sb-name">ARIA<small>operator console</small></div></div>
     <div class="sb-group">Workspace</div>
-    ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">01</span><span>Command center</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">01</span><span>Command center</span></div>`}
+    ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">⌂</span><span>Home</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">⌂</span><span>Home</span></div>`}
     <div class="navitem" data-pane="business"><span class="ico">02</span><span>Business OS</span></div>
     <div class="navitem" data-pane="integrations"><span class="ico">03</span><span>Integrations</span></div>
     <div class="navitem" data-pane="pairing"><span class="ico">04</span><span>Pair WhatsApp</span></div>
@@ -1077,11 +1080,11 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     </div>
   </aside>
   <main class="main">
-    <header class="topbar"><div class="topbar-context"><div class="topbar-kicker">ARIA CONTROL CENTER</div><strong>Private operator workspace</strong></div><div class="topbar-status"><span class="dot"></span><span>Connected</span><button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">◐</button></div></header>
+    <header class="topbar"><div class="topbar-context"><div class="topbar-kicker">ARIA</div><strong>Your companion workspace</strong></div><div class="topbar-status"><span class="dot"></span><span>Online</span><button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">◐</button></div></header>
     ${passwordNeeded ? `<div class="card"><div class="empty">Set DASHBOARD_PASSWORD in env to access.</div></div>` : content}
   </main>
 </div>
-<nav class="mobile-nav" aria-label="Primary navigation"><a href="/dashboard"><span>01</span>Command</a><a href="/dashboard?pane=pairing"><span>04</span>Pair</a><a href="/dashboard/atlas"><span>05</span>Atlas</a><a href="/dashboard?pane=missions"><span>10</span>Missions</a><a href="/dashboard?pane=health"><span>14</span>Health</a></nav>
+<nav class="mobile-nav" aria-label="Primary navigation"><a href="/dashboard"><span>⌂</span>Home</a><a href="/dashboard?pane=pairing"><span>↗</span>Pair</a><a href="/dashboard/atlas"><span>◆</span>Atlas</a><a href="/dashboard?pane=activity"><span>•</span>Activity</a><a href="/dashboard?pane=health"><span>✓</span>Health</a></nav>
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};

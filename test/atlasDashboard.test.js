@@ -42,7 +42,7 @@ test("Atlas dashboard page and API are owner-authenticated and render", async ()
     assert.equal(page.status, 200);
     assert.match(page.body, /PROJECT BRAIN/);
     assert.match(page.body, /NORTH STAR|Select or create a project/);
-    assert.match(page.body, /Private operator workspace/);
+    assert.match(page.body, /Your companion workspace/);
     assert.match(page.body, /mobile-nav/);
     assert.match(page.body, /atlas-layout/);
     assert.match(page.body, /dashboardJson/);

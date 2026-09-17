@@ -24,6 +24,16 @@ test("natural routing resolves owner file edits without a prefix", () => {
   assert.equal(action.command.ownerOnly, true);
 });
 
+test("natural routing sends dashboard and repository changes to engineering", () => {
+  const dashboard = router.resolveNaturalAction("ARIA, change your dashboard UI in the wabot repo");
+  assert.equal(dashboard.intent, "engineering");
+  assert.equal(dashboard.command.ownerOnly, true);
+
+  const companion = router.resolveNaturalAction("ARIA improve the Android companion app in danielol237/aria-android-companion");
+  assert.equal(companion.intent, "engineering");
+  assert.equal(companion.command.ownerOnly, true);
+});
+
 test("natural routing resolves capability discovery, memory recall, and website links", () => {
   assert.equal(router.resolveNaturalAction("what can you do").intent, "help");
   assert.equal(router.resolveNaturalAction("what do you remember about me").intent, "memories");

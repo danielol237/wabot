@@ -46,6 +46,23 @@ The owner-only `github-engineering` plugin exposes the same workflow through exp
 
 The aliases `!gh` and `!codechange` resolve to the same owner-only handler. The stages are ordered: **plan** creates a proposal, **approve** creates a branch and draft PR, **verify** reads GitHub status and check-runs, and **merge** is allowed only after verification is green. All GitHub writes remain reviewable through a pull request; ARIA does not write directly to `main`.
 
+## Natural-language requests and multiple repositories
+
+Prefix commands are only a compatibility surface. Owner messages addressed to ARIA are routed naturally, including requests such as:
+
+```text
+Aria, change your dashboard UI in the wabot repo.
+Aria, improve the Android companion settings screen in danielol237/aria-android-companion.
+Aria, fix the provider fallback in danielol237/wabot.
+Aria, push the verified upgrade to main.
+```
+
+When a message contains an explicit `owner/repository` name, that repository is stored on the proposal and used for every subsequent GitHub read, branch, commit, PR, verification, and merge operation. The allowlist includes the wabot source/plugin/test paths and the Android `app/` and `gradle/` paths; secrets, session state, workflow files, and dependency directories remain blocked.
+
+The safe way to publish to `main` is the final **merge** stage after GitHub checks pass. This is intentionally not triggered by the word “change” or “push” alone. ARIA will create the reviewable branch/PR first and will merge only after you explicitly request the verified upgrade.
+
+GitHub tokens should remain in the runtime environment. A WhatsApp message is not a secure secret store: it can be retained in backups, logs, quoted messages, or device notifications, and a bot cannot reliably guarantee that a token sent in a chat is not exposed. ARIA therefore does not accept raw tokens as ordinary coding instructions.
+
 ## Generate a GitHub branch and draft PR
 
 After reviewing the proposal:

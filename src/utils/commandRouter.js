@@ -118,7 +118,7 @@ const INTENTS = {
   weather: ["weather in", "weather for", "what's the weather"],
   news: ["news about", "latest news", "news on", "what's happening with"],
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
-  engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade"],
+  engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade", "change your dashboard", "change your dashboard ui", "change the dashboard", "change dashboard", "update the dashboard", "change the dashboard ui", "change dashboard ui", "improve the android companion app", "edit my github repo", "change my github repo", "make changes in my github repo", "fix my github repo", "push directly to main"],
   delegate: ["delegate", "delegate this", "orchestrate", "hand this off"],
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
   hidetag: ["hidetag", "hide tag", "hide-tag", "tag everyone silently", "mention everyone silently", "silently tag everyone"],
@@ -1959,6 +1959,12 @@ function formatResearchResult(result) {
 async function handleGitHub(sock, msg, args, ctx) {
   const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
   let query = String(args || "").trim();
+  const engineeringAction = query.match(/^(help|status|inspect|inventory|list|proposals|upgrades|plan|propose|implement|build|fix|change|approve|apply|execute|verify|check|test|merge|ship)\b/i);
+  if (engineeringAction && isOwner(ctx.senderJid)) {
+    const { handleEngineeringRequest } = require("../tools/engineeringSystem");
+    const result = await handleEngineeringRequest(query, ctx.senderName, ctx.chatId);
+    return reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));
+  }
   if (/^(?:this|it|that|the repo|the repository)$/i.test(query)) query = getQuotedMessageText(msg) || "";
   if (!query) return reply(sock, msg, "Tell me what to look up on GitHub, or reply to the repository/topic and say “search this on GitHub”.");
   await react(sock, msg, "🐙");

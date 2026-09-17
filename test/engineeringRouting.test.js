@@ -2,11 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { resolveNaturalAction } = require("../src/utils/commandRouter");
 
-test("natural engineering inspection routes to the owner-only engineering command", () => {
+test("natural engineering inspection routes to the public engineering command", () => {
   const action = resolveNaturalAction("ARIA, what modules do you have installed?");
   assert.equal(action.intent, "engineering");
   assert.equal(action.args, "status");
-  assert.equal(action.command.ownerOnly, true);
+  assert.equal(action.command.ownerOnly, false);
 });
 
 test("natural engineering proposal routes without hijacking ordinary conversation", () => {

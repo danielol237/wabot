@@ -287,7 +287,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 
   // Dev / Advanced
   registerCommand({ name: "build", aliases: [], category: "dev", description: "Build a complete app from a description", handler: handleBuild, ownerOnly: true });
-  registerCommand({ name: "engineering", aliases: ["engineer", "selfupgrade", "upgrade"], category: "dev", description: "Inspect ARIA and prepare guarded GitHub upgrades", handler: handleEngineering, ownerOnly: true });
+  registerCommand({ name: "engineering", aliases: ["engineer", "selfupgrade", "upgrade"], category: "dev", description: "Inspect ARIA and prepare guarded GitHub upgrades", handler: handleEngineering, ownerOnly: false });
   registerCommand({ name: "deploy", aliases: ["host", "publish"], category: "dev", description: "Deploy the verified project to Vercel", handler: handleDeploy, ownerOnly: true });
   registerCommand({ name: "status", aliases: [], category: "dev", description: "Project status: !status <id>", handler: handleProjectStatus, ownerOnly: false });
   registerCommand({ name: "projects", aliases: ["mylist"], category: "dev", description: "List projects", handler: handleProjectList, ownerOnly: false });
@@ -1966,7 +1966,7 @@ async function handleGitHub(sock, msg, args, ctx) {
   const engineeringAction = query.match(/^(help|status|inspect|inventory|list|proposals|upgrades|plan|propose|implement|build|fix|change|approve|apply|execute|verify|check|test|merge|ship)\b/i);
   if (engineeringAction && isOwner(ctx.senderJid)) {
     const { handleEngineeringRequest } = require("../tools/engineeringSystem");
-    const result = await handleEngineeringRequest(query, ctx.senderName, ctx.chatId);
+    const result = await handleEngineeringRequest(query, ctx.senderName, ctx.chatId, ctx.senderJid);
     return reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));
   }
   if (/^(?:this|it|that|the repo|the repository)$/i.test(query)) query = getQuotedMessageText(msg) || "";
@@ -2076,39 +2076,36 @@ async function handleEngineering(sock, msg, args, ctx) {
   let request = String(args || "").trim();
   if (/^(?:this|it|that|the brief|the proposal)$/i.test(request)) request = getQuotedMessageText(msg) || request;
   await react(sock, msg, "🛠️");
-  const result = await handleEngineeringRequest(request, ctx.senderName, ctx.chatId);
+  const result = await handleEngineeringRequest(request, ctx.senderName, ctx.chatId, ctx.senderJid);
   await reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));
 }
 
 async function handlePrivateGithubCredential(sock, msg, text, ctx) {
   const raw = String(text || "").trim();
   if (!/\b(?:github|git hub)\b/i.test(raw)) return false;
-  const { setToken, clearToken } = require("../tools/githubCredentialVault");
+  const { setTokenForUser, clearTokenForUser } = require("../tools/githubCredentialVault");
   const { reply } = require("./baileysHelpers");
 
   if (/\b(?:forget|delete|remove|revoke|clear)\b[\s\S]*\b(?:github|git hub)\b[\s\S]*\b(?:token|access)\b/i.test(raw)) {
-    if (!isOwner(ctx.senderJid)) return false;
-    clearToken();
-    await reply(sock, msg, "✅ The temporary GitHub token has been cleared from ARIA's memory.");
+    clearTokenForUser(ctx.senderJid);
+    await reply(sock, msg, "✅ Your encrypted GitHub credential has been cleared.");
     return true;
   }
 
   const token = raw.match(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/)?.[0];
   if (!token || !/\b(?:token|access|key|credential)\b/i.test(raw)) return false;
-  if (!isOwner(ctx.senderJid)) return false;
   if (ctx.isGroup) {
     await reply(sock, msg, "❌ I will not accept credentials in a group. Send the token only in ARIA's private chat.");
     return true;
   }
 
-  const result = setToken(token);
+  const result = setTokenForUser(ctx.senderJid, token);
   try { await sock.sendMessage(ctx.chatId, { delete: msg.key }); } catch (_) {}
   if (!result.success) {
     await reply(sock, msg, "❌ I rejected that value because it did not match a supported GitHub token format.");
     return true;
   }
-  const minutes = Math.max(1, Math.round((result.expiresAt - Date.now()) / 60000));
-  await reply(sock, msg, `✅ GitHub access is temporarily stored in memory for about ${minutes} minutes. I did not save or repeat the token. Say “ARIA forget my GitHub token” to clear it now.`);
+  await reply(sock, msg, "✅ Your GitHub credential has been encrypted and stored for your future repository tasks. I did not save or repeat the raw token. Say “ARIA forget my GitHub token” to clear it.");
   return true;
 }
 

@@ -2,7 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const vault = require("../src/tools/githubCredentialVault");
 
-test.afterEach(() => vault.clearToken());
+test.afterEach(() => {
+  vault.clearToken();
+  vault.clearTokenForUser("11111@s.whatsapp.net");
+  vault.clearTokenForUser("22222@s.whatsapp.net");
+});
 
 test("GitHub vault accepts supported token formats without exposing them in status", () => {
   assert.equal(vault.looksLikeGitHubToken("ghp_abcdefghijklmnopqrstuvwxyz123456"), true);
@@ -22,14 +26,12 @@ test("GitHub vault rejects arbitrary text and clears credentials", () => {
   assert.equal(vault.status().configured, false);
 });
 
-test("GitHub vault expires short-lived credentials", async () => {
-  vault.setToken("ghp_abcdefghijklmnopqrstuvwxyz123456", { ttlMs: 60_000 });
-  const originalNow = Date.now;
-  Date.now = () => originalNow() + 61_000;
-  try {
-    assert.equal(vault.getToken(), "");
-    assert.equal(vault.status().configured, false);
-  } finally {
-    Date.now = originalNow;
-  }
+test("GitHub vault isolates persistent credentials by WhatsApp user", () => {
+  vault.setTokenForUser("11111@s.whatsapp.net", "ghp_abcdefghijklmnopqrstuvwxyz123456");
+  vault.setTokenForUser("22222@s.whatsapp.net", "github_pat_abcdefghijklmnopqrstuvwxyz123456");
+  assert.equal(vault.getTokenForUser("11111@s.whatsapp.net"), "ghp_abcdefghijklmnopqrstuvwxyz123456");
+  assert.equal(vault.getTokenForUser("22222@s.whatsapp.net"), "github_pat_abcdefghijklmnopqrstuvwxyz123456");
+  vault.clearTokenForUser("11111@s.whatsapp.net");
+  assert.equal(vault.getTokenForUser("11111@s.whatsapp.net"), "");
+  assert.equal(vault.getTokenForUser("22222@s.whatsapp.net"), "github_pat_abcdefghijklmnopqrstuvwxyz123456");
 });

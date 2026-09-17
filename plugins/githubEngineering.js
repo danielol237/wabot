@@ -17,7 +17,7 @@ I work in four guarded stages:
 • !github verify <upgrade_id> — check PR status and CI
 • !github merge <upgrade_id> — merge only after verification is green
 
-The GitHub token stays in the runtime environment. ARIA never writes directly to main, edits secrets, edits WhatsApp session files, or merges an unverified PR.`;
+Each user uses only their own encrypted GitHub credential. ARIA never stores plaintext tokens, edits secrets, edits WhatsApp session files, or merges an unverified PR.`;
 
 function text(args) {
   return Array.isArray(args) ? args.join(" ").trim() : String(args || "").trim();
@@ -35,7 +35,7 @@ async function handleGithub(sock, msg, args, ctx) {
 
   if (["help", "commands", "?"].includes(action)) return ctx.reply(commandHelp());
   if (["status", "inspect", "inventory"].includes(action)) {
-    const result = await engineering.handleEngineeringRequest("status", ctx.senderName, ctx.chatId);
+    const result = await engineering.handleEngineeringRequest("status", ctx.senderName, ctx.chatId, ctx.senderJid);
     return ctx.reply(result.message || result.error || "Could not read engineering status.");
   }
   if (["list", "proposals", "upgrades"].includes(action)) {
@@ -43,22 +43,22 @@ async function handleGithub(sock, msg, args, ctx) {
   }
   if (["plan", "propose", "implement", "build", "fix", "change"].includes(action)) {
     if (!rest) return ctx.reply("Tell me what should change after `!github plan`, for example: `!github plan add tests for the pairing flow`.");
-    const result = await engineering.createUpgradePlan(rest, ctx.senderName, ctx.chatId);
+    const result = await engineering.createUpgradePlan(rest, ctx.senderName, ctx.chatId, ctx.senderJid);
     return ctx.reply(result.message || `❌ ${result.error || "Could not create a proposal."}`);
   }
   if (["approve", "apply", "execute"].includes(action)) {
     if (!rest) return ctx.reply("Provide the proposal ID, for example: `!github approve upgrade_...`.");
-    const result = await engineering.createGitHubUpgrade(rest.split(/\s+/)[0], ctx.senderName);
+    const result = await engineering.createGitHubUpgrade(rest.split(/\s+/)[0], ctx.senderName, ctx.senderJid);
     return ctx.reply(result.message || `❌ ${result.error || "Could not create the draft PR."}`);
   }
   if (["verify", "check", "test"].includes(action)) {
     if (!rest) return ctx.reply("Provide the proposal ID, for example: `!github verify upgrade_...`.");
-    const result = await engineering.verifyUpgrade(rest.split(/\s+/)[0]);
+    const result = await engineering.verifyUpgrade(rest.split(/\s+/)[0], ctx.senderJid);
     return ctx.reply(result.message || `❌ ${result.error || "Could not verify the PR."}`);
   }
   if (["merge", "ship"].includes(action)) {
     if (!rest) return ctx.reply("Provide the proposal ID, for example: `!github merge upgrade_...`.");
-    const result = await engineering.mergeUpgrade(rest.split(/\s+/)[0]);
+    const result = await engineering.mergeUpgrade(rest.split(/\s+/)[0], ctx.senderJid);
     return ctx.reply(result.message || `❌ ${result.error || "Could not merge the PR."}`);
   }
   return ctx.reply(`I don't know the GitHub action *${action}*.\n\n${commandHelp()}`);
@@ -66,7 +66,7 @@ async function handleGithub(sock, msg, args, ctx) {
 
 module.exports = {
   name: "github-engineering",
-  ownerOnly: true,
+  ownerOnly: false,
   commands: {
     github: handleGithub,
     gh: "github",

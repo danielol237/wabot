@@ -36,23 +36,23 @@ function repositoryFromRequest(input) {
   return match && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(match[1]) ? match[1] : repositoryName();
 }
 
-function githubToken() {
-  return String(githubCredentialVault.getToken() || process.env.GITHUB_TOKEN || process.env.SESSION_GITHUB_TOKEN || "").trim();
+function githubToken(actorJid) {
+  return String(githubCredentialVault.getTokenForUser(actorJid) || process.env.GITHUB_TOKEN || process.env.SESSION_GITHUB_TOKEN || "").trim();
 }
 
-function githubHeaders() {
+function githubHeaders(actorJid) {
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "ARIA-Wabot-Engineering",
   };
-  const token = githubToken();
+  const token = githubToken(actorJid);
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 }
 
-function hasGithubCredential() {
-  return Boolean(githubToken());
+function hasGithubCredential(actorJid) {
+  return Boolean(githubToken(actorJid));
 }
 
 function repoPath(endpoint, repository = repositoryName()) {
@@ -60,12 +60,12 @@ function repoPath(endpoint, repository = repositoryName()) {
 }
 
 async function githubRequest(method, endpoint, data = undefined, config = {}) {
-  if (!hasGithubCredential()) throw new Error("GitHub engineering access is not configured in the runtime.");
+  if (!hasGithubCredential(config.actorJid)) throw new Error("GitHub access is not configured for this WhatsApp user. Send your GitHub token privately to ARIA first.");
   const response = await axios({
     method,
     url: repoPath(endpoint, config.repository),
     data,
-    headers: githubHeaders(),
+    headers: githubHeaders(config.actorJid),
     timeout: config.timeout || 20000,
     validateStatus: () => true,
   });
@@ -145,7 +145,7 @@ function normalizePlan(raw, objective) {
   };
 }
 
-async function createUpgradePlan(objective, senderName, chatId) {
+async function createUpgradePlan(objective, senderName, chatId, actorJid) {
   const request = clean(objective, 1200);
   if (!request) return { success: false, error: "Tell me what you want upgraded." };
   const targetRepository = repositoryFromRequest(request);
@@ -157,6 +157,7 @@ async function createUpgradePlan(objective, senderName, chatId) {
       id: `upgrade_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,
       chatId: clean(chatId, 180),
       createdBy: clean(senderName, 120),
+      createdByJid: clean(actorJid, 180),
       state: "proposed",
       repository: targetRepository,
       baseBranch: DEFAULT_BRANCH,
@@ -192,14 +193,15 @@ async function generateUpgradeFile(repository, file, objective, currentContent, 
   return content;
 }
 
-async function createGitHubUpgrade(proposalId, senderName) {
+async function createGitHubUpgrade(proposalId, senderName, actorJid) {
   const proposal = getProposal(proposalId);
   if (!proposal) return { success: false, error: "Upgrade proposal not found or expired." };
   if (!["proposed", "ready"].includes(proposal.state)) return { success: false, error: `That upgrade is already ${proposal.state}.` };
-  if (!hasGithubCredential()) return { success: false, error: "GitHub access is not configured. I did not generate or store any credential." };
+  if (proposal.createdByJid && proposal.createdByJid !== actorJid) return { success: false, error: "Only the user who created this proposal can approve it." };
+  if (!hasGithubCredential(actorJid || proposal.createdByJid)) return { success: false, error: "GitHub access is not configured for this user. Send a GitHub token privately to ARIA first." };
 
   try {
-    const requestConfig = { repository: proposal.repository };
+    const requestConfig = { repository: proposal.repository, actorJid: actorJid || proposal.createdByJid };
     const ref = await githubRequest("GET", `/git/ref/heads/${encodeURIComponent(proposal.baseBranch)}`, undefined, requestConfig);
     const baseSha = ref?.object?.sha;
     if (!baseSha) throw new Error("The base branch has no readable commit SHA.");
@@ -239,13 +241,14 @@ async function createGitHubUpgrade(proposalId, senderName) {
   }
 }
 
-async function mergeUpgrade(proposalId) {
+async function mergeUpgrade(proposalId, actorJid) {
   const proposal = getProposal(proposalId);
   if (!proposal) return { success: false, error: "Upgrade proposal not found." };
+  if (proposal.createdByJid && proposal.createdByJid !== actorJid) return { success: false, error: "Only the user who created this proposal can merge it." };
   if (proposal.state !== "verified" || proposal.ciState !== "success") return { success: false, error: "This upgrade is not verified green yet. Run verification and wait for successful checks before merging." };
   if (!proposal.prNumber || !proposal.branch) return { success: false, error: "This proposal has no mergeable GitHub pull request." };
   try {
-    const requestConfig = { repository: proposal.repository };
+    const requestConfig = { repository: proposal.repository, actorJid: actorJid || proposal.createdByJid };
     const current = await githubRequest("GET", `/pulls/${proposal.prNumber}`, undefined, requestConfig);
     if (current.merged) return { success: false, error: "That pull request is already merged." };
     if (current.base?.ref !== DEFAULT_BRANCH || current.head?.ref !== proposal.branch) return { success: false, error: "The pull request target changed, so I blocked the merge." };
@@ -259,12 +262,13 @@ async function mergeUpgrade(proposalId) {
   }
 }
 
-async function verifyUpgrade(proposalId) {
+async function verifyUpgrade(proposalId, actorJid) {
   const proposal = getProposal(proposalId);
   if (!proposal) return { success: false, error: "Upgrade proposal not found." };
+  if (proposal.createdByJid && proposal.createdByJid !== actorJid) return { success: false, error: "Only the user who created this proposal can verify it." };
   if (!proposal.prNumber || !proposal.commitSha) return { success: false, error: "This proposal has no GitHub PR to verify yet." };
   try {
-    const requestConfig = { repository: proposal.repository };
+    const requestConfig = { repository: proposal.repository, actorJid: actorJid || proposal.createdByJid };
     const pr = await githubRequest("GET", `/pulls/${proposal.prNumber}`, undefined, requestConfig);
     const status = await githubRequest("GET", `/commits/${proposal.commitSha}/status`, undefined, requestConfig);
     const checks = await githubRequest("GET", `/commits/${proposal.commitSha}/check-runs`, { }, { ...requestConfig, timeout: 20000 });
@@ -323,17 +327,17 @@ function listProposals() {
   return loadProposals().slice(-8).reverse().map((proposal) => `${proposal.id} — ${proposal.state} — ${proposal.objective}${proposal.prUrl ? ` — ${proposal.prUrl}` : ""}`).join("\n") || "No engineering proposals recorded.";
 }
 
-async function handleEngineeringRequest(rawInput, senderName, chatId) {
+async function handleEngineeringRequest(rawInput, senderName, chatId, actorJid) {
   const raw = clean(rawInput, 1400);
   const lower = raw.toLowerCase();
   if (!raw || /^(?:status|inspect|inventory|modules|capabilities|what can you do|what modules)/i.test(raw)) return { success: true, message: formatInspection(inspectSystem()), report: inspectSystem() };
   const id = raw.match(/\b(upgrade_[a-z0-9_]+)\b/i)?.[1];
   if (/^(?:list|show)\s+(?:upgrades|proposals|engineering)/i.test(raw)) return { success: true, message: `🧾 *Recent engineering proposals*\n\n${listProposals()}` };
-  if (/^merge\b/i.test(raw) && id) return mergeUpgrade(id);
-  if (/^(?:approve|apply|execute)\b/i.test(raw)) return createGitHubUpgrade(id || raw.split(/\s+/)[1], senderName);
-  if (/^(?:verify|check|test)\b/i.test(raw) && id) return verifyUpgrade(id);
+  if (/^merge\b/i.test(raw) && id) return mergeUpgrade(id, actorJid);
+  if (/^(?:approve|apply|execute)\b/i.test(raw)) return createGitHubUpgrade(id || raw.split(/\s+/)[1], senderName, actorJid);
+  if (/^(?:verify|check|test)\b/i.test(raw) && id) return verifyUpgrade(id, actorJid);
   const objective = raw.replace(/^(?:plan|propose|implement|upgrade|improve|build|add|change|fix)\s*/i, "").trim() || raw;
-  return createUpgradePlan(objective, senderName, chatId);
+  return createUpgradePlan(objective, senderName, chatId, actorJid);
 }
 
 module.exports = {

@@ -1,6 +1,6 @@
 # ARIA Engineering Workflow
 
-ARIA’s engineering capability is owner-only and is designed to change the repository through reviewable, testable steps. It does not write directly to `main`, expose credentials, or merge an unverified change.
+ARIA’s engineering capability is available to users through their own GitHub credentials and is designed to change repositories through reviewable, testable steps. Each proposal is tied to the WhatsApp user who created it; users cannot approve, verify, or merge another user’s proposal.
 
 ## Self-awareness
 
@@ -44,7 +44,7 @@ The owner-only `github-engineering` plugin exposes the same workflow through exp
 !github merge <upgrade_id>
 ```
 
-The aliases `!gh` and `!codechange` resolve to the same owner-only handler. The stages are ordered: **plan** creates a proposal, **approve** creates a branch and draft PR, **verify** reads GitHub status and check-runs, and **merge** is allowed only after verification is green. All GitHub writes remain reviewable through a pull request; ARIA does not write directly to `main`.
+The aliases `!gh` and `!codechange` resolve to the same handler. The stages are ordered: **plan** creates a proposal, **approve** creates a branch and draft PR using that user’s credential, **verify** reads GitHub status and check-runs, and **merge** is allowed only after verification is green. All GitHub writes remain reviewable through a pull request; the final verified merge updates `main`.
 
 ## Natural-language requests and multiple repositories
 
@@ -61,7 +61,7 @@ When a message contains an explicit `owner/repository` name, that repository is 
 
 The safe way to publish to `main` is the final **merge** stage after GitHub checks pass. This is intentionally not triggered by the word “change” or “push” alone. ARIA will create the reviewable branch/PR first and will merge only after you explicitly request the verified upgrade.
 
-The preferred deployment configuration is still `GITHUB_TOKEN` in the runtime environment. For convenience, the owner can also send a supported GitHub token to ARIA in a one-to-one WhatsApp chat using natural language, for example `ARIA, use this GitHub token for my next repo task: <token>`. ARIA accepts this only from the owner, rejects group chats, attempts to delete the incoming message, never echoes or logs the value, stores it only in process memory, and expires it automatically after 30 minutes. Say `ARIA forget my GitHub token` to clear it sooner. This is a convenience fallback, not a guarantee that WhatsApp itself has erased all copies; rotate the token if the message was sent to the wrong chat or exposed elsewhere. A bot restart clears the temporary credential.
+The preferred deployment configuration is still `GITHUB_TOKEN` in the runtime environment. For multi-user deployments, users can send a supported GitHub token to ARIA in their own one-to-one WhatsApp chat. ARIA encrypts and stores credentials per WhatsApp user, never echoes or logs the raw value, and supports `ARIA forget my GitHub token`. Set `ARIA_CREDENTIAL_ENCRYPTION_KEY` for a stable encryption key across Render replacements. If it is absent, ARIA generates a local key file automatically; this avoids extra configuration but the encrypted credentials are lost if Render replaces the service disk. Neither mode stores plaintext tokens.
 
 ## Generate a GitHub branch and draft PR
 

@@ -30,6 +30,22 @@ ARIA, plan an upgrade for safer Vercel deployments
 
 ARIA returns a bounded proposal with the objective, allowed files, checks, risks, and rollback. Planning does not write files.
 
+## GitHub engineering plugin
+
+The owner-only `github-engineering` plugin exposes the same workflow through explicit prefix commands. It is intentionally separate from ordinary conversation so a casual message cannot create a branch or change a repository.
+
+```text
+!github help
+!github status
+!github list
+!github plan add tests for the WhatsApp pairing flow
+!github approve <upgrade_id>
+!github verify <upgrade_id>
+!github merge <upgrade_id>
+```
+
+The aliases `!gh` and `!codechange` resolve to the same owner-only handler. The stages are ordered: **plan** creates a proposal, **approve** creates a branch and draft PR, **verify** reads GitHub status and check-runs, and **merge** is allowed only after verification is green. All GitHub writes remain reviewable through a pull request; ARIA does not write directly to `main`.
+
 ## Generate a GitHub branch and draft PR
 
 After reviewing the proposal:
@@ -96,7 +112,7 @@ Automatic deployment is preview-only. The `!build ... and deploy` flow and `!dep
 
 ## Dedicated coding model
 
-All app-builder planning, file generation, repair, and cross-file review calls use one coding route: OpenRouter with the fixed model `anthropic/claude-opus-4.7`. Ordinary ARIA conversation continues using the existing conversational provider policy. The coding route does not silently fall through to a different chat model. If `OPENROUTER_API_KEY` is absent or the selected coding route fails, the build stops with an explicit configuration/provider error and never writes that error into a generated source file.
+All app-builder planning, file generation, repair, cross-file review, and GitHub engineering generation calls use the dedicated coding route. Gemini `gemini-3.5-flash-lite` is preferred when `GEMINI_API_KEY` is configured, with OpenRouter `anthropic/claude-opus-4.7` as the fallback. Ordinary ARIA conversation continues using the existing conversational provider policy. If neither coding credential is available, the operation stops with an explicit configuration error and never writes that error into generated source code.
 
 ## Visual companion behavior
 

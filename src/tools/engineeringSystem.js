@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const axios = require("axios");
-const { getAIResponse } = require("./ai");
+const { generateCodingText } = require("./codingProvider");
 
 const ROOT = path.join(__dirname, "../..");
 const DATA_DIR = path.join(ROOT, "data");
@@ -144,7 +144,7 @@ async function createUpgradePlan(objective, senderName, chatId) {
   if (!request) return { success: false, error: "Tell me what you want upgraded." };
   const prompt = `${request}\n\nRepository: ${repositoryName()}\nAllowed paths: ${ALLOWED_PATHS.join(", ")}\nForbidden paths: ${DENIED_PATHS.join(", ")}\n\nCreate a bounded plan with at most ${MAX_FILES} files. Include exact relative paths, a summary, tests, risks, and rollback. This is a proposal only; do not write code yet.`;
   try {
-    const response = await getAIResponse(prompt, senderName || "owner", [], PLAN_PROMPT, "");
+    const response = await generateCodingText(prompt, { system: PLAN_PROMPT, maxTokens: 6000, temperature: 0.1 });
     const plan = normalizePlan(extractJson(response), request);
     const proposal = {
       id: `upgrade_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`,
@@ -178,7 +178,7 @@ async function getRemoteFile(filePath, ref) {
 async function generateUpgradeFile(file, objective, currentContent, senderName) {
   if (Buffer.byteLength(currentContent, "utf8") > MAX_FILE_BYTES) throw new Error(`${file.path} is too large for a bounded AI edit.`);
   const prompt = `Repository: ${repositoryName()}\nFile: ${file.path}\nObjective: ${objective}\nRequested file role: ${file.description}\n\nCurrent file content:\n${currentContent}\n\nReturn the complete updated content for this file. Make the smallest coherent change that fulfills the objective. Preserve unrelated code. Do not add secrets, raw tokens, shell scripts, self-deleting code, or changes outside this file.`;
-  const response = await getAIResponse(prompt, senderName || "owner", [], CODE_PROMPT, "");
+  const response = await generateCodingText(prompt, { system: CODE_PROMPT, maxTokens: 16000, temperature: 0.12 });
   const content = String(response || "").replace(/^```[\w-]*\s*/i, "").replace(/\s*```$/i, "").trim();
   if (!content || content.length > MAX_FILE_BYTES) throw new Error(`Generated content for ${file.path} was empty or too large.`);
   if (/-----BEGIN (?:RSA|OPENSSH|EC|DSA) PRIVATE KEY-----|ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|VERCEL_TOKEN\s*[:=]/i.test(content)) throw new Error(`Generated content for ${file.path} contained a credential-like value.`);

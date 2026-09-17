@@ -20,6 +20,17 @@ test("GitHub vault accepts supported token formats without exposing them in stat
   assert.equal(vault.status().token, undefined);
 });
 
+test("GitHub vault identifies supported credential classes and rejects arbitrary strings", () => {
+  assert.equal(vault.githubCredentialType("ghp_abcdefghijklmnopqrstuvwxyz123456"), "classic-pat");
+  assert.equal(vault.githubCredentialType("github_pat_abcdefghijklmnopqrstuvwxyz123456"), "fine-grained-pat");
+  assert.equal(vault.githubCredentialType("gho_abcdefghijklmnopqrstuvwxyz123456"), "oauth-token");
+  assert.equal(vault.githubCredentialType("ghu_abcdefghijklmnopqrstuvwxyz123456"), "user-to-server-token");
+  assert.equal(vault.githubCredentialType("ghs_abcdefghijklmnopqrstuvwxyz123456"), "server-to-server-token");
+  assert.equal(vault.githubCredentialType("ghr_abcdefghijklmnopqrstuvwxyz123456"), "refresh-token");
+  assert.equal(vault.githubCredentialType("not-a-token"), null);
+  assert.equal(vault.looksLikeGitHubToken("not-a-token"), false);
+});
+
 test("GitHub vault rejects arbitrary text and clears credentials", () => {
   assert.equal(vault.setToken("not-a-token").success, false);
   vault.setToken("ghp_abcdefghijklmnopqrstuvwxyz123456", { ttlMs: 60_000 });

@@ -22,6 +22,17 @@ function looksLikeGitHubToken(value) {
   return /^(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})$/.test(token);
 }
 
+function githubCredentialType(value) {
+  const token = normalizeToken(value);
+  if (/^github_pat_/.test(token)) return "fine-grained-pat";
+  if (/^ghp_/.test(token)) return "classic-pat";
+  if (/^gho_/.test(token)) return "oauth-token";
+  if (/^ghu_/.test(token)) return "user-to-server-token";
+  if (/^ghs_/.test(token)) return "server-to-server-token";
+  if (/^ghr_/.test(token)) return "refresh-token";
+  return null;
+}
+
 function keyFromEnvironment() {
   const raw = String(process.env[KEY_ENV] || "").trim();
   if (!raw) return null;
@@ -80,7 +91,7 @@ function setTokenForUser(userJid, token) {
   if (!user) return { success: false, error: "A user identity is required." };
   if (!looksLikeGitHubToken(value)) return { success: false, error: "That does not look like a supported GitHub token." };
   const users = readStore();
-  users[user] = { ...(users[user] || {}), ...encrypt(value), updatedAt: Date.now(), source: "private-whatsapp" };
+  users[user] = { ...(users[user] || {}), ...encrypt(value), credentialType: githubCredentialType(value), updatedAt: Date.now(), source: "private-whatsapp" };
   writeStore(users);
   return { success: true, source: encryptionKey().source };
 }
@@ -130,7 +141,7 @@ function clearWorkspaceForUser(userJid) {
 function statusForUser(userJid) {
   const token = getTokenForUser(userJid);
   const record = readStore()[normalizeUser(userJid)];
-  return { configured: Boolean(token), source: token ? "private-whatsapp" : null, updatedAt: record?.updatedAt || null, encryption: encryptionKey().source };
+  return { configured: Boolean(token), source: token ? "private-whatsapp" : null, credentialType: token ? (record?.credentialType || githubCredentialType(token)) : null, updatedAt: record?.updatedAt || null, encryption: encryptionKey().source };
 }
 
 // Backward-compatible single-user helpers used only by older tests/callers.
@@ -148,6 +159,7 @@ module.exports = {
   getWorkspaceForUser,
   clearWorkspaceForUser,
   looksLikeGitHubToken,
+  githubCredentialType,
   setToken,
   getToken,
   clearToken,

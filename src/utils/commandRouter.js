@@ -2084,14 +2084,30 @@ async function handleEngineering(sock, msg, args, ctx) {
 async function handlePrivateGithubCredential(sock, msg, text, ctx) {
   const raw = String(text || "").trim();
   const { setTokenForUser, clearTokenForUser, statusForUser, getWorkspaceForUser } = require("../tools/githubCredentialVault");
+  const { startDeviceFlow, cancelDeviceFlow } = require("../tools/githubOAuth");
   const { reply } = require("./baileysHelpers");
 
   if (!/\b(?:github|git hub)\b/i.test(raw) && !/(?:gh[pousr]_|github_pat_)/i.test(raw)) return false;
 
+  if (/\b(?:connect|link|authorize|authenticate|sign\s*in)\b[\s\S]*\b(?:github|git hub)\b/i.test(raw) || /\b(?:github|git hub)\b[\s\S]*\b(?:connect|link|authorize|authenticate|sign\s*in)\b/i.test(raw)) {
+    if (ctx.isGroup) {
+      await reply(sock, msg, "❌ GitHub linking must be started in ARIA's private chat so the one-time authorization code is not exposed to a group.");
+      return true;
+    }
+    const result = await startDeviceFlow({ actorJid: ctx.senderJid, notify: (message) => reply(sock, msg, message) });
+    if (!result.success) await reply(sock, msg, `❌ ${result.error}`);
+    return true;
+  }
+
+  if (/\b(?:cancel|stop)\b[\s\S]*\b(?:github|git hub)\b/i.test(raw)) {
+    await reply(sock, msg, cancelDeviceFlow(ctx.senderJid) ? "✅ Your pending GitHub authorization was cancelled." : "There is no pending GitHub authorization for you.");
+    return true;
+  }
+
   if (/\b(?:status|configured|connected|connection)\b[\s\S]*\b(?:github|git hub)\b/i.test(raw) || /\b(?:github|git hub)\b[\s\S]*\b(?:status|configured|connected|connection)\b/i.test(raw)) {
     const status = statusForUser(ctx.senderJid);
     const workspace = getWorkspaceForUser(ctx.senderJid);
-    await reply(sock, msg, `🔐 GitHub access: *${status.configured ? "connected" : "not connected"}*${workspace ? `\nActive workspace: *${workspace}*` : ""}\nEncryption: *${status.encryption}*\n\nARIA never displays your raw token.`);
+    await reply(sock, msg, `🔐 GitHub access: *${status.configured ? "connected" : "not connected"}*${status.credentialType ? `\nCredential type: *${status.credentialType}*` : ""}${workspace ? `\nActive workspace: *${workspace}*` : ""}\nEncryption: *${status.encryption}*\n\nARIA never displays your raw token.`);
     return true;
   }
 

@@ -107,3 +107,44 @@ test("commandRouter: direct GitHub delivery follow-up resolves to deploy", () =>
   assert.equal(detectIntent("push the verified project to GitHub"), "deploy");
   assert.equal(resolveNaturalAction("ARIA, push the verified project to GitHub")?.command?.name, "deploy");
 });
+
+test("commandRouter: private GitHub PAT intake encrypts, deletes, and never echoes the token", async () => {
+  const router = require("../src/utils/commandRouter");
+  const vault = require("../src/tools/githubCredentialVault");
+  const user = "credential-test@s.whatsapp.net";
+  const token = "github_pat_abcdefghijklmnopqrstuvwxyz123456";
+  const sent = [];
+  const msg = { key: { remoteJid: user, id: "credential-msg-1" } };
+  const sock = { sendMessage: async (chatId, payload) => { sent.push({ chatId, payload }); } };
+  try {
+    await router._test.handlePrivateGithubCredential(sock, msg, `Here is my GitHub access token: ${token}`, { senderJid: user, chatId: user, isGroup: false });
+    assert.equal(vault.getTokenForUser(user), token);
+    assert.ok(sent.some((item) => item.payload.delete?.id === "credential-msg-1"));
+    const responseText = sent.filter((item) => item.payload.text).map((item) => item.payload.text).join("\n");
+    assert.doesNotMatch(responseText, new RegExp(token));
+    sent.length = 0;
+    await router._test.handlePrivateGithubCredential(sock, msg, "What is my GitHub connection status?", { senderJid: user, chatId: user, isGroup: false });
+    assert.match(sent.at(-1).payload.text, /connected/);
+    assert.doesNotMatch(sent.at(-1).payload.text, new RegExp(token));
+  } finally {
+    vault.clearTokenForUser(user);
+  }
+});
+
+test("commandRouter: GitHub PATs sent in groups are rejected and not stored", async () => {
+  const router = require("../src/utils/commandRouter");
+  const vault = require("../src/tools/githubCredentialVault");
+  const user = "group-credential-test@s.whatsapp.net";
+  const token = "github_pat_abcdefghijklmnopqrstuvwxyz654321";
+  const sent = [];
+  const msg = { key: { remoteJid: "group@g.us", id: "credential-msg-2" } };
+  const sock = { sendMessage: async (chatId, payload) => { sent.push({ chatId, payload }); } };
+  try {
+    await router._test.handlePrivateGithubCredential(sock, msg, token, { senderJid: user, chatId: "group@g.us", isGroup: true });
+    assert.equal(vault.getTokenForUser(user), "");
+    assert.ok(sent.some((item) => item.payload.delete?.id === "credential-msg-2"));
+    assert.match(sent.at(-1).payload.text, /private chat/i);
+  } finally {
+    vault.clearTokenForUser(user);
+  }
+});

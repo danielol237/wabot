@@ -2083,19 +2083,28 @@ async function handleEngineering(sock, msg, args, ctx) {
 
 async function handlePrivateGithubCredential(sock, msg, text, ctx) {
   const raw = String(text || "").trim();
-  if (!/\b(?:github|git hub)\b/i.test(raw)) return false;
-  const { setTokenForUser, clearTokenForUser } = require("../tools/githubCredentialVault");
+  const { setTokenForUser, clearTokenForUser, statusForUser, getWorkspaceForUser } = require("../tools/githubCredentialVault");
   const { reply } = require("./baileysHelpers");
 
-  if (/\b(?:forget|delete|remove|revoke|clear)\b[\s\S]*\b(?:github|git hub)\b[\s\S]*\b(?:token|access)\b/i.test(raw)) {
+  if (!/\b(?:github|git hub)\b/i.test(raw) && !/(?:gh[pousr]_|github_pat_)/i.test(raw)) return false;
+
+  if (/\b(?:status|configured|connected|connection)\b[\s\S]*\b(?:github|git hub)\b/i.test(raw) || /\b(?:github|git hub)\b[\s\S]*\b(?:status|configured|connected|connection)\b/i.test(raw)) {
+    const status = statusForUser(ctx.senderJid);
+    const workspace = getWorkspaceForUser(ctx.senderJid);
+    await reply(sock, msg, `🔐 GitHub access: *${status.configured ? "connected" : "not connected"}*${workspace ? `\nActive workspace: *${workspace}*` : ""}\nEncryption: *${status.encryption}*\n\nARIA never displays your raw token.`);
+    return true;
+  }
+
+  if (/\b(?:forget|delete|remove|revoke|clear)\b[\s\S]*\b(?:github|git hub)\b[\s\S]*\b(?:token|access|credential)\b/i.test(raw)) {
     clearTokenForUser(ctx.senderJid);
     await reply(sock, msg, "✅ Your encrypted GitHub credential has been cleared.");
     return true;
   }
 
   const token = raw.match(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/)?.[0];
-  if (!token || !/\b(?:token|access|key|credential)\b/i.test(raw)) return false;
+  if (!token) return false;
   if (ctx.isGroup) {
+    try { await sock.sendMessage(ctx.chatId, { delete: msg.key }); } catch (_) {}
     await reply(sock, msg, "❌ I will not accept credentials in a group. Send the token only in ARIA's private chat.");
     return true;
   }
@@ -3045,5 +3054,5 @@ module.exports = {
   resolveNaturalAction,
   naturalArgs,
   detectCommandCollisions,
-  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation },
+  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation, handlePrivateGithubCredential },
 };

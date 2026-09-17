@@ -52,6 +52,8 @@ test("repository selection rejects malformed overrides", () => {
 test("engineering requests can target an explicit repository and Android paths", () => {
   assert.equal(_test.repositoryFromRequest("change the dashboard in danielol237/wabot"), "danielol237/wabot");
   assert.equal(_test.repositoryFromRequest("update the companion app"), "danielol237/wabot");
+  assert.equal(_test.repositoryFromRequest("let's work now on the aria android companion repo"), "danielol237/aria-android-companion");
+  assert.equal(_test.repositoryFromRequest("improve the android app login screen"), "danielol237/aria-android-companion");
   assert.equal(_test.safeRelativePath("app/src/main/AndroidManifest.xml"), "app/src/main/AndroidManifest.xml");
   assert.equal(_test.safeRelativePath("gradle/libs.versions.toml"), "gradle/libs.versions.toml");
 });

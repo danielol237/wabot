@@ -9,6 +9,15 @@ const ROOT = path.join(__dirname, "../..");
 const DATA_DIR = path.join(ROOT, "data");
 const PROPOSALS_FILE = path.join(DATA_DIR, "engineeringProposals.json");
 const DEFAULT_REPOSITORY = "danielol237/wabot";
+const BUILTIN_REPOSITORY_ALIASES = {
+  "wabot": "danielol237/wabot",
+  "aria bot": "danielol237/wabot",
+  "whatsapp bot": "danielol237/wabot",
+  "aria android companion": "danielol237/aria-android-companion",
+  "android companion": "danielol237/aria-android-companion",
+  "aria companion": "danielol237/aria-android-companion",
+  "android app": "danielol237/aria-android-companion",
+};
 const DEFAULT_BRANCH = "main";
 const MAX_FILES = 6;
 const MAX_FILE_BYTES = 240000;
@@ -32,8 +41,16 @@ function repositoryName() {
 }
 
 function repositoryFromRequest(input) {
-  const match = String(input || "").match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/);
-  return match && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(match[1]) ? match[1] : repositoryName();
+  const request = String(input || "").toLowerCase();
+  const match = request.match(/\b([a-z0-9_.-]+\/[a-z0-9_.-]+)\b/);
+  if (match && /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(match[1])) return match[1];
+  let aliases = { ...BUILTIN_REPOSITORY_ALIASES };
+  try {
+    const configured = JSON.parse(String(process.env.ARIA_REPOSITORY_ALIASES || "{}"));
+    if (configured && typeof configured === "object") aliases = { ...aliases, ...configured };
+  } catch (_) {}
+  const alias = Object.keys(aliases).sort((a, b) => b.length - a.length).find((name) => request.includes(name));
+  return alias && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(aliases[alias]) ? aliases[alias] : repositoryName();
 }
 
 function githubToken(actorJid) {

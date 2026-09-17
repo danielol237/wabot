@@ -34,6 +34,12 @@ test("natural routing sends dashboard and repository changes to engineering", ()
   assert.equal(companion.command.ownerOnly, false);
 });
 
+test("natural routing recognizes named repository workspace requests", () => {
+  const action = router.resolveNaturalAction("ARIA, let's work now on the aria android companion repo");
+  assert.equal(action.intent, "engineering");
+  assert.equal(action.command.ownerOnly, false);
+});
+
 test("natural routing resolves capability discovery, memory recall, and website links", () => {
   assert.equal(router.resolveNaturalAction("what can you do").intent, "help");
   assert.equal(router.resolveNaturalAction("what do you remember about me").intent, "memories");

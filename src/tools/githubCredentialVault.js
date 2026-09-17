@@ -80,9 +80,23 @@ function setTokenForUser(userJid, token) {
   if (!user) return { success: false, error: "A user identity is required." };
   if (!looksLikeGitHubToken(value)) return { success: false, error: "That does not look like a supported GitHub token." };
   const users = readStore();
-  users[user] = { ...encrypt(value), updatedAt: Date.now(), source: "private-whatsapp" };
+  users[user] = { ...(users[user] || {}), ...encrypt(value), updatedAt: Date.now(), source: "private-whatsapp" };
   writeStore(users);
   return { success: true, source: encryptionKey().source };
+}
+
+function setWorkspaceForUser(userJid, repository) {
+  const user = normalizeUser(userJid);
+  const repo = String(repository || "").trim();
+  if (!user || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return { success: false, error: "Use a repository in owner/repo format." };
+  const users = readStore();
+  users[user] = { ...(users[user] || {}), workspace: repo, workspaceUpdatedAt: Date.now() };
+  writeStore(users);
+  return { success: true, repository: repo };
+}
+
+function getWorkspaceForUser(userJid) {
+  return readStore()[normalizeUser(userJid)]?.workspace || "";
 }
 
 function getTokenForUser(userJid) {
@@ -95,7 +109,20 @@ function clearTokenForUser(userJid) {
   const user = normalizeUser(userJid);
   const users = readStore();
   if (users[user]) {
-    delete users[user];
+    const workspace = users[user].workspace;
+    const workspaceUpdatedAt = users[user].workspaceUpdatedAt;
+    users[user] = workspace ? { workspace, workspaceUpdatedAt } : undefined;
+    if (!users[user]) delete users[user];
+    writeStore(users);
+  }
+}
+
+function clearWorkspaceForUser(userJid) {
+  const user = normalizeUser(userJid);
+  const users = readStore();
+  if (users[user]?.workspace) {
+    delete users[user].workspace;
+    delete users[user].workspaceUpdatedAt;
     writeStore(users);
   }
 }
@@ -117,6 +144,9 @@ module.exports = {
   getTokenForUser,
   clearTokenForUser,
   statusForUser,
+  setWorkspaceForUser,
+  getWorkspaceForUser,
+  clearWorkspaceForUser,
   looksLikeGitHubToken,
   setToken,
   getToken,

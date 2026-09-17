@@ -34,10 +34,13 @@ test("natural routing sends dashboard and repository changes to engineering", ()
   assert.equal(companion.command.ownerOnly, false);
 });
 
-test("natural routing recognizes named repository workspace requests", () => {
-  const action = router.resolveNaturalAction("ARIA, let's work now on the aria android companion repo");
+test("natural routing supports explicit repositories and per-user workspace commands", () => {
+  const action = router.resolveNaturalAction("ARIA, work on danielol237/aria-android-companion");
   assert.equal(action.intent, "engineering");
   assert.equal(action.command.ownerOnly, false);
+  assert.equal(router.resolveNaturalAction("ARIA, list my GitHub repos").intent, "engineering");
+  assert.equal(router.resolveNaturalAction("ARIA, use my GitHub repo owner/project").intent, "engineering");
+  assert.equal(router.resolveNaturalAction("ARIA, let's work now on the Android Companion repo"), null);
 });
 
 test("natural routing resolves capability discovery, memory recall, and website links", () => {

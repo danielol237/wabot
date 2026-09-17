@@ -9,15 +9,6 @@ const ROOT = path.join(__dirname, "../..");
 const DATA_DIR = path.join(ROOT, "data");
 const PROPOSALS_FILE = path.join(DATA_DIR, "engineeringProposals.json");
 const DEFAULT_REPOSITORY = "danielol237/wabot";
-const BUILTIN_REPOSITORY_ALIASES = {
-  "wabot": "danielol237/wabot",
-  "aria bot": "danielol237/wabot",
-  "whatsapp bot": "danielol237/wabot",
-  "aria android companion": "danielol237/aria-android-companion",
-  "android companion": "danielol237/aria-android-companion",
-  "aria companion": "danielol237/aria-android-companion",
-  "android app": "danielol237/aria-android-companion",
-};
 const DEFAULT_BRANCH = "main";
 const MAX_FILES = 6;
 const MAX_FILE_BYTES = 240000;
@@ -40,21 +31,16 @@ function repositoryName() {
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value) ? value : DEFAULT_REPOSITORY;
 }
 
-function repositoryFromRequest(input) {
+function repositoryFromRequest(input, actorJid) {
   const request = String(input || "").toLowerCase();
   const match = request.match(/\b([a-z0-9_.-]+\/[a-z0-9_.-]+)\b/);
   if (match && /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(match[1])) return match[1];
-  let aliases = { ...BUILTIN_REPOSITORY_ALIASES };
-  try {
-    const configured = JSON.parse(String(process.env.ARIA_REPOSITORY_ALIASES || "{}"));
-    if (configured && typeof configured === "object") aliases = { ...aliases, ...configured };
-  } catch (_) {}
-  const alias = Object.keys(aliases).sort((a, b) => b.length - a.length).find((name) => request.includes(name));
-  return alias && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(aliases[alias]) ? aliases[alias] : repositoryName();
+  return githubCredentialVault.getWorkspaceForUser(actorJid) || null;
 }
 
 function githubToken(actorJid) {
-  return String(githubCredentialVault.getTokenForUser(actorJid) || process.env.GITHUB_TOKEN || process.env.SESSION_GITHUB_TOKEN || "").trim();
+  if (actorJid) return String(githubCredentialVault.getTokenForUser(actorJid) || "").trim();
+  return String(process.env.GITHUB_TOKEN || process.env.SESSION_GITHUB_TOKEN || "").trim();
 }
 
 function githubHeaders(actorJid) {
@@ -69,7 +55,8 @@ function githubHeaders(actorJid) {
 }
 
 function hasGithubCredential(actorJid) {
-  return Boolean(githubToken(actorJid));
+  if (actorJid) return Boolean(githubCredentialVault.getTokenForUser(actorJid));
+  return Boolean(process.env.GITHUB_TOKEN || process.env.SESSION_GITHUB_TOKEN);
 }
 
 function repoPath(endpoint, repository = repositoryName()) {
@@ -165,7 +152,8 @@ function normalizePlan(raw, objective) {
 async function createUpgradePlan(objective, senderName, chatId, actorJid) {
   const request = clean(objective, 1200);
   if (!request) return { success: false, error: "Tell me what you want upgraded." };
-  const targetRepository = repositoryFromRequest(request);
+  const targetRepository = repositoryFromRequest(request, actorJid);
+  if (!targetRepository) return { success: false, error: "Tell me the repository as owner/repo, or choose one first with “ARIA use my GitHub repo owner/repo”. I will not assume another user’s repository." };
   const prompt = `${request}\n\nRepository: ${targetRepository}\nAllowed paths: ${ALLOWED_PATHS.join(", ")}\nForbidden paths: ${DENIED_PATHS.join(", ")}\n\nCreate a bounded plan with at most ${MAX_FILES} files. Include exact relative paths, a summary, tests, risks, and rollback. This is a proposal only; do not write code yet.`;
   try {
     const response = await generateCodingText(prompt, { system: PLAN_PROMPT, maxTokens: 6000, temperature: 0.1 });
@@ -344,11 +332,49 @@ function listProposals() {
   return loadProposals().slice(-8).reverse().map((proposal) => `${proposal.id} — ${proposal.state} — ${proposal.objective}${proposal.prUrl ? ` — ${proposal.prUrl}` : ""}`).join("\n") || "No engineering proposals recorded.";
 }
 
+async function listUserRepositories(actorJid) {
+  if (!hasGithubCredential(actorJid)) return { success: false, error: "Send your GitHub token privately to ARIA before listing your repositories." };
+  const response = await axios({
+    method: "GET",
+    url: "https://api.github.com/user/repos?per_page=100&sort=updated",
+    headers: githubHeaders(actorJid),
+    timeout: 20000,
+    validateStatus: () => true,
+  });
+  if (response.status < 200 || response.status >= 300) return { success: false, error: clean(response.data?.message || `GitHub returned HTTP ${response.status}`, 240) };
+  const repositories = (Array.isArray(response.data) ? response.data : []).map((repo) => ({ name: repo.full_name, private: Boolean(repo.private), defaultBranch: repo.default_branch || "main" }));
+  return { success: true, repositories };
+}
+
+async function selectUserRepository(repository, actorJid) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || "")) return { success: false, error: "Use the repository in owner/repo format." };
+  try {
+    const repo = await githubRequest("GET", "", undefined, { repository, actorJid });
+    const saved = githubCredentialVault.setWorkspaceForUser(actorJid, repository);
+    if (!saved.success) return saved;
+    return { success: true, repository, message: `✅ Your active ARIA workspace is now *${repo.full_name || repository}*. Future engineering requests from you will use this repository until you choose another.` };
+  } catch (error) {
+    return { success: false, error: `I could not access ${repository} with your GitHub credential: ${clean(error.message, 300)}` };
+  }
+}
+
 async function handleEngineeringRequest(rawInput, senderName, chatId, actorJid) {
   const raw = clean(rawInput, 1400);
   const lower = raw.toLowerCase();
   if (!raw || /^(?:status|inspect|inventory|modules|capabilities|what can you do|what modules)/i.test(raw)) return { success: true, message: formatInspection(inspectSystem()), report: inspectSystem() };
   const id = raw.match(/\b(upgrade_[a-z0-9_]+)\b/i)?.[1];
+  if (/^(?:list|show)\s+(?:my\s+)?(?:github\s+)?repos(?:itories)?\b/i.test(raw)) {
+    const result = await listUserRepositories(actorJid);
+    if (!result.success) return result;
+    const lines = result.repositories.map((repo) => `• ${repo.name}${repo.private ? " 🔒" : ""}`).join("\n") || "No repositories were returned for this GitHub account.";
+    return { success: true, message: `📚 *Your GitHub repositories*\n\n${lines}\n\nSay “ARIA use my GitHub repo owner/repo” to select one.` };
+  }
+  const workspaceRequest = raw.match(/^(?:use|select|switch(?:\s+to)?)\s+(?:my\s+)?(?:github\s+)?(?:repo(?:sitory)?\s+)?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/i);
+  if (workspaceRequest) return selectUserRepository(workspaceRequest[1], actorJid);
+  if (/^(?:clear|forget|remove)\s+(?:my\s+)?(?:active\s+)?(?:github\s+)?workspace$/i.test(raw)) {
+    githubCredentialVault.clearWorkspaceForUser(actorJid);
+    return { success: true, message: "✅ Your active GitHub workspace has been cleared. Name a repository explicitly for your next task." };
+  }
   if (/^(?:list|show)\s+(?:upgrades|proposals|engineering)/i.test(raw)) return { success: true, message: `🧾 *Recent engineering proposals*\n\n${listProposals()}` };
   if (/^merge\b/i.test(raw) && id) return mergeUpgrade(id, actorJid);
   if (/^(?:approve|apply|execute)\b/i.test(raw)) return createGitHubUpgrade(id || raw.split(/\s+/)[1], senderName, actorJid);

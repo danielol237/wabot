@@ -118,7 +118,7 @@ const INTENTS = {
   weather: ["weather in", "weather for", "what's the weather"],
   news: ["news about", "latest news", "news on", "what's happening with"],
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
-  engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade", "change your dashboard", "change your dashboard ui", "change the dashboard", "change dashboard", "update the dashboard", "change the dashboard ui", "change dashboard ui", "improve the android companion app", "work on the aria android companion repo", "work now on the aria android companion repo", "start working on the aria android companion repo", "let's work on the aria android companion repo", "let's work now on the aria android companion repo", "edit my github repo", "change my github repo", "make changes in my github repo", "fix my github repo", "push directly to main"],
+  engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "list my github repos", "show my github repositories", "use my github repo", "select my github repo", "switch to my github repo", "clear my github workspace", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade", "change your dashboard", "change your dashboard ui", "change the dashboard", "change dashboard", "update the dashboard", "change the dashboard ui", "change dashboard ui", "improve the android companion app", "edit my github repo", "change my github repo", "make changes in my github repo", "fix my github repo", "push directly to main"],
   delegate: ["delegate", "delegate this", "orchestrate", "hand this off"],
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
   hidetag: ["hidetag", "hide tag", "hide-tag", "tag everyone silently", "mention everyone silently", "silently tag everyone"],
@@ -349,6 +349,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 function detectIntent(text) {
   const lower = text.toLowerCase().trim();
   if (/^(?:push|publish|upload|send)\s+(?:the\s+)?(?:verified\s+)?(?:project|build|artifact)\s+(?:to|on)\s+github\b/i.test(lower)) return "deploy";
+  if (/\b(?:work\s+on|inspect|improve|fix|change|update|review)\b[\s\S]*\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i.test(lower)) return "engineering";
   for (const [intent, patterns] of Object.entries(INTENTS)) {
     for (const pattern of patterns) {
       // Only match clear intent at the START of the message, never mid-sentence.
@@ -1964,7 +1965,7 @@ async function handleGitHub(sock, msg, args, ctx) {
   const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
   let query = String(args || "").trim();
   const engineeringAction = query.match(/^(help|status|inspect|inventory|list|proposals|upgrades|plan|propose|implement|build|fix|change|approve|apply|execute|verify|check|test|merge|ship)\b/i);
-  if (engineeringAction && isOwner(ctx.senderJid)) {
+  if (engineeringAction) {
     const { handleEngineeringRequest } = require("../tools/engineeringSystem");
     const result = await handleEngineeringRequest(query, ctx.senderName, ctx.chatId, ctx.senderJid);
     return reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));

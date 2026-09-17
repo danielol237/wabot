@@ -57,7 +57,7 @@ Aria, fix the provider fallback in danielol237/wabot.
 Aria, push the verified upgrade to main.
 ```
 
-When a message contains an explicit `owner/repository` name, that repository is stored on the proposal and used for every subsequent GitHub read, branch, commit, PR, verification, and merge operation. Known aliases also work: `ARIA Android Companion repo` selects `danielol237/aria-android-companion`, while `wabot`, `ARIA bot`, and `WhatsApp bot` select `danielol237/wabot`. Other repositories can be selected with their explicit `owner/repository` name. The allowlist includes the wabot source/plugin/test paths and the Android `app/` and `gradle/` paths; secrets, session state, workflow files, and dependency directories remain blocked.
+When a message contains an explicit `owner/repository` name, that repository is stored on the proposal and used for every subsequent GitHub read, branch, commit, PR, verification, and merge operation. ARIA does not globally map personal repository names for every user. A user can say `ARIA list my GitHub repos`, then `ARIA use my GitHub repo owner/repo`; that active workspace is stored only for that WhatsApp user. The allowlist includes the wabot source/plugin/test paths and the Android `app/` and `gradle/` paths; secrets, session state, workflow files, and dependency directories remain blocked.
 
 The safe way to publish to `main` is the final **merge** stage after GitHub checks pass. This is intentionally not triggered by the word “change” or “push” alone. ARIA will create the reviewable branch/PR first and will merge only after you explicitly request the verified upgrade.
 

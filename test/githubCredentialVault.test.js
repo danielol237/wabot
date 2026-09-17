@@ -6,6 +6,8 @@ test.afterEach(() => {
   vault.clearToken();
   vault.clearTokenForUser("11111@s.whatsapp.net");
   vault.clearTokenForUser("22222@s.whatsapp.net");
+  vault.clearWorkspaceForUser("11111@s.whatsapp.net");
+  vault.clearWorkspaceForUser("22222@s.whatsapp.net");
 });
 
 test("GitHub vault accepts supported token formats without exposing them in status", () => {
@@ -34,4 +36,14 @@ test("GitHub vault isolates persistent credentials by WhatsApp user", () => {
   vault.clearTokenForUser("11111@s.whatsapp.net");
   assert.equal(vault.getTokenForUser("11111@s.whatsapp.net"), "");
   assert.equal(vault.getTokenForUser("22222@s.whatsapp.net"), "github_pat_abcdefghijklmnopqrstuvwxyz123456");
+});
+
+test("GitHub workspaces are isolated per WhatsApp user", () => {
+  vault.setWorkspaceForUser("11111@s.whatsapp.net", "alice/project-one");
+  vault.setWorkspaceForUser("22222@s.whatsapp.net", "bob/project-two");
+  assert.equal(vault.getWorkspaceForUser("11111@s.whatsapp.net"), "alice/project-one");
+  assert.equal(vault.getWorkspaceForUser("22222@s.whatsapp.net"), "bob/project-two");
+  vault.clearWorkspaceForUser("11111@s.whatsapp.net");
+  assert.equal(vault.getWorkspaceForUser("11111@s.whatsapp.net"), "");
+  assert.equal(vault.getWorkspaceForUser("22222@s.whatsapp.net"), "bob/project-two");
 });

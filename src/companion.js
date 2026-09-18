@@ -3,6 +3,9 @@ const express = require("express");
 const router = express.Router();
 const { getAIResponse } = require("./tools/ai");
 const { analyzeImage } = require("./tools/visionAI");
+const { getMemory, saveMemory } = require("./utils/memory");
+const { buildUserContext } = require("./utils/userProfile");
+const { autoExtractMemory, learnCommunicationStyle } = require("./utils/semanticMemory");
 const platform = require("./core");
 const { ownerContext, recordProductActivity } = require("./core/productBridge");
 const {
@@ -173,14 +176,26 @@ router.post("/chat", async (req, res) => {
   if (!message) return res.status(400).json({ ok: false, error: "message is required" });
   const history = Array.isArray(req.body?.history) ? req.body.history.slice(-12).map((item) => ({ role: item?.role === "assistant" ? "assistant" : "user", content: clean(item?.content, 2000) })).filter((item) => item.content) : [];
   const conversationId = clean(req.body?.conversationId, 120) || `companion_${crypto.randomBytes(8).toString("hex")}`;
+  const client = clean(req.body?.client, 40) || "android-companion";
+  const messageId = crypto.createHash("sha256").update(`${conversationId}:user:${message}`).digest("hex");
+  const userId = auth.context.userId || `companion:${auth.authType}`;
   try {
+    const profile = buildUserContext(userId, message);
+    const conversationHistory = [...getMemory(conversationId), ...history].slice(-12);
     const answer = await getAIResponse(
       message,
       auth.context.user?.displayName || "Companion user",
-      history,
+      conversationHistory,
       null,
       "The user is speaking through ARIA Android Companion. Keep the response concise, useful, and genuinely ARIA-like. Do not claim biological consciousness or abilities unavailable to this server.",
-      { conversationId, source: "android-companion", platformContext: auth.context },
+      {
+        conversationId,
+        source: client,
+        platformContext: auth.context,
+        userContext: profile.context,
+        preferences: profile.profile.preferences,
+        facts: profile.profile.facts,
+      },
     );
     try {
       recordProductActivity({
@@ -194,12 +209,17 @@ router.post("/chat", async (req, res) => {
       });
     } catch (_) {}
     const text = String(answer || "I’m here, but I couldn’t form a reply just now.").slice(0, 12000);
+    saveMemory(conversationId, message, text);
+    try {
+      autoExtractMemory(userId, auth.context.user?.displayName || "Companion user", message);
+      learnCommunicationStyle(userId, auth.context.user?.displayName || "Companion user", message);
+    } catch (_) {}
     const syncBase = { conversation_id: conversationId, supabase_user_id: auth.supabaseSubject, aria_user_id: auth.context.userId, tenant_id: auth.context.tenantId };
     await syncRow("companion_messages", { ...syncBase, message_id: crypto.createHash("sha256").update(`${conversationId}:user:${message}`).digest("hex"), role: "user", content: message, created_at: new Date().toISOString() });
     await syncRow("companion_messages", { ...syncBase, message_id: crypto.createHash("sha256").update(`${conversationId}:assistant:${text}`).digest("hex"), role: "assistant", content: text, created_at: new Date().toISOString() });
-    return res.json({ ok: true, conversationId, text, auth: auth.authType });
+    return res.json({ ok: true, status: "completed", conversationId, messageId, text, client, auth: auth.authType });
   } catch (err) {
-    return res.status(502).json({ ok: false, conversationId, error: "ARIA could not complete that companion request." });
+    return res.status(502).json({ ok: false, status: "failed", conversationId, messageId, error: "ARIA could not complete that companion request." });
   }
 });
 

@@ -1,6 +1,7 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
 const express = require("express");
 const QRCode = require("qrcode");
 const qrcodeTerminal = require("qrcode-terminal");
@@ -17,6 +18,7 @@ const { loadPlugins } = require("./utils/pluginLoader");
 const { log, error, warn } = require("./utils/logger");
 const { startTaskPoller } = require("./tools/taskPoller");
 const whatsappPairing = require("./utils/whatsappPairing");
+const companionEvents = require("./companionEvents");
 
 const TEMP_DIR = path.join(__dirname, "../temp");
 const SESSIONS_DIR = path.join(__dirname, "../sessions");
@@ -261,6 +263,7 @@ async function startBot() {
     if (connection === "open") {
       log("✅ ARIA is online and ready!");
       isReady = !!sock.authState.creds.registered;
+      companionEvents.publish({ type: "connection_state", payload: { state: "whatsapp_connected", registered: isReady } });
       whatsappPairing.updateConnection("open", {
         ready: isReady,
         registered: !!sock.authState.creds.registered,
@@ -456,9 +459,21 @@ async function startBot() {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+      if (type !== "notify") return;
     for (const msg of messages) {
       if (!msg.message || msg.key.fromMe) continue;
+      companionEvents.publish({
+        type: "whatsapp_message",
+        conversationId: msg.key.remoteJid,
+        payload: {
+          conversationId: msg.key.remoteJid,
+          sender: msg.key.participant || msg.key.remoteJid,
+          senderName: msg.pushName || null,
+          messageId: msg.key.id || null,
+          direction: "incoming",
+          textAvailable: true,
+        },
+      });
 
       // View-once media is ephemeral BY DESIGN. Auto-downloading and forwarding
       // it is a privacy-sensitive behavior, so it's gated behind an explicit
@@ -581,7 +596,9 @@ async function boot() {
     lastError = err.message;
   });
 
-  app.listen(PORT, () => log(`🚀 Server on port ${PORT}`));
+  const server = http.createServer(app);
+  companionEvents.attach(server);
+  server.listen(PORT, () => log(`🚀 Server on port ${PORT} (companion events enabled)`));
 }
 
 boot();
@@ -589,6 +606,7 @@ boot();
 // Flush memory to disk on shutdown so nothing's lost on a clean restart/deploy
 const { flushNow } = require("./utils/memory");
 const shutdown = async () => {
+  companionEvents.close();
   flushNow();
   sessionPersistence.stopAutoSync();
   await sessionPersistence.backupSession().catch(() => {});

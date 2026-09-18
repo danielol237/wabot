@@ -4,6 +4,7 @@
 
 const { getAIResponse } = require("./ai");
 const { getMemory } = require("../utils/memory");
+const companionEvents = require("../companionEvents");
 
 let sockRef = null;
 let activeIntervals = [];
@@ -62,6 +63,7 @@ async function autonomousTick() {
       const { composeDailyBrief, markDelivered } = require("./atlasDigest");
       const digest = composeDailyBrief(ownerJid, now);
       await sockRef.sendMessage(ownerJid, { text: digest?.text || "Good morning — when you’re ready, tell me what you want to move forward today." });
+      companionEvents.publish({ type: "proactive_message", conversationId: ownerJid, payload: { direction: "outgoing", recipient: ownerJid, text: digest?.text || "Good morning — when you’re ready, tell me what you want to move forward today.", reason: "morning-brief" } });
       if (digest) markDelivered(digest, now);
       markRitualDone(ownerJid, "morning");
       specialUsers.set(ownerJid, { lastCheck: now, mood: "warm" });
@@ -87,6 +89,7 @@ async function autonomousTick() {
 
   try {
     await sockRef.sendMessage(ownerJid, { text: message });
+    companionEvents.publish({ type: "proactive_message", conversationId: ownerJid, payload: { direction: "outgoing", recipient: ownerJid, text: message, reason: "autonomous-check-in" } });
     specialUsers.set(ownerJid, { lastCheck: now, mood: "chatty" });
     console.log("🤖 ARIA sent autonomous message to owner");
   } catch (e) {

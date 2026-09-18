@@ -203,6 +203,10 @@ test("dashboard: home actions wire pairing and activity navigation", async () =>
   assert.match(r.body, /href="\?pane=activity"/);
   assert.match(r.body, /const paneTriggers=document\.querySelectorAll\('\[data-pane\]'\)/);
   assert.match(r.body, /paneTriggers\.forEach\(n=>n\.addEventListener\('click'/);
+  assert.match(r.body, /class="mobile-topbar-logo"/);
+  assert.match(r.body, /class="nav-icon"/);
+  assert.match(r.body, /<svg viewBox="0 0 24 24">/);
+  assert.doesNotMatch(r.body, /<nav class="mobile-nav"[^>]*>.*?<span>⌂<\/span>/s);
   await close(srv);
 });
 

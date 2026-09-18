@@ -1042,6 +1042,8 @@ input,textarea,select{background:var(--panel2)!important;border-color:var(--line
   .app{padding-bottom:78px}.sidebar{height:62px;padding:10px 16px;box-shadow:0 1px 0 var(--line)}.sb-brand .sb-logo{width:34px;height:34px}.main{padding:0 14px 28px}.topbar{height:58px;margin:0 -14px 22px;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--line)}.topbar-context strong{font-size:14px}.page-title{font-size:28px}.page-sub{font-size:13px;margin-bottom:20px}.hero{padding:20px 16px;margin-bottom:16px;border-radius:16px}.hero .hrow{align-items:flex-start}.hero h2{font-size:18px}.quick-grid{grid-template-columns:1fr;gap:10px}.quick-card{min-height:70px;padding:14px}.grid2{gap:12px}.card{padding:16px;border-radius:14px}.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:13px;border-radius:13px}.stat .n{font-size:22px}.mobile-nav{height:auto;padding:9px 6px calc(9px + env(safe-area-inset-bottom));background:color-mix(in srgb,var(--panel) 94%,transparent);backdrop-filter:blur(18px)}.mobile-nav a{font-size:10px;min-height:42px;justify-content:center}.mobile-nav a span{font-size:10px;color:var(--accent)}.actions{display:grid;grid-template-columns:1fr}.actions .qbtn{width:100%}.pairing-form .btn{width:100%}
 }
 @media(min-width:821px){.main>.pane.show{max-width:1120px}.pairing-form{max-width:680px}.pairing-layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:16px;align-items:start}}
+.mobile-topbar-logo{display:none}.nav-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px}.nav-icon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.mobile-nav a{transition:color .16s ease,transform .16s ease}.mobile-nav a:active{transform:translateY(1px)}
+@media(max-width:820px){.sidebar{display:none}.app{padding-bottom:86px}.topbar{position:sticky;top:0;z-index:40;height:68px;margin:0 -14px 26px;padding:0 16px;background:color-mix(in srgb,var(--panel) 94%,transparent);backdrop-filter:blur(18px);box-shadow:0 1px 0 var(--line)}.mobile-topbar-logo{display:block;border-radius:10px;box-shadow:0 5px 14px rgba(118,87,199,.14)}.topbar-context{display:flex;align-items:center;gap:10px}.topbar-kicker{margin-bottom:2px}.topbar-context strong{font-size:14px}.topbar-status{gap:8px}.theme-toggle{width:38px;height:38px;border-radius:11px}.mobile-nav{padding:10px 10px calc(10px + env(safe-area-inset-bottom));box-shadow:0 -10px 28px rgba(15,20,28,.12)}.mobile-nav a{gap:5px;font-size:10px}.mobile-nav a .nav-icon{color:var(--muted)}.mobile-nav a:hover .nav-icon,.mobile-nav a:focus .nav-icon{color:var(--accent)}}
 </style>
 </head>
 <body>
@@ -1080,11 +1082,11 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     </div>
   </aside>
   <main class="main">
-    <header class="topbar"><div class="topbar-context"><div class="topbar-kicker">ARIA</div><strong>Your companion workspace</strong></div><div class="topbar-status"><span class="dot"></span><span>Online</span><button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">◐</button></div></header>
+    <header class="topbar"><div class="topbar-context"><img class="mobile-topbar-logo" src="/aria-mark.png" alt="" width="34" height="34" /><div><div class="topbar-kicker">ARIA</div><strong>Your companion workspace</strong></div></div><div class="topbar-status"><span class="dot"></span><span>Online</span><button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">◐</button></div></header>
     ${passwordNeeded ? `<div class="card"><div class="empty">Set DASHBOARD_PASSWORD in env to access.</div></div>` : content}
   </main>
 </div>
-<nav class="mobile-nav" aria-label="Primary navigation"><a href="/dashboard"><span>⌂</span>Home</a><a href="/dashboard?pane=pairing"><span>↗</span>Pair</a><a href="/dashboard/atlas"><span>◆</span>Atlas</a><a href="/dashboard?pane=activity"><span>•</span>Activity</a><a href="/dashboard?pane=health"><span>✓</span>Health</a></nav>
+<nav class="mobile-nav" aria-label="Primary navigation"><a href="/dashboard"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></span>Home</a><a href="/dashboard?pane=pairing"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M15 7h4v4M19 7l-7 7M9 17H5v-4M5 17l7-7"/></svg></span>Pair</a><a href="/dashboard/atlas"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 9 9-9 9-9-9zM12 8v8M8 12h8"/></svg></span>Atlas</a><a href="/dashboard?pane=activity"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 19V9M12 19V5M19 19v-7"/></svg></span>Activity</a><a href="/dashboard?pane=health"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.6 2.9 8.2 7 10 4.1-1.8 7-5.4 7-10V6zM9 12l2 2 4-4"/></svg></span>Health</a></nav>
 `}
 <script>
 const CSRF=${JSON.stringify(csrf || "")};
@@ -1116,12 +1118,13 @@ if(!STANDALONE_PANE){
   const prefersDark=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;
   const theme=saved||(prefersDark?'dark':'light');
   root.setAttribute('data-theme',theme);
-  if(btn)btn.textContent=theme==='dark'?'☀️':'🌙';
+  const themeIcon=(mode)=>mode==='dark'?'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2z"/></svg>';
+  if(btn)btn.innerHTML=themeIcon(theme);
   if(btn)btn.addEventListener('click',()=>{
     const next=root.getAttribute('data-theme')==='dark'?'light':'dark';
     root.setAttribute('data-theme',next);
     localStorage.setItem('aria-theme',next);
-    btn.textContent=next==='dark'?'☀️':'🌙';
+    btn.innerHTML=themeIcon(next);
   });
 })();
 // Learner drill-down — fetch full profile + evidence and open the modal.

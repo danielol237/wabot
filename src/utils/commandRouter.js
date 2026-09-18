@@ -1536,13 +1536,15 @@ async function handleDownload(sock, msg, args, ctx) {
   const raw = String(args || "").trim();
   const url = raw.match(/https?:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.!?]+$/, "");
   if (!url) return reply(sock, msg, "Send me a public video link and say “download this”, or use !dl <url>.");
+  const { mediaDownloadEnabled, mediaDownloadMaxMb } = require("../tools/mediaTools");
+  if (!mediaDownloadEnabled()) return reply(sock, msg, "🎬 Video downloads are currently disabled by the ARIA configuration.");
   await react(sock, msg, "⬇️");
   const { validateMediaTarget } = require("./mediaAccess");
   const target = await validateMediaTarget(url);
   if (!target.ok) return reply(sock, msg, `❌ I can only fetch public media links: ${target.reason}.`);
   const { downloadVideo } = require("../tools/mediaTools");
   await reply(sock, msg, "⏬ I’m fetching the video now…");
-  const dl = await downloadVideo(target.url, 50);
+  const dl = await downloadVideo(target.url, mediaDownloadMaxMb());
   if (!dl.success) return reply(sock, msg, `❌ I couldn't download that media link: ${dl.error}. Make sure it is public and still available.`);
   try {
     const buf = require("fs").readFileSync(dl.filePath);
@@ -1581,13 +1583,15 @@ async function handleYtDownload(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   const url = String(args || "").match(/https?:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.!?]+$/, "");
   if (!url) return reply(sock, msg, "Send a public video link, for example: !yt <url>");
+  const { mediaDownloadEnabled, mediaDownloadMaxMb } = require("../tools/mediaTools");
+  if (!mediaDownloadEnabled()) return reply(sock, msg, "🎬 Video downloads are currently disabled by the ARIA configuration.");
   await react(sock, msg, "⬇️");
   const { validateMediaTarget } = require("./mediaAccess");
   const target = await validateMediaTarget(url);
   if (!target.ok) return reply(sock, msg, `❌ I can only fetch public media links: ${target.reason}.`);
   const { downloadVideo } = require("../tools/mediaTools");
   await reply(sock, msg, "⏬ Downloading… (may take a bit)");
-  const dl = await downloadVideo(target.url, 50);
+  const dl = await downloadVideo(target.url, mediaDownloadMaxMb());
   if (!dl.success) return reply(sock, msg, `❌ Download failed: ${dl.error}`);
   try {
     const buf = require("fs").readFileSync(dl.filePath);

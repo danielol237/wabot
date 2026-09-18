@@ -15,6 +15,16 @@ const { resolveYtDlp, commandArgs } = require("../utils/mediaRuntime");
 const TEMP_DIR = path.join(os.tmpdir(), "aria-media");
 try { fs.mkdirSync(TEMP_DIR, { recursive: true }); } catch (_) {}
 
+function mediaDownloadEnabled() {
+  return String(process.env.MEDIA_DOWNLOAD_ENABLED || "1").trim() !== "0";
+}
+
+function mediaDownloadMaxMb() {
+  const configured = Number.parseInt(process.env.MEDIA_DOWNLOAD_MAX_MB || "50", 10);
+  if (!Number.isFinite(configured)) return 50;
+  return Math.min(100, Math.max(1, configured));
+}
+
 function exec(cmd, args, timeoutMs = 120000, env = process.env) {
   return new Promise((resolve) => {
     execFile(cmd, args, { env, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -133,4 +143,4 @@ async function downloadVideo(sourceUrl, maxMB = 50) {
   });
 }
 
-module.exports = { searchYt, downloadAudio, downloadVideo, TEMP_DIR, ytBaseFlags };
+module.exports = { searchYt, downloadAudio, downloadVideo, mediaDownloadEnabled, mediaDownloadMaxMb, TEMP_DIR, ytBaseFlags };

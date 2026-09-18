@@ -92,7 +92,7 @@ const INTENTS = {
   video: ["generate a video", "generate me a video", "generate my video", "create a video", "create me a video", "make a video", "make me a video", "animate this", "create an animation"],
   music: ["generate music", "generate a song", "make music", "make a song", "create music", "create a song", "compose music", "compose a song", "make a beat", "make me a beat", "create a soundtrack"],
   search: ["search for", "look up", "google", "search the web", "find info on"],
-  download: ["download", "dl this", "get this video", "save this"],
+  download: ["download", "please download", "download this link", "download the link", "download this video", "download the video", "download this clip", "download this reel", "dl this", "get this video", "get me this video", "send me the video", "save this", "save this video"],
   scrape: ["read this link", "open this link", "check this site", "visit", "browse", "summarize this link", "what's on this site"],
   remind: ["remind me", "set a reminder", "alert me", "notify me in"],
   help: ["help", "show commands", "what can you do", "what do you do", "menu"],
@@ -215,7 +215,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 
   // Utility
   registerCommand({ name: "search", aliases: ["web", "google"], category: "utility", description: "Search the web", handler: handleSearch, ownerOnly: false });
-  registerCommand({ name: "download", aliases: ["dl"], category: "utility", description: "Download media from URL", handler: handleDownload, ownerOnly: true });
+  registerCommand({ name: "download", aliases: ["dl"], category: "utility", description: "Download public media from a URL", handler: handleDownload, ownerOnly: false });
   registerCommand({ name: "play", aliases: ["music", "song"], category: "utility", description: "Play a song: !play <song name>", handler: handlePlayMusic, ownerOnly: false });
   registerCommand({ name: "yt", aliases: ["youtube", "ytdl", "video"], category: "utility", description: "Download a video: !yt <url>", handler: handleYtDownload, ownerOnly: false });
   registerCommand({ name: "tiktok", aliases: ["tok"], category: "utility", description: "Download a TikTok video: !tiktok <url>", handler: handleYtDownload, ownerOnly: false });
@@ -349,6 +349,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 function detectIntent(text) {
   const lower = text.toLowerCase().trim();
   if (/^(?:push|publish|upload|send)\s+(?:the\s+)?(?:verified\s+)?(?:project|build|artifact)\s+(?:to|on)\s+github\b/i.test(lower)) return "deploy";
+  if (/https?:\/\/\S+/i.test(lower) && /\b(?:download|save|get|fetch|grab|send)\b/i.test(lower) && /\b(?:this|that|it|link|video|clip|reel|media)\b/i.test(lower)) return "download";
   const engineeringAction = /\b(?:check|inspect|look\s+at|review|audit|understand|explain|work(?:\s+\w+){0,2}\s+on|improve|fix|change|update|edit|modify|implement|add|remove|build|test|run|plan|propose|open|list|show|use|select|switch|connect|link|approve|verify|merge|ship|push)\b/i;
   const engineeringTarget = /\b(?:github|git\s*hub|repo(?:sitory)?|codebase|source\s*code|dashboard|android\s+companion)\b|\b(?!src\/|app\/|plugins\/|test\/|gradle\/|data\/|node_modules\/)[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i;
   if (engineeringAction.test(lower) && engineeringTarget.test(lower) && /\b(?:my|the|this|that)\b|\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i.test(lower)) return "engineering";
@@ -1532,14 +1533,24 @@ async function handleSearch(sock, msg, args, ctx) {
 
 async function handleDownload(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !dl <url>");
+  const raw = String(args || "").trim();
+  const url = raw.match(/https?:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.!?]+$/, "");
+  if (!url) return reply(sock, msg, "Send me a public video link and say “download this”, or use !dl <url>.");
   await react(sock, msg, "⬇️");
-  const { downloadFromUrl } = require("../tools/downloader");
-  const result = await downloadFromUrl(args);
-  if (result?.buffer) {
-    await sock.sendMessage(ctx.chatId, { document: result.buffer, mimetype: result.mimetype, fileName: result.filename });
-  } else {
-    await reply(sock, msg, result?.text || "❌ Download failed.");
+  const { validateMediaTarget } = require("./mediaAccess");
+  const target = await validateMediaTarget(url);
+  if (!target.ok) return reply(sock, msg, `❌ I can only fetch public media links: ${target.reason}.`);
+  const { downloadVideo } = require("../tools/mediaTools");
+  await reply(sock, msg, "⏬ I’m fetching the video now…");
+  const dl = await downloadVideo(target.url, 50);
+  if (!dl.success) return reply(sock, msg, `❌ I couldn't download that media link: ${dl.error}. Make sure it is public and still available.`);
+  try {
+    const buf = require("fs").readFileSync(dl.filePath);
+    await sock.sendMessage(ctx.chatId, { video: buf, mimetype: "video/mp4", caption: "🎬 Here you go" }, { quoted: msg });
+  } catch (e) {
+    await reply(sock, msg, `❌ The video downloaded, but I couldn't send it: ${e.message}`);
+  } finally {
+    try { require("fs").unlinkSync(dl.filePath); } catch (_) {}
   }
 }
 
@@ -1568,11 +1579,15 @@ async function handlePlayMusic(sock, msg, args, ctx) {
 // !yt / !tiktok / !ig <url> — download video, send mp4.
 async function handleYtDownload(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  if (!args) return reply(sock, msg, "Usage: !yt <url>");
+  const url = String(args || "").match(/https?:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.!?]+$/, "");
+  if (!url) return reply(sock, msg, "Send a public video link, for example: !yt <url>");
   await react(sock, msg, "⬇️");
+  const { validateMediaTarget } = require("./mediaAccess");
+  const target = await validateMediaTarget(url);
+  if (!target.ok) return reply(sock, msg, `❌ I can only fetch public media links: ${target.reason}.`);
   const { downloadVideo } = require("../tools/mediaTools");
   await reply(sock, msg, "⏬ Downloading… (may take a bit)");
-  const dl = await downloadVideo(args, 50);
+  const dl = await downloadVideo(target.url, 50);
   if (!dl.success) return reply(sock, msg, `❌ Download failed: ${dl.error}`);
   try {
     const buf = require("fs").readFileSync(dl.filePath);

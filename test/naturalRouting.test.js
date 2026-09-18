@@ -51,6 +51,20 @@ test("natural routing understands human repository-check language", () => {
   }
 });
 
+test("natural routing recognizes broad social-media download requests", () => {
+  for (const phrase of [
+    "ARIA, download this link https://www.youtube.com/watch?v=abc123",
+    "ARIA, please download https://www.tiktok.com/@creator/video/123",
+    "ARIA, save this reel https://www.instagram.com/reel/ABC123/",
+    "ARIA, can you fetch this video for me https://www.facebook.com/watch/?v=123",
+    "ARIA, send me the video https://example.com/video.mp4",
+  ]) {
+    const action = router.resolveNaturalAction(phrase);
+    assert.equal(action?.intent, "download", phrase);
+    assert.equal(action?.command?.ownerOnly, false, phrase);
+  }
+});
+
 test("natural routing resolves capability discovery, memory recall, and website links", () => {
   assert.equal(router.resolveNaturalAction("what can you do").intent, "help");
   assert.equal(router.resolveNaturalAction("what do you remember about me").intent, "memories");

@@ -62,6 +62,7 @@ const { sendFile, extractAllCodeBlocks } = require("../tools/fileSender");
 const { createBackup } = require("../tools/backupSystem");
 const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
+const { listCapabilities } = require("./capabilityCatalog");
 
 const { setReminder } = require("../tools/reminders");
 const { buildProject, deployProject, publishProjectToGitHub, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile, autoUpgradeProject } = require("../tools/appBuilder");
@@ -97,6 +98,7 @@ const INTENTS = {
   remind: ["remind me", "set a reminder", "alert me", "notify me in"],
   help: ["help", "show commands", "what can you do", "what do you do", "menu"],
   memories: ["what do you remember", "show me what you remember", "my memories", "your memories"],
+  remember: ["remember that", "remember this", "keep in mind that", "keep in mind", "don't forget that", "do not forget that", "put this in your memory", "save this to memory", "store this in memory"],
   atlas: ["this is a project", "this is my project", "new project", "add this to", "add that to", "what is next", "what's next", "what is blocking us", "what's blocking us", "project brief", "give me the project brief", "take the next safe step", "why did you choose this", "morning brief", "morning briefing", "add a task", "create a task", "record a decision", "log a decision", "plan this project", "plan this", "plan it", "make a plan", "break this down", "break the project down", "plan the project", "make a roadmap", "build a roadmap", "show the roadmap", "show the plan", "view the dependencies", "show the risks", "apply the plan", "approve the plan", "show sentinel", "sentinel status", "enable sentinel", "disable sentinel", "show project signals", "project signals", "what changed in the project", "what changed on the project", "show decision briefs", "acknowledge signal", "resolve signal", "approve brief", "diagnose integrations", "diagnose integration", "inspect integrations", "check the webhook", "check the connection", "webhook status", "integration health", "delivery diagnostics", "show delivery diagnostics", "execute the next safe step", "execute the next step", "take the next safe step", "start execution", "start research run", "start a research run", "start design run", "start a design run", "start build run", "start a build run", "start verify run", "start a verify run", "start release run", "start a release run", "start a research execution", "start a design execution", "start a build execution", "start a verify execution", "start a release execution", "show execution status", "pause execution", "approve execution", "reject execution", "what evidence is missing", "missing execution evidence", "propose recovery", "retrospect this run", "start an operator team", "start a team", "start a research team", "start a verify team", "delegate this to the team", "show team status", "show team handoff", "show the current team handoff", "approve team", "reject team", "pause the operator team", "resume the operator team", "retry the team", "recover the team", "why is the team blocked", "review the operator team", "review release readiness", "retrospect the operator team", "show connected delivery", "connected delivery status", "show delivery status", "is the release ready", "release readiness", "show deployment evidence", "show delivery proposals", "map github repository", "connect github", "connect render", "what failed in github", "what failed in render", "approve delivery", "approve delivery_", "reject delivery", "reject delivery_", "resolve delivery", "resolve delivery_", "show the project knowledge graph", "show project knowledge", "what supports this requirement", "what is blocking this project", "show stale project knowledge", "show conflicts in the project", "what conflicts in the project", "trace this artifact", "link this evidence to the release decision", "record this as a project requirement", "add this artifact to the project vault", "what changed in the project knowledge", "knowledge graph", "project knowledge", "artifact vault", "atlas"],
   links: ["give me the dashboard link", "give me link to dashboard", "link to dashboard", "open dashboard", "open the dashboard", "show me the dashboard", "dashboard link", "anime website", "open the anime website", "show me the anime website", "anime site", "give me the anime link", "give me link to anime website", "links"],
   anime: ["find anime", "search anime", "show me anime", "anime"],
@@ -414,6 +416,9 @@ function naturalArgs(intent, text) {
   if (intent === "nsfw") {
     const explicit = value.match(/^nsfw\s+(on|off|true|false|enable|disable|enabled|disabled)$/i);
     if (explicit) return explicit[1].toLowerCase();
+  }
+  if (intent === "remember") {
+    return value.replace(/^(?:remember(?:\s+that|\s+this)?|keep\s+in\s+mind(?:\s+that)?|(?:don'?t|do\s+not)\s+forget(?:\s+that)?|put\s+this\s+in\s+your\s+memory|save\s+this\s+to\s+memory|store\s+this\s+in\s+memory)\s*/i, "").trim();
   }
   return patterns[intent] ? value.replace(patterns[intent], "").trim() : value;
 }
@@ -756,6 +761,7 @@ async function handleHelp(sock, msg, args, ctx) {
     "⏰ *Personal operator* — say ‘remind me…’, ‘track this project’, ‘start a mission’, or ‘open my learner portal’.",
     "🧠 *Companion memory* — ask ‘what do you remember about me?’ or tell ARIA something worth keeping; memory is curated internally rather than controlled by prefix commands.",
     "🔗 *Web surfaces* — ask ‘give me the dashboard link’ or ‘open the anime website’.",
+    `🧩 *Verified capability groups* — ${listCapabilities().map((capability) => capability.name).join(", ")}. I only report a completed operation after the underlying result and evidence exist.`,
   ];
   if (owner) {
     lines.push("", "🔐 *Owner capabilities* — build, edit, delegate missions, manage the dashboard, configure WhatsApp, inspect health, and administer the bot. These still require owner authorization even without a prefix.");
@@ -2304,8 +2310,9 @@ async function handleDebugCode(sock, msg, args, ctx) {
 async function handleRemember(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, `Usage: !remember prefers React over Vue`);
-  addPreference(ctx.senderJid, args);
-  await reply(sock, msg, `✅ Got it — I'll keep that in mind.`);
+  const result = addPreference(ctx.senderJid, args);
+  if (!result?.persisted) return reply(sock, msg, `❌ I couldn't save that preference${result?.reason ? ` (${result.reason})` : ""}.`);
+  await reply(sock, msg, `✅ Saved. I can retrieve that preference later.`);
 }
 
 async function handlePreferences(sock, msg, args, ctx) {
@@ -2485,8 +2492,8 @@ async function handleLearn(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !learn <fact>");
   await react(sock, msg, "🧠");
-  learnFact(ctx.senderJid, args);
-  await reply(sock, msg, "✅ Got it!");
+  const result = learnFact(ctx.senderJid, args);
+  await reply(sock, msg, result?.persisted ? "✅ Saved to persistent memory." : `❌ I couldn't save that fact${result?.reason ? ` (${result.reason})` : ""}.`);
 }
 
 async function handleFacts(sock, msg, args, ctx) {

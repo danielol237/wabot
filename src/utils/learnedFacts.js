@@ -26,20 +26,25 @@ try {
 function save() {
   try {
     fs.writeFileSync(FACTS_FILE, JSON.stringify(facts, null, 2));
+    return true;
   } catch (err) {
     error("Failed to save learned facts:", err.message);
+    return false;
   }
 }
 
 const MAX_FACTS_PER_CHAT = 50;
 
 function learnFact(chatId, fact) {
+  const value = String(fact || "").trim().slice(0, 500);
+  if (!value) return { persisted: false, reason: "empty-value", recordCount: getFacts(chatId).length };
   if (!facts[chatId]) facts[chatId] = [];
-  if (!facts[chatId].includes(fact)) {
-    facts[chatId].push(fact);
+  if (!facts[chatId].includes(value)) {
+    facts[chatId].push(value);
     if (facts[chatId].length > MAX_FACTS_PER_CHAT) facts[chatId].shift();
   }
-  save();
+  const persisted = save();
+  return { persisted, recordCount: getFacts(chatId).length, value };
 }
 
 function getFacts(chatId) {
@@ -65,4 +70,3 @@ function forgetFact(chatId, index) {
 }
 
 module.exports = { learnFact, getFacts, searchFacts, getFactsContext, forgetFact };
-

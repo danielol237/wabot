@@ -48,14 +48,19 @@ The aliases `!gh` and `!codechange` resolve to the same handler. The stages are 
 
 ## Natural-language requests and multiple repositories
 
-Prefix commands are only a compatibility surface. Owner messages addressed to ARIA are routed naturally, including requests such as:
+Prefix commands are only a compatibility surface. Messages addressed to ARIA are routed naturally in private chats and groups, including requests such as:
 
 ```text
 Aria, change your dashboard UI in the wabot repo.
 Aria, improve the Android companion settings screen in danielol237/aria-android-companion.
 Aria, fix the provider fallback in danielol237/wabot.
 Aria, push the verified upgrade to main.
+Aria, check my repos.
+Aria, look at the repo and tell me what needs attention.
+Aria, review the provider code in my repository.
 ```
+
+ARIA resolves the user’s intended **action**, **target**, and **scope** before dispatching: repository discovery goes to the user’s GitHub account, a singular “my repo” request checks the selected workspace, code changes become a bounded proposal, and approval/verification/merge remain permission-checked stages. In a group, ARIA performs the same routing when the message addresses her by name, while using the sender’s own credential and workspace rather than the group or another participant’s account.
 
 When a message contains an explicit `owner/repository` name, that repository is stored on the proposal and used for every subsequent GitHub read, branch, commit, PR, verification, and merge operation. ARIA does not globally map personal repository names for every user. A user can say `ARIA list my GitHub repos`, then `ARIA use my GitHub repo owner/repo`; that active workspace is stored only for that WhatsApp user. The allowlist includes the wabot source/plugin/test paths and the Android `app/` and `gradle/` paths; secrets, session state, workflow files, and dependency directories remain blocked.
 

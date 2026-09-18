@@ -40,7 +40,15 @@ test("natural routing supports explicit repositories and per-user workspace comm
   assert.equal(action.command.ownerOnly, false);
   assert.equal(router.resolveNaturalAction("ARIA, list my GitHub repos").intent, "engineering");
   assert.equal(router.resolveNaturalAction("ARIA, use my GitHub repo owner/project").intent, "engineering");
-  assert.equal(router.resolveNaturalAction("ARIA, let's work now on the Android Companion repo"), null);
+  assert.equal(router.resolveNaturalAction("ARIA, let's work now on the Android Companion repo").intent, "engineering");
+});
+
+test("natural routing understands human repository-check language", () => {
+  for (const phrase of ["ARIA, check my repos", "ARIA, show my repositories", "ARIA, check my repo", "ARIA, inspect my repo", "ARIA, check danielol237/wabot"]) {
+    const action = router.resolveNaturalAction(phrase);
+    assert.equal(action?.intent, "engineering", phrase);
+    assert.equal(action?.command?.ownerOnly, false, phrase);
+  }
 });
 
 test("natural routing resolves capability discovery, memory recall, and website links", () => {

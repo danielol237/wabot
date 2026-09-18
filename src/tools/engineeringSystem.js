@@ -346,6 +346,26 @@ async function listUserRepositories(actorJid) {
   return { success: true, repositories };
 }
 
+async function inspectUserRepository(repository, actorJid) {
+  const target = repository || githubCredentialVault.getWorkspaceForUser(actorJid);
+  if (!target) {
+    const listed = await listUserRepositories(actorJid);
+    if (!listed.success) return listed;
+    const lines = listed.repositories.map((repo) => `• ${repo.name}${repo.private ? " 🔒" : ""}`).join("\n") || "No repositories were returned for this GitHub account.";
+    return { success: true, message: `📚 I found your GitHub repositories, but you have not selected an active workspace yet.\n\n${lines}\n\nTell me “ARIA use my GitHub repo owner/repo” and I’ll inspect that repository.` };
+  }
+  try {
+    const repo = await githubRequest("GET", "", undefined, { repository: target, actorJid });
+    return {
+      success: true,
+      repository: target,
+      message: `🔎 *Repository check*\n\n*${repo.full_name || target}*${repo.private ? " 🔒" : ""}\n${repo.description || "No description provided."}\n\n• Default branch: *${repo.default_branch || "main"}*\n• Open issues: *${Number(repo.open_issues_count || 0)}*\n• Last updated: *${repo.updated_at || "unknown"}*\n\nTell me what you want changed, reviewed, or tested and I’ll use this repository.`
+    };
+  } catch (error) {
+    return { success: false, error: `I could not check ${target} with your GitHub credential: ${clean(error.message, 300)}` };
+  }
+}
+
 async function selectUserRepository(repository, actorJid) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || "")) return { success: false, error: "Use the repository in owner/repo format." };
   try {
@@ -361,14 +381,19 @@ async function selectUserRepository(repository, actorJid) {
 async function handleEngineeringRequest(rawInput, senderName, chatId, actorJid) {
   const raw = clean(rawInput, 1400);
   const lower = raw.toLowerCase();
-  if (!raw || /^(?:status|inspect|inventory|modules|capabilities|what can you do|what modules)/i.test(raw)) return { success: true, message: formatInspection(inspectSystem()), report: inspectSystem() };
+  if (!raw || (/^(?:status|inspect|inventory|modules|capabilities|what can you do|what modules)/i.test(raw) && !/\b(?:repo|repository|github|codebase|dashboard)\b/i.test(raw))) return { success: true, message: formatInspection(inspectSystem()), report: inspectSystem() };
   const id = raw.match(/\b(upgrade_[a-z0-9_]+)\b/i)?.[1];
-  if (/^(?:list|show)\s+(?:my\s+)?(?:github\s+)?repos(?:itories)?\b/i.test(raw)) {
+  if (/^(?:list|show|check)\s+(?:my\s+)?(?:github\s+)?repos(?:itories)?\b/i.test(raw)) {
     const result = await listUserRepositories(actorJid);
     if (!result.success) return result;
     const lines = result.repositories.map((repo) => `• ${repo.name}${repo.private ? " 🔒" : ""}`).join("\n") || "No repositories were returned for this GitHub account.";
     return { success: true, message: `📚 *Your GitHub repositories*\n\n${lines}\n\nSay “ARIA use my GitHub repo owner/repo” to select one.` };
   }
+  if (/^(?:check|inspect|look\s+at|show\s+me)\s+(?:my\s+)?(?:github\s+)?repo(?:sitory)?\b/i.test(raw) && !/\brepo(?:sitories)?\b\s*$/i.test(raw)) {
+    const explicit = raw.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/)?.[1];
+    return inspectUserRepository(explicit, actorJid);
+  }
+  if (/^(?:check|inspect|look\s+at|show\s+me)\s+(?:my\s+)?(?:github\s+)?repo(?:sitory)?$/i.test(raw)) return inspectUserRepository(null, actorJid);
   const workspaceRequest = raw.match(/^(?:use|select|switch(?:\s+to)?)\s+(?:my\s+)?(?:github\s+)?(?:repo(?:sitory)?\s+)?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/i);
   if (workspaceRequest) return selectUserRepository(workspaceRequest[1], actorJid);
   if (/^(?:clear|forget|remove)\s+(?:my\s+)?(?:active\s+)?(?:github\s+)?workspace$/i.test(raw)) {

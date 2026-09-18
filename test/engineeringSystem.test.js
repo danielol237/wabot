@@ -56,3 +56,10 @@ test("engineering requests can target an explicit repository and Android paths",
   assert.equal(_test.safeRelativePath("app/src/main/AndroidManifest.xml"), "app/src/main/AndroidManifest.xml");
   assert.equal(_test.safeRelativePath("gradle/libs.versions.toml"), "gradle/libs.versions.toml");
 });
+
+test("engineering repository checks require the user credential", async () => {
+  const engineering = require("../src/tools/engineeringSystem");
+  const result = await engineering.handleEngineeringRequest("check my repo", "Test User", "chat-test", "no-credential@s.whatsapp.net");
+  assert.equal(result.success, false);
+  assert.match(result.error, /GitHub token privately/i);
+});

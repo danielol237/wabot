@@ -26,26 +26,25 @@ try {
 function save() {
   try {
     fs.writeFileSync(FACTS_FILE, JSON.stringify(facts, null, 2));
-    return { success: true, file: FACTS_FILE };
+    return true;
   } catch (err) {
     error("Failed to save learned facts:", err.message);
-    return { success: false, error: "The memory store could not be written." };
+    return false;
   }
 }
 
 const MAX_FACTS_PER_CHAT = 50;
 
 function learnFact(chatId, fact) {
+  const value = String(fact || "").trim().slice(0, 500);
+  if (!value) return { persisted: false, reason: "empty-value", recordCount: getFacts(chatId).length };
   if (!facts[chatId]) facts[chatId] = [];
-  const normalized = String(fact || "").trim();
-  if (!normalized) return { success: false, error: "The fact is empty." };
-  const existingIndex = facts[chatId].indexOf(normalized);
-  if (existingIndex >= 0) return { success: true, created: false, index: existingIndex, fact: normalized };
-  facts[chatId].push(normalized);
-  if (facts[chatId].length > MAX_FACTS_PER_CHAT) facts[chatId].shift();
+  if (!facts[chatId].includes(value)) {
+    facts[chatId].push(value);
+    if (facts[chatId].length > MAX_FACTS_PER_CHAT) facts[chatId].shift();
+  }
   const persisted = save();
-  if (!persisted.success) return { success: false, error: persisted.error };
-  return { success: true, created: true, index: facts[chatId].indexOf(normalized), fact: normalized };
+  return { persisted, recordCount: getFacts(chatId).length, value };
 }
 
 function getFacts(chatId) {
@@ -63,16 +62,15 @@ function getFactsContext(chatId) {
   return `\n\nThings you've been told to remember about this chat/project: ${list.join("; ")}.`;
 }
 
-function forgetFact(chatId, value) {
-  if (!facts[chatId]) return { success: false, error: "No facts are stored for this chat." };
-  const raw = String(value ?? "").trim();
+function forgetFact(chatId, index) {
+  if (!facts[chatId]) return { persisted: false, reason: "not-found" };
+  const raw = String(index ?? "").trim();
   const numeric = /^\d+$/.test(raw) ? Number(raw) : -1;
-  const index = numeric >= 0 ? numeric : facts[chatId].findIndex((fact) => fact.toLowerCase() === raw.toLowerCase());
-  if (index < 0 || !facts[chatId][index]) return { success: false, error: "I couldn't find that fact." };
-  const [fact] = facts[chatId].splice(index, 1);
+  const target = numeric >= 0 ? numeric : facts[chatId].findIndex((fact) => fact.toLowerCase() === raw.toLowerCase());
+  if (target < 0 || !facts[chatId][target]) return { persisted: false, reason: "not-found" };
+  const [value] = facts[chatId].splice(target, 1);
   const persisted = save();
-  if (!persisted.success) return { success: false, error: persisted.error };
-  return { success: true, fact };
+  return { persisted, value };
 }
 
 module.exports = { learnFact, getFacts, searchFacts, getFactsContext, forgetFact };

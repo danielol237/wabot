@@ -9,7 +9,7 @@ const id = `test_${process.pid}_${Date.now()}`;
 
 test("capability catalog describes real memory, build, deployment, and engineering seams", () => {
   const names = listCapabilities().map((capability) => capability.name);
-  assert.deepEqual(names, ["memory.write", "memory.read", "project.build", "project.deploy", "engineering.inspect"]);
+  assert.deepEqual(names, ["memory.write", "memory.read", "project.build", "project.deploy", "project.deliver", "engineering.inspect"]);
   assert.equal(getCapability("project.deploy").outputSchema.verified, "boolean");
 });
 

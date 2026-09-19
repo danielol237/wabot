@@ -41,6 +41,15 @@ const CAPABILITIES = Object.freeze([
     limitations: ["no URL is reported unless deployment and verification succeed"],
   },
   {
+    name: "project.deliver",
+    description: "Build, verify, deploy, screenshot, and send a completed website with its live link and archive.",
+    inputSchema: { chatId: "string", goal: "string" },
+    outputSchema: { success: "boolean", url: "string|null", screenshot: "boolean", archive: "boolean" },
+    requirements: ["coding provider", "filesystem workspace", "hosting credentials", "headless browser"],
+    permissions: "owner approval",
+    limitations: ["public link requires a configured hosting provider", "screenshot depends on an available browser runtime"],
+  },
+  {
     name: "engineering.inspect",
     description: "Inspect an allowlisted repository and produce a bounded, reviewable change plan.",
     inputSchema: { objective: "string", repository: "string" },

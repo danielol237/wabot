@@ -123,7 +123,6 @@ const INTENTS = {
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
   engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "list my github repos", "show my github repositories", "check my github repos", "check my repos", "check repos", "show my github repositories", "show my repositories", "show my repos", "what github repos do i have", "what repositories do i have", "check my github repo", "check my repo", "inspect my repo", "look at my repo", "use my github repo", "select my github repo", "switch to my github repo", "clear my github workspace", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade", "change your dashboard", "change your dashboard ui", "change the dashboard", "change dashboard", "update the dashboard", "change the dashboard ui", "change dashboard ui", "improve the android companion app", "edit my github repo", "change my github repo", "make changes in my github repo", "fix my github repo", "push directly to main"],
   delegate: ["delegate", "delegate this", "orchestrate", "hand this off"],
-  deliver: ["build and show me", "build it and show me", "build and send me the link", "build it and send me the link", "build and screenshot", "build it and screenshot", "create and deploy", "create it and deploy", "build and deploy", "build it and deploy", "build a website and give me the link"],
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
   hidetag: ["hidetag", "hide tag", "hide-tag", "tag everyone silently", "mention everyone silently", "silently tag everyone"],
   tagall: ["tag everyone", "tag everybody", "tag all members", "mention everyone", "mention everybody", "mention all members"],
@@ -292,7 +291,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 
   // Dev / Advanced
   registerCommand({ name: "build", aliases: [], category: "dev", description: "Build a complete app from a description", handler: handleBuild, ownerOnly: true });
-  registerCommand({ name: "deliver", aliases: ["buildsite"], category: "dev", description: "Build, verify, deploy, screenshot, and send a website", handler: handleDeliver, ownerOnly: true });
+  registerCommand({ name: "deliver", aliases: ["buildsite"], category: "dev", capability: "project.deliver", description: "Build, verify, deploy, screenshot, and send a website", handler: handleDeliver, ownerOnly: true });
   registerCommand({ name: "engineering", aliases: ["engineer", "selfupgrade", "upgrade"], category: "dev", description: "Inspect ARIA and prepare guarded GitHub upgrades", handler: handleEngineering, ownerOnly: false });
   registerCommand({ name: "deploy", aliases: ["host", "publish"], category: "dev", description: "Deploy the verified project to Vercel", handler: handleDeploy, ownerOnly: true });
   registerCommand({ name: "status", aliases: [], category: "dev", description: "Project status: !status <id>", handler: handleProjectStatus, ownerOnly: false });
@@ -359,6 +358,10 @@ function detectIntent(text) {
   const engineeringAction = /\b(?:check|inspect|look\s+at|review|audit|understand|explain|work(?:\s+\w+){0,2}\s+on|improve|fix|change|update|edit|modify|implement|add|remove|build|test|run|plan|propose|open|list|show|use|select|switch|connect|link|approve|verify|merge|ship|push)\b/i;
   const engineeringTarget = /\b(?:github|git\s*hub|repo(?:sitory)?|codebase|source\s*code|dashboard|android\s+companion)\b|\b(?!src\/|app\/|plugins\/|test\/|gradle\/|data\/|node_modules\/)[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i;
   if (engineeringAction.test(lower) && engineeringTarget.test(lower) && /\b(?:my|the|this|that)\b|\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i.test(lower)) return "engineering";
+  const deliveryIntent = /^(?:please\s+)?(?:build|create|make|design|develop|code)\b/i.test(lower)
+    && /\b(?:website|web\s*app|webpage|site|landing\s+page|portfolio|dashboard|app)\b/i.test(lower)
+    && /\b(?:deploy|host|publish|online|preview|link|url|screenshot|screen\s*shot|show\s+me|send\s+me)\b/i.test(lower);
+  if (deliveryIntent) return "deliver";
   for (const [intent, patterns] of Object.entries(INTENTS)) {
     for (const pattern of patterns) {
       // Only match clear intent at the START of the message, never mid-sentence.
@@ -405,6 +408,7 @@ function naturalArgs(intent, text) {
     music: /^(?:please\s+)?(?:generate|create|make|produce|compose)(?:\s+(?:a|an|me|my|the|this|that|some|music))*\s+/i,
     voiceGenerate: /^(?:please\s+)?(?:generate|create|make|produce|record|narrate)(?:\s+(?:a|an|me|my|the|this|that|some))*\s+(?:voice|speech|audio|narration)\s*/i,
     build: /^(?:please\s+)?(?:build|create|make)(?:\s+me)?(?:\s+(?:an|a))?\s*/i,
+    deliver: /^(?:please\s+)?(?:build|create|make|design|develop|code)(?:\s+me)?(?:\s+(?:an|a))?\s*/i,
     deploy: /^(?:please\s+)?(?:deploy|host|publish)(?:\s+(?:it|this|the project|through vercel|on vercel))?\s*/i,
     delegate: /^(?:please\s+)?(?:delegate|orchestrate|hand this off)(?:\s+(?:this|that|task|mission))?\s*/i,
     agent: /^(?:please\s+)?(?:figure out|plan and|research and|find and compare|deep dive on)\s*/i,

@@ -21,7 +21,7 @@ The deployment runtime needs `VERCEL_TOKEN` for public preview URLs. The browser
 ```text
 !deliver build a dark personal portfolio for Daniel
 !build a landing page for my anime project and send me the link
-ARIA, create a website for my business and show me what you built
+Create a website for my business and show me what you built
 ```
 
 The command is owner-only because it can create hosted projects and send generated artifacts externally.

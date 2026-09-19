@@ -28,8 +28,8 @@ test("delivery command is owner-only and has intuitive aliases", () => {
   assert.deepEqual(command.aliases, ["buildsite"]);
 });
 
-test("natural delivery request resolves to the protected delivery command", () => {
-  const action = router.resolveNaturalAction("ARIA build a website and give me the link for a portfolio");
+test("natural delivery request resolves without requiring a bot name", () => {
+  const action = router.resolveNaturalAction("build a website and give me the link for a portfolio");
   assert.equal(action?.intent, "deliver");
   assert.equal(action?.command?.name, "deliver");
   assert.equal(action?.command?.ownerOnly, true);

@@ -225,6 +225,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
   // NOTE: !run is claimed by the academy challenge runner (registered earlier).
   // The generic code executor gets its own name so it isn't silently shadowed.
   registerCommand({ name: "exec", aliases: ["code"], category: "utility", description: "Execute code: !exec <code>", handler: handleCode, ownerOnly: true });
+  registerCommand({ name: "shell", aliases: ["terminal", "bash"], category: "admin", description: "Run a safe owner-only shell command inside the sandbox", handler: handleShell, ownerOnly: true });
   registerCommand({ name: "weather", aliases: [], category: "utility", description: "Get weather", handler: handleWeather, ownerOnly: false });
   registerCommand({ name: "translate", aliases: ["tr"], category: "utility", description: "Translate text", handler: handleTranslate, ownerOnly: false });
   registerCommand({ name: "news", aliases: [], category: "utility", description: "Get news summary", handler: handleNews, ownerOnly: false });
@@ -1621,6 +1622,38 @@ async function handleCode(sock, msg, args, ctx) {
   const result = await executeCode(ctx.senderJid, code, lang, { scope: "*" });
   const output = typeof result.output === "string" ? result.output : JSON.stringify(result.output);
   await reply(sock, msg, (result.sandboxed === false ? "⚠️ *Unsandboxed*\n" : "🛡️ *Sandboxed*\n") + output);
+}
+
+function blockedShellCommand(command) {
+  const normalized = String(command || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return "No shell command supplied.";
+  const blocked = [
+    /(^|\s)sudo(\s|$)/,
+    /(^|\s)(shutdown|reboot|poweroff|halt|mkfs|fdisk|mount|umount)(\s|$)/,
+    /(^|\s)(docker|podman|systemctl|service|iptables)(\s|$)/,
+    /(^|\s)(ssh|scp|sftp)(\s|$)/,
+    /(^|\s)(kill|pkill|killall)(\s|$)/,
+    /(^|\s)rm\s+(-[a-z]*\s+)*-?[a-z]*r[a-z]*f?\s+(\/|~|\.git|sessions|\.env|.*whatsapp)/,
+    /(^|\s)(curl|wget)\b[^\n|;]*\|\s*(sh|bash|zsh|node)\b/,
+    /(^|\s)(dd|chmod\s+777)(\s|$)/,
+  ];
+  return blocked.some((pattern) => pattern.test(normalized))
+    ? "That shell command is blocked because it could damage the host, expose credentials, or escape the sandbox."
+    : null;
+}
+
+async function handleShell(sock, msg, args, ctx) {
+  const { reply, react } = require("./baileysHelpers");
+  const command = String(args || "").trim();
+  if (!command) return reply(sock, msg, "Usage: !shell <command>\nAliases: !terminal, !bash");
+  const blocked = blockedShellCommand(command);
+  if (blocked) return reply(sock, msg, `❌ ${blocked}`);
+  await react(sock, msg, "🖥️");
+  const { executeCode } = require("../tools/codeRunner");
+  const result = await executeCode(ctx.senderJid, command, "bash", { scope: "shell", timeout: 30, memory: "256m" });
+  const output = String(result.output || "(no output)").slice(0, 5000);
+  const prefix = result.sandboxed ? "🛡️ *Sandboxed terminal*" : "❌ *Terminal blocked*";
+  await reply(sock, msg, `${prefix}\n\n${output}`);
 }
 
 async function handleWeather(sock, msg, args, ctx) {

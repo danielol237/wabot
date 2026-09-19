@@ -2243,10 +2243,11 @@ async function handleBuild(sock, msg, args, ctx) {
   if (!request) return reply(sock, msg, "Tell me what to build before asking me to deploy it.");
 
   await react(sock, msg, "🏗️");
-  await reply(sock, msg, "🏗️ Build started. I’m working through the plan, files, checks, and packaging now.");
-  const onProgress = async (update) => {
-    try { await reply(sock, msg, `⏳ ${update}`); } catch (_) {}
-  };
+  await reply(sock, msg, "🏗️ Working on it. I’ll send the result when the build and checks are complete.");
+  // Keep internal planner/coder/reviewer telemetry out of WhatsApp. The user
+  // gets one start message and one truthful final result instead of a stream
+  // of implementation noise.
+  const onProgress = async () => {};
   const result = await buildProject(request, ctx.senderName, ctx.chatId, onProgress);
   if (!result.success) return reply(sock, msg, formatBuildResult(result));
   let finalText = formatBuildResult(result);

@@ -73,9 +73,9 @@ function formatDeliveryReport({ project, deployment, screenshot, github }) {
 
 async function deliverWebsite({ sock, msg, ctx, request, buildProject, deployProject, publishProjectToGitHub, reply, react }) {
   const chatId = ctx.chatId;
-  const onProgress = async (update) => {
-    try { await reply(sock, msg, `⏳ ${update}`); } catch (_) {}
-  };
+  // Builder progress is useful for internal telemetry but noisy in WhatsApp.
+  // Send only the start message and the final verified result.
+  const onProgress = async () => {};
   await react(sock, msg, "🚀");
   await reply(sock, msg, "🚀 I’m building it, running the real checks, deploying the verified result, and preparing a screenshot + link.");
 
@@ -87,7 +87,6 @@ async function deliverWebsite({ sock, msg, ctx, request, buildProject, deployPro
     if (!process.env.VERCEL_TOKEN) {
       return reply(sock, msg, `${formatDeliveryReport({ project })}\n\n⚠️ The project passed local verification, but I could not create a public website link because VERCEL_TOKEN is not configured.`);
     }
-    await reply(sock, msg, "🌐 Verification passed. Deploying the checked project to a public preview now...");
     deployment = await deployProject(chatId, project.projectId, { target: "preview" });
     if (!deployment.success) return reply(sock, msg, `⚠️ The project passed verification, but public deployment failed: ${safeText(deployment.error, 900)}`);
   }

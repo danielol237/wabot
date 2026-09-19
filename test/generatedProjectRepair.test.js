@@ -4,6 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { repairGeneratedProject, hasProviderFailureText } = require("../src/tools/generatedProjectRepair");
+const { checkProject } = require("../src/tools/websiteQuality");
 
 function tempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "aria-generated-"));
@@ -29,4 +30,26 @@ test("generated-project repair rejects raw provider failures as deliverables", (
   assert.equal(result.failures.length, 1);
   assert.equal(result.failures[0].file, "styles.css");
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("generated frontend repair fixes missing CSS contracts, metadata, and starter copy", () => {
+  const dir = tempProject();
+  try {
+    fs.writeFileSync(path.join(dir, "index.html"), `<!doctype html><html lang="en"><head><title>Portfolio</title></head><body><main class="hero-section project-tags contact-email site-footer"><h1>Build Something Great</h1><p>Contact us at example.com</p></main></body></html>`);
+    fs.writeFileSync(path.join(dir, "style.css"), ".contact-link { color: red; }\n");
+    const result = repairGeneratedProject(dir, ["index.html", "style.css"]);
+    assert.equal(result.failures.length, 0);
+    assert.ok(result.fixes.some((fix) => /CSS contracts/.test(fix)));
+    assert.ok(result.fixes.some((fix) => /meta description/.test(fix)));
+    assert.ok(result.fixes.some((fix) => /starter copy/.test(fix)));
+    const html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
+    const css = fs.readFileSync(path.join(dir, "style.css"), "utf8");
+    assert.match(html, /meta name="description"/);
+    assert.doesNotMatch(html, /Build Something Great|example\.com/);
+    assert.match(css, /\.hero-section\s*\{/);
+    assert.match(css, /\.contact-email\s*\{/);
+    assert.deepEqual(checkProject(dir, ["index.html", "style.css"]).blocking, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

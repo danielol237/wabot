@@ -501,7 +501,7 @@ function bar(value, max = 100, color = "var(--accent)") {
 }
 
 // Real-time ARIA status strip (rendered live via /api/live).
-function renderLiveStrip(ls) {
+function renderLiveStrip(ls, activity = []) {
   const configured = ls.primary && ls.primary !== "none";
   const modelLabel = configured ? ls.primary : "Not configured";
   const fallbackLabel = ls.fallback && ls.fallback !== "none" ? ls.fallback : "—";
@@ -521,9 +521,7 @@ function renderLiveStrip(ls) {
       </div>
       <div class="home-columns">
         <section class="card home-activity"><div class="section-heading"><h2>Recent activity</h2><a href="?pane=activity">See all →</a></div>
-          <div class="feed-item"><div class="feed-ico">↗</div><div class="feed-body"><div class="m">WhatsApp connection and ARIA replies</div><div class="s">Use Pair WhatsApp to check the live connection.</div></div></div>
-          <div class="feed-item"><div class="feed-ico">◆</div><div class="feed-body"><div class="m">Project work lives in Atlas</div><div class="s">Open a workspace to see decisions, tasks, and delivery status.</div></div></div>
-          <div class="feed-item"><div class="feed-ico">✓</div><div class="feed-body"><div class="m">System is ${configured ? "ready" : "waiting for configuration"}</div><div class="s">${configured ? `Last known response: ${ls.lastLatency}ms.` : "Add a provider key, then restart the bot."}</div></div></div>
+          ${activity.length ? activity.slice(0, 4).map((event) => `<div class="feed-item"><div class="feed-ico">${event.ok ? "✓" : "!"}</div><div class="feed-body"><div class="m">${esc(event.label)}</div><div class="s">${esc(event.detail)} · ${esc(new Date(event.at).toLocaleString())}</div></div></div>`).join("") : `<div class="empty">No activity recorded yet. ARIA will show messages, commands, responses, and failures here.</div>`}
         </section>
         <section class="card home-system"><div class="section-heading"><h2>System</h2><a href="?pane=health">Details →</a></div>
           <div class="system-status"><span class="status-dot"></span><b>${configured ? "Online and ready" : "Needs attention"}</b></div>
@@ -893,7 +891,9 @@ function renderAtlasPane(workspaces, brief, csrf) {
   </div>`;
 }
 
-function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "", standalonePane = false, initialPane = "home") {
+function renderPage(title, content, passwordNeeded = false, isLogin = false, csrf = "", standalonePane = false, initialPane = "home", whatsappReady = null) {
+  const shellStatus = whatsappReady === true ? "Connected" : whatsappReady === false ? "Not connected" : "Status unavailable";
+  const shellStatusClass = whatsappReady === true ? "status-connected" : whatsappReady === false ? "status-disconnected" : "status-unknown";
   return `<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
@@ -940,6 +940,8 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .sb-bottom{margin-top:auto;padding-top:16px;border-top:1px solid var(--line)}
 .sb-online{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:0 12px;margin-bottom:12px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(34,197,94,.15)}
+.status-disconnected .dot{background:var(--amber);box-shadow:0 0 0 3px rgba(245,158,11,.14)}
+.status-unknown .dot{background:var(--faint);box-shadow:0 0 0 3px color-mix(in srgb,var(--faint) 18%,transparent)}
 .logout{width:100%;background:none;border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:10px;font-size:12px;font-weight:650;cursor:pointer;transition:.14s}
 .logout:hover{color:var(--red);border-color:rgba(239,68,68,.4)}
 
@@ -1044,6 +1046,7 @@ input,textarea,select{background:var(--panel2)!important;border-color:var(--line
 @media(min-width:821px){.main>.pane.show{max-width:1120px}.pairing-form{max-width:680px}.pairing-layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:16px;align-items:start}}
 .mobile-topbar-logo{display:none}.nav-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px}.nav-icon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.mobile-nav a{transition:color .16s ease,transform .16s ease}.mobile-nav a:active{transform:translateY(1px)}
 @media(max-width:820px){.sidebar{display:none}.app{padding-bottom:86px}.topbar{position:sticky;top:0;z-index:40;height:68px;margin:0 -14px 26px;padding:0 16px;background:color-mix(in srgb,var(--panel) 94%,transparent);backdrop-filter:blur(18px);box-shadow:0 1px 0 var(--line)}.mobile-topbar-logo{display:block;border-radius:10px;box-shadow:0 5px 14px rgba(118,87,199,.14)}.topbar-context{display:flex;align-items:center;gap:10px}.topbar-kicker{margin-bottom:2px}.topbar-context strong{font-size:14px}.topbar-status{gap:8px}.theme-toggle{width:38px;height:38px;border-radius:11px}.mobile-nav{padding:10px 10px calc(10px + env(safe-area-inset-bottom));box-shadow:0 -10px 28px rgba(15,20,28,.12)}.mobile-nav a{gap:5px;font-size:10px}.mobile-nav a .nav-icon{color:var(--muted)}.mobile-nav a:hover .nav-icon,.mobile-nav a:focus .nav-icon{color:var(--accent)}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.quick-card:hover,.qbtn:hover{transform:none}}
 </style>
 </head>
 <body>
@@ -1053,36 +1056,36 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
     <div class="sb-brand"><img class="sb-logo" src="/aria-mark.png" alt="ARIA" width="38" height="38" /><div class="sb-name">ARIA<small>operator console</small></div></div>
     <div class="sb-group">Workspace</div>
     ${standalonePane ? `<a class="navitem" href="/dashboard"><span class="ico">⌂</span><span>Home</span></a>` : `<div class="navitem active" data-pane="home"><span class="ico">⌂</span><span>Home</span></div>`}
-    <div class="navitem" data-pane="business"><span class="ico">02</span><span>Business OS</span></div>
-    <div class="navitem" data-pane="integrations"><span class="ico">03</span><span>Integrations</span></div>
-    <div class="navitem" data-pane="pairing"><span class="ico">04</span><span>Pair WhatsApp</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="business"><span class="ico">02</span><span>Workspace</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="integrations"><span class="ico">03</span><span>Connections</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="pairing"><span class="ico">04</span><span>WhatsApp</span></div>
     <a class="navitem" href="/dashboard/atlas"><span class="ico">05</span><span>Atlas projects</span></a>
-    <div class="navitem" data-pane="activity"><span class="ico">04</span><span>Activity</span></div>
-    <div class="navitem" data-pane="analytics"><span class="ico">05</span><span>Analytics</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="activity"><span class="ico">04</span><span>Activity</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="analytics"><span class="ico">05</span><span>Insights</span></div>
     <div class="sb-group">Intelligence</div>
-    <div class="navitem" data-pane="brain"><span class="ico">05</span><span>System brain</span></div>
-    <div class="navitem" data-pane="memory"><span class="ico">06</span><span>Memory</span></div>
-    <div class="navitem" data-pane="media"><span class="ico">07</span><span>Media</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="brain"><span class="ico">05</span><span>ARIA</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="memory"><span class="ico">06</span><span>Memory</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="media"><span class="ico">07</span><span>Media</span></div>
     <div class="sb-group">Build & learn</div>
-    <div class="navitem" data-pane="academy"><span class="ico">08</span><span>Academy</span></div>
-    <div class="navitem" data-pane="learnerspace"><span class="ico">09</span><span>Learners</span></div>
-    <div class="navitem" data-pane="missions"><span class="ico">10</span><span>Missions</span></div>
-    <div class="navitem" data-pane="downloads"><span class="ico">11</span><span>Downloads</span></div>
-    <div class="navitem" data-pane="sources"><span class="ico">12</span><span>Sources</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="academy"><span class="ico">08</span><span>Academy</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="learnerspace"><span class="ico">09</span><span>Learning</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="missions"><span class="ico">10</span><span>Tasks</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="downloads"><span class="ico">11</span><span>Downloads</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="sources"><span class="ico">12</span><span>Sources</span></div>
     <div class="sb-group">Operations</div>
-    <div class="navitem" data-pane="incidents"><span class="ico">13</span><span>Incidents</span></div>
-    <div class="navitem" data-pane="health"><span class="ico">14</span><span>Health</span></div>
-    <div class="navitem" data-pane="logs"><span class="ico">15</span><span>Logs</span></div>
-    <div class="navitem" data-pane="system"><span class="ico">16</span><span>System</span></div>
-    <div class="navitem" data-pane="household"><span class="ico">17</span><span>Household</span></div>
-    <div class="navitem" data-pane="admin"><span class="ico">18</span><span>Admin</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="incidents"><span class="ico">13</span><span>Incidents</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="health"><span class="ico">14</span><span>Health</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="logs"><span class="ico">15</span><span>Logs</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="system"><span class="ico">16</span><span>System</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="household"><span class="ico">17</span><span>Household</span></div>
+    <div class="navitem" role="button" tabindex="0" data-pane="admin"><span class="ico">18</span><span>Settings</span></div>
     <div class="sb-bottom">
-      <div class="sb-online"><span class="dot"></span><span>ARIA online</span></div>
+      <div class="sb-online ${shellStatusClass}"><span class="dot"></span><span>WhatsApp ${shellStatus}</span></div>
       <form method="POST" action="/dashboard/logout">${csrf ? `<input type="hidden" name="_csrf" value="${csrf}" />` : ""}<button class="logout">Leave dashboard</button></form>
     </div>
   </aside>
   <main class="main">
-    <header class="topbar"><div class="topbar-context"><img class="mobile-topbar-logo" src="/aria-mark.png" alt="" width="34" height="34" /><div><div class="topbar-kicker">ARIA</div><strong>Your companion workspace</strong></div></div><div class="topbar-status"><span class="dot"></span><span>Online</span><button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">◐</button></div></header>
+    <header class="topbar"><div class="topbar-context"><img class="mobile-topbar-logo" src="/aria-mark.png" alt="" width="34" height="34" /><div><div class="topbar-kicker">ARIA</div><strong>Your companion workspace</strong></div></div><div class="topbar-status ${shellStatusClass}"><span class="dot"></span><span>WhatsApp ${shellStatus}</span><button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">◐</button></div></header>
     ${passwordNeeded ? `<div class="card"><div class="empty">Set DASHBOARD_PASSWORD in env to access.</div></div>` : content}
   </main>
 </div>
@@ -1092,12 +1095,12 @@ ${isLogin ? `<div class="login-wrap">${content}</div>` : `
 const CSRF=${JSON.stringify(csrf || "")};
 const STANDALONE_PANE=${JSON.stringify(standalonePane)};
 const INITIAL_PANE=${JSON.stringify(initialPane)};
-const titles={home:['Home','Your daily ARIA workspace'],business:['Business OS','customers · pipeline · revenue'],integrations:['Integrations','cross-product readiness · safe defaults'],pairing:['Pair WhatsApp','phone-number pairing · QR fallback · owner-only'],analytics:['Analytics','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['Brain','ARIA intelligence'],missions:['Missions','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Admin','access']};
+const titles={home:['Home','Your daily ARIA workspace'],business:['Workspace','customers · pipeline · revenue'],integrations:['Connections','cross-product readiness · safe defaults'],pairing:['WhatsApp','phone-number pairing · QR fallback · owner-only'],analytics:['Insights','volume · latency · reliability'],academy:['Academy','learners · mastery · intelligence'],incidents:['Incidents','production response'],brain:['ARIA','ARIA intelligence'],missions:['Tasks','what ARIA is building'],memory:['Memory','what she remembers'],media:['Media','images & voice'],downloads:['Downloads','anime pipeline'],household:['Household','shared space'],activity:['Activity','what she did'],system:['System','health'],health:['Health','sources & providers'],logs:['Logs','live console'],admin:['Settings','access']};
 const navs=document.querySelectorAll('.navitem');
 const paneTriggers=document.querySelectorAll('[data-pane]');
 const htmlEscClient=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function showPane(p){
-  navs.forEach(n=>n.classList.toggle('active',n.dataset.pane===p));
+  navs.forEach(n=>{const active=n.dataset.pane===p;n.classList.toggle('active',active);if(n.dataset.pane)n.setAttribute('aria-current',active?'page':'false');});
   document.querySelectorAll('.pane').forEach(x=>x.classList.remove('show'));
   const el=document.getElementById('pane-'+p); if(el)el.classList.add('show');
   const t=titles[p]||['','']; const pt=document.querySelector('.page-title'); const ps=document.querySelector('.page-sub');
@@ -1106,6 +1109,7 @@ function showPane(p){
 }
 if(!STANDALONE_PANE){
   paneTriggers.forEach(n=>n.addEventListener('click',(event)=>{event.preventDefault();showPane(n.dataset.pane);}));
+  paneTriggers.forEach(n=>n.addEventListener('keydown',(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();showPane(n.dataset.pane);}}));
   showPane(INITIAL_PANE);
 }else{
   document.getElementById('pane-atlas')?.classList.add('show');
@@ -1810,13 +1814,14 @@ router.get("/", checkAuth, (req, res) => {
     const tel = require("./tools/dashboardTelemetry");
     const selfUid = (process.env.OWNER_NUMBER || "237650284057").split("@")[0];
     const ls = tel.liveStatus();
+    const activity = tel.recentActivity(6);
     const a = tel.analytics();
     const ad = tel.academyData();
     const id = tel.incidentData();
     const b = tel.brainData();
     const profile = tel.learnerProfile(selfUid);
     const active = d.activeMissions[0] || d.missions[0];
-    let content = renderLiveStrip(ls);
+    let content = renderLiveStrip(ls, activity);
     content += renderBusinessPane();
     content += renderIntegrationsPane(Boolean(req.app.locals.whatsappReady));
     content += renderPairingPane();
@@ -1902,7 +1907,7 @@ router.get("/", checkAuth, (req, res) => {
     content += renderLogsPane();
 
     const requestedPane = ["home","business","integrations","pairing","activity","analytics","brain","memory","media","academy","learnerspace","missions","downloads","sources","incidents","health","logs","system","household","admin"].includes(String(req.query.pane || "")) ? String(req.query.pane) : "home";
-    res.send(renderPage("Home", content, false, false, csrfFor(req), false, requestedPane));
+    res.send(renderPage("Home", content, false, false, csrfFor(req), false, requestedPane, Boolean(req.app.locals.whatsappReady)));
   } catch (e) {
     res.send(renderPage("Error", `<div class="card"><div class="empty">${e.message}</div></div>`));
   }

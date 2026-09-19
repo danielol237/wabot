@@ -132,6 +132,25 @@ function liveStatus() {
   };
 }
 
+function recentActivity(limit = 6) {
+  const labels = {
+    message: "Message received",
+    command: "Command completed",
+    natural_action: "ARIA action selected",
+    ai: "AI response generated",
+    error: "Operation failed",
+    download: "Download activity",
+    incident: "Incident activity",
+  };
+  return telemetry.events.slice().reverse().slice(0, Math.max(1, Math.min(20, limit))).map((event) => ({
+    type: event.type,
+    label: labels[event.type] || "ARIA activity",
+    detail: event.detail || (event.provider ? `${event.provider} response` : "No additional details"),
+    ok: event.ok !== false,
+    at: event.t,
+  }));
+}
+
 // ── Academy intelligence ──────────────────────────────────────
 function academyData() {
   const lm = tryLoad("./academy/learnerModel");
@@ -343,4 +362,4 @@ function brainData() {
   };
 }
 
-module.exports = { record, analytics, liveStatus, academyData, learnerProfile, incidentData, brainData };
+module.exports = { record, analytics, liveStatus, recentActivity, academyData, learnerProfile, incidentData, brainData };

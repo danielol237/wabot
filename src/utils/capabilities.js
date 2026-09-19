@@ -18,6 +18,17 @@ const { isPermissionGranted, getUserModel } = require("../utils/worldModel");
 const DEFAULT_ALLOWED = new Set(["sendMessage", "react", "readMemory", "readWorldModel"]);
 
 const CAPABILITY_REQUIRES_GRANT = {
+  // Canonical planner-facing names. Natural language stays separate from
+  // these internal operations, so routing can evolve without changing tools.
+  create_project: "create_project",
+  modify_files: "write_files",
+  run_validation: "run_validation",
+  deploy_project: "deploy_project",
+  send_whatsapp_message: "send_whatsapp_message",
+  search_web: "network_access",
+  store_memory: "store_memory",
+  retrieve_memory: "readMemory",
+  github: "github_access",
   code: "execute_code",
   fileWrite: "write_files",
   network: "network_access",

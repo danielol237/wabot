@@ -25,6 +25,7 @@ const REPO = process.env.SESSION_GIT_REPO || "";
 // used by other ARIA features. This token should be limited to the private
 // session repository only.
 const TOKEN = process.env.SESSION_GITHUB_TOKEN || "";
+let lastSyncResult = { operation: null, ok: null, at: null, error: null };
 
 // Static askpass helper — reads the token from its own environment, so the
 // secret never appears in the git process argv (which other users/processes
@@ -234,8 +235,31 @@ function withSyncLock(operation) {
   syncOperation = next.catch(() => {});
   return next;
 }
-function backupSession() { return withSyncLock(backupSessionUnlocked); }
-function restoreSession() { return withSyncLock(restoreSessionUnlocked); }
+function backupSession() {
+  return withSyncLock(backupSessionUnlocked).then((result) => {
+    lastSyncResult = { operation: "backup", ok: Boolean(result?.ok), at: new Date().toISOString(), error: result?.err || null };
+    return result;
+  });
+}
+function restoreSession() {
+  return withSyncLock(restoreSessionUnlocked).then((result) => {
+    lastSyncResult = { operation: "restore", ok: Boolean(result?.ok), at: new Date().toISOString(), error: result?.err || null };
+    return result;
+  });
+}
+
+function getSessionPersistenceStatus() {
+  const keyLength = String(process.env.SESSION_ENCRYPT_KEY || "").length;
+  return {
+    configured: syncEnabled(),
+    repositoryConfigured: Boolean(REPO),
+    tokenConfigured: Boolean(TOKEN),
+    encryptionKeyConfigured: keyLength >= 32,
+    encryptionKeyLength: keyLength,
+    sessionsDirectoryPresent: fs.existsSync(SESSIONS_DIR),
+    lastSync: { ...lastSyncResult },
+  };
+}
 
 // Auto-sync loop
 let syncInterval = null;
@@ -257,4 +281,4 @@ function stopAutoSync() {
   syncInterval = null;
 }
 
-module.exports = { backupSession, restoreSession, startAutoSync, stopAutoSync, syncEnabled };
+module.exports = { backupSession, restoreSession, startAutoSync, stopAutoSync, syncEnabled, getSessionPersistenceStatus };

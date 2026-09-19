@@ -8,6 +8,7 @@ const { uploadToGofile } = require("./gofileUpload");
 const { repairGeneratedProject, hasProviderFailureText } = require("./generatedProjectRepair");
 const { checkProject: checkWebsiteQuality } = require("./websiteQuality");
 const { runBrowserSmoke } = require("./browserSmoke");
+const { validateProject } = require("./projectValidator");
 const { loadTemplate, matchTemplate: tmplMatch, TEMPLATES } = require("../templates/loader");
 const {
   createProject,
@@ -724,6 +725,24 @@ async function finalizeProject(project, projectDir, onProgress) {
     };
   }
 
+  // Syntax-valid files are not enough: imports must resolve, external packages
+  // must be declared, and package scripts must be structurally valid.
+  const projectValidation = validateProject(projectDir);
+  if (projectValidation.errors.length) {
+    trackBuildEvent(project.id, "failed", { stage: "dependency-validation", errors: projectValidation.errors.length });
+    setProjectStatus(project.id, "failed");
+    cleanupDir(projectDir);
+    return {
+      success: false,
+      verificationState: projectValidation.state,
+      error: `Project rejected by dependency validation: ${projectValidation.errors.slice(0, 8).map((item) => `${item.file || "project"}: ${item.message}`).join("; ")}`,
+      projectValidation,
+    };
+  }
+  if (onProgress && projectValidation.warnings.length) {
+    await onProgress(`⚠️ *Dependency check:* ${projectValidation.warnings.slice(0, 3).map((item) => item.message).join("; ")}`);
+  }
+
   // Reviewer Agent pass — a genuinely separate look at ALL files together,
   // catching cross-file issues that per-file generation/verification can't see.
   if (onProgress) await onProgress("🔍 *Reviewer:* Checking the whole project for cross-file issues...");
@@ -885,6 +904,8 @@ async function finalizeProject(project, projectDir, onProgress) {
     files: doneFiles.map((f) => f.path),
     warnings: warningFiles.map((f) => f.path),
     buildWarning,
+    verificationState: "VALID",
+    projectValidation,
     browserSmoke,
     buildVerification: hasPackageJson ? "passed" : "not_required",
     repairFixes,

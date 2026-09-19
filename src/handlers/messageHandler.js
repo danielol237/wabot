@@ -16,7 +16,7 @@ const { getAIResponse } = require("../tools/ai");
 const { getPreferences } = require("../utils/userPreferences");
 const { getFactsContext } = require("../utils/learnedFacts");
 const { log, error, warn } = require("../utils/logger");
-const { updateMood, humanDelay, isSleeping, getStateMessage } = require("../tools/humanity");
+const { updateMood, humanDelay, isSleeping, sleepResponseMode, getStateMessage } = require("../tools/humanity");
 
 const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 const RECENT_MESSAGE_TTL_MS = 5 * 60 * 1000;
@@ -172,9 +172,10 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
       // The owner still gets a groggy reply during sleep hours (no emoji).
       return reply(sock, msg, getStateMessage());
     }
-    // Everyone else is silently ignored while she's asleep — she doesn't reply
-    // at all until she wakes up. This is the "true sleep" behavior.
-    return;
+    // Silent mode preserves the old behavior; reply mode avoids making normal
+    // users believe ARIA is broken during configured sleep hours.
+    if (sleepResponseMode() === "silent") return;
+    return reply(sock, msg, "🌙 I’m offline for sleep right now, but I’ll be back soon.");
   }
 
   // ── DECIDE WHETHER TO REPLY (checked for text AND media/voice) ──

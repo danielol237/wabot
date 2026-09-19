@@ -71,3 +71,6 @@ jobs:
           DASHBOARD_CSRF_SECRET: ci-csrf-secret
           OWNER_NUMBER: 12345000000
         run: npm test
+
+      - name: Validate generated-project dependency rules
+        run: node --test test/projectValidator.test.js

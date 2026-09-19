@@ -62,7 +62,6 @@ const { sendFile, extractAllCodeBlocks } = require("../tools/fileSender");
 const { createBackup } = require("../tools/backupSystem");
 const { runSelfCheck: selfCheck } = require("../tools/selfCheck");
 const { getAIResponse, needsLargeOutput } = require("../tools/ai");
-const { listCapabilities } = require("./capabilityCatalog");
 
 const { setReminder } = require("../tools/reminders");
 const { buildProject, deployProject, publishProjectToGitHub, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile, autoUpgradeProject } = require("../tools/appBuilder");
@@ -93,12 +92,11 @@ const INTENTS = {
   video: ["generate a video", "generate me a video", "generate my video", "create a video", "create me a video", "make a video", "make me a video", "animate this", "create an animation"],
   music: ["generate music", "generate a song", "make music", "make a song", "create music", "create a song", "compose music", "compose a song", "make a beat", "make me a beat", "create a soundtrack"],
   search: ["search for", "look up", "google", "search the web", "find info on"],
-  download: ["download", "please download", "download this link", "download the link", "download this video", "download the video", "download this clip", "download this reel", "dl this", "get this video", "get me this video", "send me the video", "save this", "save this video"],
+  download: ["download", "dl this", "get this video", "save this"],
   scrape: ["read this link", "open this link", "check this site", "visit", "browse", "summarize this link", "what's on this site"],
   remind: ["remind me", "set a reminder", "alert me", "notify me in"],
   help: ["help", "show commands", "what can you do", "what do you do", "menu"],
   memories: ["what do you remember", "show me what you remember", "my memories", "your memories"],
-  remember: ["remember that", "remember this", "keep in mind that", "keep in mind", "don't forget that", "do not forget that", "put this in your memory", "save this to memory", "store this in memory"],
   atlas: ["this is a project", "this is my project", "new project", "add this to", "add that to", "what is next", "what's next", "what is blocking us", "what's blocking us", "project brief", "give me the project brief", "take the next safe step", "why did you choose this", "morning brief", "morning briefing", "add a task", "create a task", "record a decision", "log a decision", "plan this project", "plan this", "plan it", "make a plan", "break this down", "break the project down", "plan the project", "make a roadmap", "build a roadmap", "show the roadmap", "show the plan", "view the dependencies", "show the risks", "apply the plan", "approve the plan", "show sentinel", "sentinel status", "enable sentinel", "disable sentinel", "show project signals", "project signals", "what changed in the project", "what changed on the project", "show decision briefs", "acknowledge signal", "resolve signal", "approve brief", "diagnose integrations", "diagnose integration", "inspect integrations", "check the webhook", "check the connection", "webhook status", "integration health", "delivery diagnostics", "show delivery diagnostics", "execute the next safe step", "execute the next step", "take the next safe step", "start execution", "start research run", "start a research run", "start design run", "start a design run", "start build run", "start a build run", "start verify run", "start a verify run", "start release run", "start a release run", "start a research execution", "start a design execution", "start a build execution", "start a verify execution", "start a release execution", "show execution status", "pause execution", "approve execution", "reject execution", "what evidence is missing", "missing execution evidence", "propose recovery", "retrospect this run", "start an operator team", "start a team", "start a research team", "start a verify team", "delegate this to the team", "show team status", "show team handoff", "show the current team handoff", "approve team", "reject team", "pause the operator team", "resume the operator team", "retry the team", "recover the team", "why is the team blocked", "review the operator team", "review release readiness", "retrospect the operator team", "show connected delivery", "connected delivery status", "show delivery status", "is the release ready", "release readiness", "show deployment evidence", "show delivery proposals", "map github repository", "connect github", "connect render", "what failed in github", "what failed in render", "approve delivery", "approve delivery_", "reject delivery", "reject delivery_", "resolve delivery", "resolve delivery_", "show the project knowledge graph", "show project knowledge", "what supports this requirement", "what is blocking this project", "show stale project knowledge", "show conflicts in the project", "what conflicts in the project", "trace this artifact", "link this evidence to the release decision", "record this as a project requirement", "add this artifact to the project vault", "what changed in the project knowledge", "knowledge graph", "project knowledge", "artifact vault", "atlas"],
   links: ["give me the dashboard link", "give me link to dashboard", "link to dashboard", "open dashboard", "open the dashboard", "show me the dashboard", "dashboard link", "anime website", "open the anime website", "show me the anime website", "anime site", "give me the anime link", "give me link to anime website", "links"],
   anime: ["find anime", "search anime", "show me anime", "anime"],
@@ -120,7 +118,7 @@ const INTENTS = {
   weather: ["weather in", "weather for", "what's the weather"],
   news: ["news about", "latest news", "news on", "what's happening with"],
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
-  engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "list my github repos", "show my github repositories", "check my github repos", "check my repos", "check repos", "show my github repositories", "show my repositories", "show my repos", "what github repos do i have", "what repositories do i have", "check my github repo", "check my repo", "inspect my repo", "look at my repo", "use my github repo", "select my github repo", "switch to my github repo", "clear my github workspace", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade", "change your dashboard", "change your dashboard ui", "change the dashboard", "change dashboard", "update the dashboard", "change the dashboard ui", "change dashboard ui", "improve the android companion app", "edit my github repo", "change my github repo", "make changes in my github repo", "fix my github repo", "push directly to main"],
+  engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade"],
   delegate: ["delegate", "delegate this", "orchestrate", "hand this off"],
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
   hidetag: ["hidetag", "hide tag", "hide-tag", "tag everyone silently", "mention everyone silently", "silently tag everyone"],
@@ -217,7 +215,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 
   // Utility
   registerCommand({ name: "search", aliases: ["web", "google"], category: "utility", description: "Search the web", handler: handleSearch, ownerOnly: false });
-  registerCommand({ name: "download", aliases: ["dl"], category: "utility", description: "Download public media from a URL", handler: handleDownload, ownerOnly: false });
+  registerCommand({ name: "download", aliases: ["dl"], category: "utility", description: "Download media from URL", handler: handleDownload, ownerOnly: true });
   registerCommand({ name: "play", aliases: ["music", "song"], category: "utility", description: "Play a song: !play <song name>", handler: handlePlayMusic, ownerOnly: false });
   registerCommand({ name: "yt", aliases: ["youtube", "ytdl", "video"], category: "utility", description: "Download a video: !yt <url>", handler: handleYtDownload, ownerOnly: false });
   registerCommand({ name: "tiktok", aliases: ["tok"], category: "utility", description: "Download a TikTok video: !tiktok <url>", handler: handleYtDownload, ownerOnly: false });
@@ -289,7 +287,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 
   // Dev / Advanced
   registerCommand({ name: "build", aliases: [], category: "dev", description: "Build a complete app from a description", handler: handleBuild, ownerOnly: true });
-  registerCommand({ name: "engineering", aliases: ["engineer", "selfupgrade", "upgrade"], category: "dev", description: "Inspect ARIA and prepare guarded GitHub upgrades", handler: handleEngineering, ownerOnly: false });
+  registerCommand({ name: "engineering", aliases: ["engineer", "selfupgrade", "upgrade"], category: "dev", description: "Inspect ARIA and prepare guarded GitHub upgrades", handler: handleEngineering, ownerOnly: true });
   registerCommand({ name: "deploy", aliases: ["host", "publish"], category: "dev", description: "Deploy the verified project to Vercel", handler: handleDeploy, ownerOnly: true });
   registerCommand({ name: "status", aliases: [], category: "dev", description: "Project status: !status <id>", handler: handleProjectStatus, ownerOnly: false });
   registerCommand({ name: "projects", aliases: ["mylist"], category: "dev", description: "List projects", handler: handleProjectList, ownerOnly: false });
@@ -351,10 +349,6 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 function detectIntent(text) {
   const lower = text.toLowerCase().trim();
   if (/^(?:push|publish|upload|send)\s+(?:the\s+)?(?:verified\s+)?(?:project|build|artifact)\s+(?:to|on)\s+github\b/i.test(lower)) return "deploy";
-  if (/https?:\/\/\S+/i.test(lower) && /\b(?:download|save|get|fetch|grab|send)\b/i.test(lower) && /\b(?:this|that|it|link|video|clip|reel|media)\b/i.test(lower)) return "download";
-  const engineeringAction = /\b(?:check|inspect|look\s+at|review|audit|understand|explain|work(?:\s+\w+){0,2}\s+on|improve|fix|change|update|edit|modify|implement|add|remove|build|test|run|plan|propose|open|list|show|use|select|switch|connect|link|approve|verify|merge|ship|push)\b/i;
-  const engineeringTarget = /\b(?:github|git\s*hub|repo(?:sitory)?|codebase|source\s*code|dashboard|android\s+companion)\b|\b(?!src\/|app\/|plugins\/|test\/|gradle\/|data\/|node_modules\/)[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i;
-  if (engineeringAction.test(lower) && engineeringTarget.test(lower) && /\b(?:my|the|this|that)\b|\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i.test(lower)) return "engineering";
   for (const [intent, patterns] of Object.entries(INTENTS)) {
     for (const pattern of patterns) {
       // Only match clear intent at the START of the message, never mid-sentence.
@@ -416,9 +410,6 @@ function naturalArgs(intent, text) {
   if (intent === "nsfw") {
     const explicit = value.match(/^nsfw\s+(on|off|true|false|enable|disable|enabled|disabled)$/i);
     if (explicit) return explicit[1].toLowerCase();
-  }
-  if (intent === "remember") {
-    return value.replace(/^(?:remember(?:\s+that|\s+this)?|keep\s+in\s+mind(?:\s+that)?|(?:don'?t|do\s+not)\s+forget(?:\s+that)?|put\s+this\s+in\s+your\s+memory|save\s+this\s+to\s+memory|store\s+this\s+in\s+memory)\s*/i, "").trim();
   }
   return patterns[intent] ? value.replace(patterns[intent], "").trim() : value;
 }
@@ -532,10 +523,6 @@ function resolveNaturalAction(text) {
 async function routeMessage(sock, msg, context) {
   const { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins } = context;
   const matchedPrefix = getMatchedPrefix(lower);
-
-  // Credential intake is handled before every other route so a token is never
-  // sent to the AI provider, memory layer, or generic chat fallback.
-  if (await handlePrivateGithubCredential(sock, msg, text, { ...context, senderJid, senderName, chatId, isGroup })) return;
   
   // ── MODERATION CHECK ───────────────────────────────────────
   if (isGroup) {
@@ -761,7 +748,6 @@ async function handleHelp(sock, msg, args, ctx) {
     "⏰ *Personal operator* — say ‘remind me…’, ‘track this project’, ‘start a mission’, or ‘open my learner portal’.",
     "🧠 *Companion memory* — ask ‘what do you remember about me?’ or tell ARIA something worth keeping; memory is curated internally rather than controlled by prefix commands.",
     "🔗 *Web surfaces* — ask ‘give me the dashboard link’ or ‘open the anime website’.",
-    `🧩 *Verified capability groups* — ${listCapabilities().map((capability) => capability.name).join(", ")}. I only report a completed operation after the underlying result and evidence exist.`,
   ];
   if (owner) {
     lines.push("", "🔐 *Owner capabilities* — build, edit, delegate missions, manage the dashboard, configure WhatsApp, inspect health, and administer the bot. These still require owner authorization even without a prefix.");
@@ -1539,26 +1525,14 @@ async function handleSearch(sock, msg, args, ctx) {
 
 async function handleDownload(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  const raw = String(args || "").trim();
-  const url = raw.match(/https?:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.!?]+$/, "");
-  if (!url) return reply(sock, msg, "Send me a public video link and say “download this”, or use !dl <url>.");
-  const { mediaDownloadEnabled, mediaDownloadMaxMb } = require("../tools/mediaTools");
-  if (!mediaDownloadEnabled()) return reply(sock, msg, "🎬 Video downloads are currently disabled by the ARIA configuration.");
+  if (!args) return reply(sock, msg, "Usage: !dl <url>");
   await react(sock, msg, "⬇️");
-  const { validateMediaTarget } = require("./mediaAccess");
-  const target = await validateMediaTarget(url);
-  if (!target.ok) return reply(sock, msg, `❌ I can only fetch public media links: ${target.reason}.`);
-  const { downloadVideo } = require("../tools/mediaTools");
-  await reply(sock, msg, "⏬ I’m fetching the video now…");
-  const dl = await downloadVideo(target.url, mediaDownloadMaxMb());
-  if (!dl.success) return reply(sock, msg, `❌ I couldn't download that media link: ${dl.error}. Make sure it is public and still available.`);
-  try {
-    const buf = require("fs").readFileSync(dl.filePath);
-    await sock.sendMessage(ctx.chatId, { video: buf, mimetype: "video/mp4", caption: "🎬 Here you go" }, { quoted: msg });
-  } catch (e) {
-    await reply(sock, msg, `❌ The video downloaded, but I couldn't send it: ${e.message}`);
-  } finally {
-    try { require("fs").unlinkSync(dl.filePath); } catch (_) {}
+  const { downloadFromUrl } = require("../tools/downloader");
+  const result = await downloadFromUrl(args);
+  if (result?.buffer) {
+    await sock.sendMessage(ctx.chatId, { document: result.buffer, mimetype: result.mimetype, fileName: result.filename });
+  } else {
+    await reply(sock, msg, result?.text || "❌ Download failed.");
   }
 }
 
@@ -1587,17 +1561,11 @@ async function handlePlayMusic(sock, msg, args, ctx) {
 // !yt / !tiktok / !ig <url> — download video, send mp4.
 async function handleYtDownload(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  const url = String(args || "").match(/https?:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.!?]+$/, "");
-  if (!url) return reply(sock, msg, "Send a public video link, for example: !yt <url>");
-  const { mediaDownloadEnabled, mediaDownloadMaxMb } = require("../tools/mediaTools");
-  if (!mediaDownloadEnabled()) return reply(sock, msg, "🎬 Video downloads are currently disabled by the ARIA configuration.");
+  if (!args) return reply(sock, msg, "Usage: !yt <url>");
   await react(sock, msg, "⬇️");
-  const { validateMediaTarget } = require("./mediaAccess");
-  const target = await validateMediaTarget(url);
-  if (!target.ok) return reply(sock, msg, `❌ I can only fetch public media links: ${target.reason}.`);
   const { downloadVideo } = require("../tools/mediaTools");
   await reply(sock, msg, "⏬ Downloading… (may take a bit)");
-  const dl = await downloadVideo(target.url, mediaDownloadMaxMb());
+  const dl = await downloadVideo(args, 50);
   if (!dl.success) return reply(sock, msg, `❌ Download failed: ${dl.error}`);
   try {
     const buf = require("fs").readFileSync(dl.filePath);
@@ -1991,12 +1959,6 @@ function formatResearchResult(result) {
 async function handleGitHub(sock, msg, args, ctx) {
   const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
   let query = String(args || "").trim();
-  const engineeringAction = query.match(/^(help|status|inspect|inventory|list|proposals|upgrades|plan|propose|implement|build|fix|change|approve|apply|execute|verify|check|test|merge|ship)\b/i);
-  if (engineeringAction) {
-    const { handleEngineeringRequest } = require("../tools/engineeringSystem");
-    const result = await handleEngineeringRequest(query, ctx.senderName, ctx.chatId, ctx.senderJid);
-    return reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));
-  }
   if (/^(?:this|it|that|the repo|the repository)$/i.test(query)) query = getQuotedMessageText(msg) || "";
   if (!query) return reply(sock, msg, "Tell me what to look up on GitHub, or reply to the repository/topic and say “search this on GitHub”.");
   await react(sock, msg, "🐙");
@@ -2104,62 +2066,8 @@ async function handleEngineering(sock, msg, args, ctx) {
   let request = String(args || "").trim();
   if (/^(?:this|it|that|the brief|the proposal)$/i.test(request)) request = getQuotedMessageText(msg) || request;
   await react(sock, msg, "🛠️");
-  const result = await handleEngineeringRequest(request, ctx.senderName, ctx.chatId, ctx.senderJid);
+  const result = await handleEngineeringRequest(request, ctx.senderName, ctx.chatId);
   await reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));
-}
-
-async function handlePrivateGithubCredential(sock, msg, text, ctx) {
-  const raw = String(text || "").trim();
-  const { setTokenForUser, clearTokenForUser, statusForUser, getWorkspaceForUser } = require("../tools/githubCredentialVault");
-  const { startDeviceFlow, cancelDeviceFlow } = require("../tools/githubOAuth");
-  const { reply } = require("./baileysHelpers");
-
-  if (!/\b(?:github|git hub)\b/i.test(raw) && !/(?:gh[pousr]_|github_pat_)/i.test(raw)) return false;
-
-  if (/\b(?:connect|link|authorize|authenticate|sign\s*in)\b[\s\S]*\b(?:github|git hub)\b/i.test(raw) || /\b(?:github|git hub)\b[\s\S]*\b(?:connect|link|authorize|authenticate|sign\s*in)\b/i.test(raw)) {
-    if (ctx.isGroup) {
-      await reply(sock, msg, "❌ GitHub linking must be started in ARIA's private chat so the one-time authorization code is not exposed to a group.");
-      return true;
-    }
-    const result = await startDeviceFlow({ actorJid: ctx.senderJid, notify: (message) => reply(sock, msg, message) });
-    if (!result.success) await reply(sock, msg, `❌ ${result.error}`);
-    return true;
-  }
-
-  if (/\b(?:cancel|stop)\b[\s\S]*\b(?:github|git hub)\b/i.test(raw)) {
-    await reply(sock, msg, cancelDeviceFlow(ctx.senderJid) ? "✅ Your pending GitHub authorization was cancelled." : "There is no pending GitHub authorization for you.");
-    return true;
-  }
-
-  if (/\b(?:status|configured|connected|connection)\b[\s\S]*\b(?:github|git hub)\b/i.test(raw) || /\b(?:github|git hub)\b[\s\S]*\b(?:status|configured|connected|connection)\b/i.test(raw)) {
-    const status = statusForUser(ctx.senderJid);
-    const workspace = getWorkspaceForUser(ctx.senderJid);
-    await reply(sock, msg, `🔐 GitHub access: *${status.configured ? "connected" : "not connected"}*${status.credentialType ? `\nCredential type: *${status.credentialType}*` : ""}${workspace ? `\nActive workspace: *${workspace}*` : ""}\nEncryption: *${status.encryption}*\n\nARIA never displays your raw token.`);
-    return true;
-  }
-
-  if (/\b(?:forget|delete|remove|revoke|clear)\b[\s\S]*\b(?:github|git hub)\b[\s\S]*\b(?:token|access|credential)\b/i.test(raw)) {
-    clearTokenForUser(ctx.senderJid);
-    await reply(sock, msg, "✅ Your encrypted GitHub credential has been cleared.");
-    return true;
-  }
-
-  const token = raw.match(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/)?.[0];
-  if (!token) return false;
-  if (ctx.isGroup) {
-    try { await sock.sendMessage(ctx.chatId, { delete: msg.key }); } catch (_) {}
-    await reply(sock, msg, "❌ I will not accept credentials in a group. Send the token only in ARIA's private chat.");
-    return true;
-  }
-
-  const result = setTokenForUser(ctx.senderJid, token);
-  try { await sock.sendMessage(ctx.chatId, { delete: msg.key }); } catch (_) {}
-  if (!result.success) {
-    await reply(sock, msg, "❌ I rejected that value because it did not match a supported GitHub token format.");
-    return true;
-  }
-  await reply(sock, msg, "✅ Your GitHub credential has been encrypted and stored for your future repository tasks. I did not save or repeat the raw token. Say “ARIA forget my GitHub token” to clear it.");
-  return true;
 }
 
 async function handleBuild(sock, msg, args, ctx) {
@@ -2310,9 +2218,8 @@ async function handleDebugCode(sock, msg, args, ctx) {
 async function handleRemember(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, `Usage: !remember prefers React over Vue`);
-  const result = addPreference(ctx.senderJid, args);
-  if (!result?.persisted) return reply(sock, msg, `❌ I couldn't save that preference${result?.reason ? ` (${result.reason})` : ""}.`);
-  await reply(sock, msg, `✅ Saved. I can retrieve that preference later.`);
+  addPreference(ctx.senderJid, args);
+  await reply(sock, msg, `✅ Got it — I'll keep that in mind.`);
 }
 
 async function handlePreferences(sock, msg, args, ctx) {
@@ -2493,7 +2400,8 @@ async function handleLearn(sock, msg, args, ctx) {
   if (!args) return reply(sock, msg, "Usage: !learn <fact>");
   await react(sock, msg, "🧠");
   const result = learnFact(ctx.senderJid, args);
-  await reply(sock, msg, result?.persisted ? "✅ Saved to persistent memory." : `❌ I couldn't save that fact${result?.reason ? ` (${result.reason})` : ""}.`);
+  if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+  await reply(sock, msg, result.created ? "✅ Got it — I saved that." : "✅ I already had that saved.");
 }
 
 async function handleFacts(sock, msg, args, ctx) {
@@ -2505,8 +2413,9 @@ async function handleFacts(sock, msg, args, ctx) {
 async function handleForget(sock, msg, args, ctx) {
   const { reply } = require("./baileysHelpers");
   if (!args) return reply(sock, msg, "Usage: !forget <fact to forget>");
-  forgetFact(ctx.senderJid, args);
-  await reply(sock, msg, "✅ Forgotten.");
+  const result = forgetFact(ctx.senderJid, args);
+  if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
+  await reply(sock, msg, `✅ Forgotten: ${result.fact}`);
 }
 
 async function handleAgent(sock, msg, args, ctx) {
@@ -2557,13 +2466,8 @@ async function handleNsfw(sock, msg, args, ctx) {
   const chatId = msg.key.remoteJid;
   const raw = Array.isArray(args) ? args.join(" ") : String(args || "");
   const value = raw.toLowerCase().replace(/[?!.]+$/g, "").replace(/^nsfw\s+/, "").trim();
-  const nsfwCommands = ["waifu", "neko", "trap", "blowjob", "ass", "hentai", "milf", "oral", "paizuri", "ero", "yuri", "cum", "feet", "spank", "smallboobs"];
   const enabled = /^(?:on|true|enable|enabled|turn\s+on(?:\s+nsfw)?|switch\s+on(?:\s+nsfw)?)$/.test(value) || /^(?:turn|switch)\s+on\s+nsfw$/.test(raw.toLowerCase().trim());
   const disabled = /^(?:off|false|disable|disabled|turn\s+off(?:\s+nsfw)?|switch\s+off(?:\s+nsfw)?)$/.test(value) || /^(?:turn|switch)\s+off\s+nsfw$/.test(raw.toLowerCase().trim());
-
-  if (!isOwner(ctx.senderJid) && !isAdmin(ctx.senderJid)) {
-    return reply(sock, msg, "❌ NSFW controls are restricted to ARIA's owner and configured admins.");
-  }
 
   if (disabled) {
     setNsfw(false, chatId);
@@ -2571,10 +2475,10 @@ async function handleNsfw(sock, msg, args, ctx) {
   }
   if (enabled) {
     setNsfw(true, chatId);
-    return reply(sock, msg, `✅ NSFW mode enabled in this chat.\n\nAvailable commands:\n${nsfwCommands.map((command) => `!${command}`).join(", ")}`);
+    return reply(sock, msg, "✅ NSFW mode enabled in this chat.");
   }
   const current = isNsfwEnabled(chatId);
-  return reply(sock, msg, `🔞 *NSFW admin panel*\nStatus: *${current ? "ON" : "OFF"}*\n\nAvailable commands:\n${nsfwCommands.map((command) => `!${command}`).join(", ")}\n\nUse *!nsfw on* or *!nsfw off*.`);
+  return reply(sock, msg, `🔞 NSFW is currently *${current ? "ON" : "OFF"}* in this chat. Use *!nsfw on* or *!nsfw off*.`);
 }
 
 
@@ -3098,5 +3002,5 @@ module.exports = {
   resolveNaturalAction,
   naturalArgs,
   detectCommandCollisions,
-  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation, handlePrivateGithubCredential },
+  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation },
 };

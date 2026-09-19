@@ -73,6 +73,7 @@ app.get("/healthz", async (req, res) => {
       build: process.env.RENDER_GIT_COMMIT || process.env.RENDER_GIT_COMMIT_SHA || "unknown",
       whatsappReady: !!isReady,
       media: runtimeDeps,
+      sessionPersistence: sessionPersistence.getSessionPersistenceStatus(),
     });
   } catch (err) {
     res.status(503).json({ ok: false, service: "aria", error: "health check failed" });

@@ -150,7 +150,14 @@ async function humanDelay(sock, chatId, userJid, messageLength) {
 
 function isSleeping() {
   const h = new Date().getHours();
-  return h >= 1 && h < 6; // Deep sleep hours
+  const start = Number.parseInt(process.env.ARIA_SLEEP_START_HOUR || "1", 10);
+  const end = Number.parseInt(process.env.ARIA_SLEEP_END_HOUR || "6", 10);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start === end) return false;
+  return start < end ? h >= start && h < end : h >= start || h < end;
+}
+
+function sleepResponseMode() {
+  return String(process.env.ARIA_SLEEP_MODE || "reply").toLowerCase() === "silent" ? "silent" : "reply";
 }
 
 function isDrowsy() {
@@ -203,5 +210,5 @@ function getPersonalitySuffix(userJid) {
 module.exports = {
   updateMood, getMoodData, getRelationship,
   trackInteraction, getBondLabel, getTypingDelay, humanDelay,
-  isSleeping, isDrowsy, getStateMessage, getPersonalitySuffix, MOODS,
+  isSleeping, isDrowsy, sleepResponseMode, getStateMessage, getPersonalitySuffix, MOODS,
 };

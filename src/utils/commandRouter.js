@@ -2206,6 +2206,12 @@ async function handlePrivateGithubCredential(sock, msg, text, ctx) {
   return true;
 }
 
+function cleanDeliveryRequest(request) {
+  return String(request || "")
+    .replace(/\s+(?:and\s+)?(?:deploy|publish|host|show\s+me|send\s+me\s+(?:the\s+)?(?:link|screenshot)|(?:then\s+)?give\s+me\s+(?:the\s+)?(?:ngrok\s+)?(?:tunnel\s+)?(?:link|url)|use\s+(?:an?\s+)?(?:ngrok|tunnel))\s*$/i, "")
+    .trim();
+}
+
 async function handleDeliver(sock, msg, args, ctx) {
   const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
   let request = String(args || "").trim();
@@ -2215,7 +2221,7 @@ async function handleDeliver(sock, msg, args, ctx) {
     sock,
     msg,
     ctx,
-    request: request.replace(/\s+(?:and\s+)?(?:deploy|publish|host|show\s+me|send\s+me\s+(?:the\s+)?(?:link|screenshot))\s*$/i, "").trim() || request,
+    request: cleanDeliveryRequest(request) || request,
     buildProject,
     deployProject,
     publishProjectToGitHub,
@@ -3166,5 +3172,5 @@ module.exports = {
   resolveNaturalAction,
   naturalArgs,
   detectCommandCollisions,
-  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation, handlePrivateGithubCredential },
+  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation, handlePrivateGithubCredential, cleanDeliveryRequest },
 };

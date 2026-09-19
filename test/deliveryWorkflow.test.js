@@ -34,3 +34,9 @@ test("natural delivery request resolves without requiring a bot name", () => {
   assert.equal(action?.command?.name, "deliver");
   assert.equal(action?.command?.ownerOnly, true);
 });
+
+test("delivery method instructions are removed from the project brief", () => {
+  const { cleanDeliveryRequest } = router._test;
+  assert.equal(cleanDeliveryRequest("create a site about yourself then give me ngrok tunnel link"), "create a site about yourself");
+  assert.equal(cleanDeliveryRequest("build a portfolio and deploy"), "build a portfolio");
+});

@@ -66,6 +66,7 @@ const { listCapabilities } = require("./capabilityCatalog");
 
 const { setReminder } = require("../tools/reminders");
 const { buildProject, deployProject, publishProjectToGitHub, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile, autoUpgradeProject } = require("../tools/appBuilder");
+const { deliverWebsite } = require("../tools/deliveryWorkflow");
 const { handleEngineeringRequest } = require("../tools/engineeringSystem");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
 const { handleAriaLifeFeature } = require("../tools/ariaLifeFeatures");
@@ -122,6 +123,7 @@ const INTENTS = {
   agent: ["figure out", "plan and", "research and", "find and compare", "deep dive on"],
   engineering: ["what modules do you have installed", "which modules do you have installed", "inspect your system", "inspect your capabilities", "show your capabilities", "show your installed modules", "list my github repos", "show my github repositories", "check my github repos", "check my repos", "check repos", "show my github repositories", "show my repositories", "show my repos", "what github repos do i have", "what repositories do i have", "check my github repo", "check my repo", "inspect my repo", "look at my repo", "use my github repo", "select my github repo", "switch to my github repo", "clear my github workspace", "propose an upgrade", "plan an upgrade", "upgrade yourself", "improve your system", "implement this in your system", "verify the upgrade", "open a github pr for the upgrade", "merge the upgrade", "merge upgrade", "change your dashboard", "change your dashboard ui", "change the dashboard", "change dashboard", "update the dashboard", "change the dashboard ui", "change dashboard ui", "improve the android companion app", "edit my github repo", "change my github repo", "make changes in my github repo", "fix my github repo", "push directly to main"],
   delegate: ["delegate", "delegate this", "orchestrate", "hand this off"],
+  deliver: ["build and show me", "build it and show me", "build and send me the link", "build it and send me the link", "build and screenshot", "build it and screenshot", "create and deploy", "create it and deploy", "build and deploy", "build it and deploy", "build a website and give me the link"],
   build: ["build", "build me a", "build an app", "build a website", "create an app", "create a website", "make me an app", "make me a website", "code me", "create a project"],
   hidetag: ["hidetag", "hide tag", "hide-tag", "tag everyone silently", "mention everyone silently", "silently tag everyone"],
   tagall: ["tag everyone", "tag everybody", "tag all members", "mention everyone", "mention everybody", "mention all members"],
@@ -290,6 +292,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
 
   // Dev / Advanced
   registerCommand({ name: "build", aliases: [], category: "dev", description: "Build a complete app from a description", handler: handleBuild, ownerOnly: true });
+  registerCommand({ name: "deliver", aliases: ["buildsite"], category: "dev", description: "Build, verify, deploy, screenshot, and send a website", handler: handleDeliver, ownerOnly: true });
   registerCommand({ name: "engineering", aliases: ["engineer", "selfupgrade", "upgrade"], category: "dev", description: "Inspect ARIA and prepare guarded GitHub upgrades", handler: handleEngineering, ownerOnly: false });
   registerCommand({ name: "deploy", aliases: ["host", "publish"], category: "dev", description: "Deploy the verified project to Vercel", handler: handleDeploy, ownerOnly: true });
   registerCommand({ name: "status", aliases: [], category: "dev", description: "Project status: !status <id>", handler: handleProjectStatus, ownerOnly: false });
@@ -2199,11 +2202,32 @@ async function handlePrivateGithubCredential(sock, msg, text, ctx) {
   return true;
 }
 
+async function handleDeliver(sock, msg, args, ctx) {
+  const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
+  let request = String(args || "").trim();
+  if (/^(?:this|it|that|the brief|the project)$/i.test(request)) request = getQuotedMessageText(msg) || "";
+  if (!request) return reply(sock, msg, "Tell me what website to deliver. Example: !deliver create a portfolio site for ARIA");
+  return deliverWebsite({
+    sock,
+    msg,
+    ctx,
+    request: request.replace(/\s+(?:and\s+)?(?:deploy|publish|host|show\s+me|send\s+me\s+(?:the\s+)?(?:link|screenshot))\s*$/i, "").trim() || request,
+    buildProject,
+    deployProject,
+    publishProjectToGitHub,
+    reply,
+    react,
+  });
+}
+
 async function handleBuild(sock, msg, args, ctx) {
   const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
   let request = String(args || "").trim();
   if (/^(?:this|it|that|the brief|the project)$/i.test(request)) request = getQuotedMessageText(msg) || "";
   if (!request) return reply(sock, msg, "Tell me what to build, or reply to a project brief and say “ARIA, build this”.");
+  if (/\b(?:screenshot|send\s+me\s+(?:the\s+)?link|give\s+me\s+(?:the\s+)?link|show\s+me\s+what\s+you\s+built|put\s+it\s+online)\b/i.test(request)) {
+    return handleDeliver(sock, msg, request, ctx);
+  }
 
   // Treat “build ... and deploy on Vercel” as one explicit owner request. The
   // project must still pass the builder’s deterministic repair and real build
@@ -2798,6 +2822,7 @@ const intentHandlers = {
     await reply(sock, msg, result);
   },
   build: async (sock, msg, text, ctx) => handleBuild(sock, msg, text, ctx),
+  deliver: async (sock, msg, text, ctx) => handleDeliver(sock, msg, text, ctx),
   github: async (sock, msg, text, ctx) => {
     const { reply, react } = require("./baileysHelpers");
     await react(sock, msg, "🐙");

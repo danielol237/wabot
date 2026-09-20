@@ -1,0 +1,91 @@
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { spawn, execFileSync } = require("child_process");
+
+function dockerAvailable() {
+  try { execFileSync("docker", ["version", "--format", "{{.Server.Version}}"], { stdio: "ignore", timeout: 4000 }); return true; } catch (_) { return false; }
+}
+
+function appendOutput(state, chunk) {
+  state.output = (state.output + String(chunk)).slice(-18000);
+}
+
+function runProcess(command, args, options = {}) {
+  const cwd = path.resolve(options.cwd || process.cwd());
+  const timeout = Number(options.timeout || 120000);
+  return new Promise((resolve) => {
+    const state = { output: "" };
+    const child = spawn(command, args, {
+      cwd,
+      env: { ...process.env, CI: "1", HOST: "127.0.0.1", PORT: "0", npm_config_cache: path.join(os.tmpdir(), "aria-sandbox-npm-cache") },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let settled = false;
+    const finish = (result) => { if (settled) return; settled = true; clearTimeout(timer); resolve({ ...result, sandbox: options.sandbox || "process", output: state.output }); };
+    child.stdout.on("data", (chunk) => appendOutput(state, chunk));
+    child.stderr.on("data", (chunk) => appendOutput(state, chunk));
+    const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch (_) {} finish({ success: false, error: `${command} timed out after ${timeout}ms` }); }, timeout);
+    const observeTimer = options.observe ? setTimeout(() => {
+      try { child.kill("SIGTERM"); } catch (_) {}
+      finish({ success: true, observed: true });
+    }, Math.min(Number(options.observeAfter || 5000), Math.max(1, timeout - 1))) : null;
+    const originalFinish = finish;
+    // Clear the observation timer whenever the child exits before the window.
+    const finishWithObservationCleanup = (result) => { if (observeTimer) clearTimeout(observeTimer); originalFinish(result); };
+    child.once("error", (error) => finishWithObservationCleanup({ success: false, error: `${command} could not start: ${error.message}` }));
+    child.once("exit", (code, signal) => {
+      if (code === 0) return finishWithObservationCleanup({ success: true });
+      finishWithObservationCleanup({ success: false, error: `${command} failed (${signal || `exit ${code}`})` });
+    });
+  });
+}
+
+function runDocker(args, options = {}) {
+  const root = path.resolve(options.cwd || process.cwd());
+  const network = options.network || "none";
+  const command = [
+    "run", "--rm", "--network", network, "--user", "1000:1000",
+    "--read-only", "--tmpfs", "/tmp:size=256m", "--memory", "768m", "--cpus", "1",
+    "--pids-limit", "128", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+    "--ulimit", "nproc=128:128", "--ulimit", "nofile=256:256",
+    "-e", "CI=1", "-e", "HOST=127.0.0.1", "-e", "PORT=0", "-e", "NPM_CONFIG_CACHE=/tmp/npm-cache",
+    "-v", `${root}:/workspace:rw`, "-w", "/workspace", "node:22-slim", ...args,
+  ];
+  return runProcess("docker", command, { ...options, sandbox: "docker" });
+}
+
+async function runSandboxCommand(projectDir, args, label, options = {}) {
+  const timeout = options.timeout || 120000;
+  const result = dockerAvailable()
+    ? await runDocker(args, { cwd: projectDir, timeout, network: options.network || "none", observe: options.observe, observeAfter: options.observeAfter })
+    : process.env.ARIA_ALLOW_UNSANDBOXED_BUILDS === "true"
+      ? await runProcess(args[0], args.slice(1), { cwd: projectDir, timeout, sandbox: "explicit-process-opt-in", observe: options.observe, observeAfter: options.observeAfter })
+      : { success: false, sandbox: "unavailable", output: "", error: "Docker sandbox is unavailable. Set ARIA_ALLOW_UNSANDBOXED_BUILDS=true only when the owner explicitly accepts direct-process verification." };
+  if (result.success) return { ...result, label };
+  return { ...result, label, error: `${label} failed in ${result.sandbox}: ${result.error}\n${result.output || ""}` };
+}
+
+async function runNpmScriptInSandbox(projectDir, scriptName, options = {}) {
+  return runSandboxCommand(projectDir, ["npm", "run", scriptName], `npm run ${scriptName}`, options);
+}
+
+async function verifyPackageInSandbox(projectDir) {
+  const packagePath = path.join(projectDir, "package.json");
+  if (!fs.existsSync(packagePath)) return { success: true, skipped: true, sandbox: "not_required" };
+  const install = await runSandboxCommand(projectDir, ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"], "npm install", { timeout: 120000, network: "bridge" });
+  if (!install.success) return install;
+  const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  if (pkg.scripts?.build) {
+    const build = await runNpmScriptInSandbox(projectDir, "build", { timeout: 120000, network: "none" });
+    if (!build.success) return build;
+  }
+  if (pkg.scripts?.start) {
+    const runtime = await runNpmScriptInSandbox(projectDir, "start", { timeout: 10000, network: "none", observe: true });
+    // A server that stays alive until the bounded observation ends is healthy.
+    if (!runtime.success && !/timed out/i.test(runtime.error || "")) return runtime;
+  }
+  return { success: true, sandbox: dockerAvailable() ? "docker" : "process-fallback" };
+}
+
+module.exports = { dockerAvailable, runSandboxCommand, runNpmScriptInSandbox, verifyPackageInSandbox, _test: { appendOutput } };

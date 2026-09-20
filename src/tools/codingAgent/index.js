@@ -11,6 +11,7 @@ const { repairGeneratedProject, hasProviderFailureText } = require("../generated
 const { checkProject } = require("../websiteQuality");
 const { runBrowserSmoke } = require("../browserSmoke");
 const { validateProject } = require("../projectValidator");
+const { verifyPackageInSandbox } = require("./sandboxRunner");
 
 const MAX_FILES = 16;
 const TEMP_DIR = path.join(__dirname, "../../../temp");
@@ -152,29 +153,10 @@ function readProjectFiles(root) {
   return out;
 }
 
-function runProcess(command, args, cwd, timeout = 120000) {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, env: { ...process.env, CI: "1", npm_config_cache: path.join(os.tmpdir(), "aria-npm-cache") }, stdio: ["ignore", "pipe", "pipe"] });
-    let output = "";
-    const append = (chunk) => { output = (output + String(chunk)).slice(-18000); };
-    child.stdout.on("data", append); child.stderr.on("data", append);
-    const timer = setTimeout(() => { child.kill("SIGKILL"); resolve({ success: false, error: `${command} timed out after ${timeout}ms\n${output}` }); }, timeout);
-    child.once("error", (error) => { clearTimeout(timer); resolve({ success: false, error: `${command} could not start: ${error.message}\n${output}` }); });
-    child.once("exit", (code, signal) => { clearTimeout(timer); resolve(code === 0 ? { success: true, output } : { success: false, error: `${command} failed (${signal || `exit ${code}`})\n${output}` }); });
-  });
-}
-
 async function runBuildVerification(root) {
   const packagePath = path.join(root, "package.json");
   if (!fs.existsSync(packagePath)) return { success: true, skipped: true };
-  const install = await runProcess("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], root, 120000);
-  if (!install.success) return install;
-  const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
-  if (pkg.scripts?.build) {
-    const build = await runProcess("npm", ["run", "build"], root, 120000);
-    if (!build.success) return build;
-  }
-  return { success: true };
+  return verifyPackageInSandbox(root);
 }
 
 async function browserCheck(root) {

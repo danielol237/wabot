@@ -10,3 +10,4 @@ data/*
 .session-askpass
 .env
 *.log
+.render/

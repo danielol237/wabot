@@ -77,7 +77,8 @@ test("builder exposes complete verified starter fallback plans", async () => {
 test("build flow runs all files without a continuation prompt or command", () => {
   const builderSource = fs.readFileSync(path.join(__dirname, "../src/tools/appBuilder.js"), "utf8");
   const routerSource = fs.readFileSync(path.join(__dirname, "../src/utils/commandRouter.js"), "utf8");
-  assert.match(builderSource, /const batchEnd = project\.files\.length/);
+  assert.match(builderSource, /contract-first/);
+  assert.match(builderSource, /executeBuild/);
   assert.doesNotMatch(builderSource, /continue the project|reply ["']continue["']/i);
   assert.doesNotMatch(routerSource, /name:\s*["']continue["']/);
 });

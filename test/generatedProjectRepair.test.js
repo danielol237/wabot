@@ -53,3 +53,20 @@ test("generated frontend repair fixes missing CSS contracts, metadata, and start
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("generated dashboard repair reconciles navigation ids and section selectors", () => {
+  const dir = tempProject();
+  try {
+    fs.writeFileSync(path.join(dir, "index.html"), `<!doctype html><html lang="en"><head><title>Workspace</title><meta name="viewport" content="width=device-width"></head><body><nav><a href="#dashboard">Dashboard</a><a href="#deployments">Deployments</a><a href="#settings">Settings</a></nav><main><h1>Workspace</h1></main><script src="app.js"></script></body></html>`);
+    fs.writeFileSync(path.join(dir, "style.css"), ".nav { display: flex; }\n");
+    fs.writeFileSync(path.join(dir, "app.js"), "const sections = document.querySelectorAll('.dashboard-section'); sections.forEach((section) => section.classList.add('ready'));\n");
+    const result = repairGeneratedProject(dir, ["index.html", "style.css", "app.js"]);
+    assert.equal(result.failures.length, 0);
+    const html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
+    assert.match(html, /id="dashboard"/);
+    assert.match(html, /id="deployments"/);
+    assert.match(html, /id="settings"/);
+    assert.match(html, /class="dashboard-section"/);
+    assert.equal(checkProject(dir, ["index.html", "style.css", "app.js"]).blocking.length, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

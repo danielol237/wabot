@@ -91,6 +91,42 @@ function repairFrontendContracts(projectDir, files) {
   return { fixes, changed };
 }
 
+function repairDomContracts(projectDir, files) {
+  const htmlFile = files.find((file) => /\.html?$/i.test(file));
+  const jsFile = files.find((file) => /\.(?:js|jsx|ts|tsx)$/i.test(file));
+  if (!htmlFile || !jsFile) return { fixes: [], changed: {} };
+  let html = readText(projectDir, htmlFile);
+  const js = readText(projectDir, jsFile) || "";
+  if (!html) return { fixes: [], changed: {} };
+  const fixes = [];
+  const original = html;
+  const ids = new Set([...html.matchAll(/\bid=["']([^"']+)["']/gi)].map((match) => match[1]));
+  const addSection = (id) => {
+    if (!id || ids.has(id)) return;
+    const block = `\n<section id="${id}" class="dashboard-section" data-section-panel="${id}"><h2>${id.replace(/[-_]/g, " ")}</h2><p>Workspace content for this section.</p></section>\n`;
+    if (/<\/main>/i.test(html)) html = html.replace(/<\/main>/i, `${block}</main>`);
+    else if (/<\/body>/i.test(html)) html = html.replace(/<\/body>/i, `${block}</body>`);
+    else html += block;
+    ids.add(id);
+    fixes.push(`added missing HTML section #${id} referenced by navigation or JavaScript`);
+  };
+  for (const match of html.matchAll(/\b(?:href|action)=["']#([^"']+)["']/gi)) addSection(match[1]);
+  for (const match of js.matchAll(/getElementById\(\s*["']([^"']+)["']/g)) if (!ids.has(match[1])) addSection(match[1]);
+  const classes = new Set([...html.matchAll(/\bclass=["']([^"']+)["']/gi)].flatMap((match) => match[1].split(/\s+/)));
+  for (const match of js.matchAll(/querySelectorAll?\(\s*["']\.([a-zA-Z][\w-]*)["']/g)) {
+    if (classes.has(match[1])) continue;
+    const block = `\n<section class="${match[1]}" data-generated-contract="true"><p>Workspace content.</p></section>\n`;
+    if (/<\/main>/i.test(html)) html = html.replace(/<\/main>/i, `${block}</main>`);
+    else if (/<\/body>/i.test(html)) html = html.replace(/<\/body>/i, `${block}</body>`);
+    else html += block;
+    classes.add(match[1]);
+    fixes.push(`added missing HTML class .${match[1]} referenced by JavaScript`);
+  }
+  if (html === original) return { fixes, changed: {} };
+  fs.writeFileSync(path.join(projectDir, htmlFile), html, "utf8");
+  return { fixes, changed: { [htmlFile]: html } };
+}
+
 function repairPlaceholderCopy(projectDir, files) {
   const replacements = [
     [/lorem ipsum/gi, "Designed for clarity and momentum."],
@@ -136,13 +172,16 @@ function inspectGeneratedArtifacts(projectDir, files) {
 function repairGeneratedProject(projectDir, files) {
   const normalized = normalizePackage(projectDir, files);
   const frontend = repairFrontendContracts(projectDir, files);
+  const dom = repairDomContracts(projectDir, files);
+  // DOM repairs can introduce new classes, so run the CSS contract pass again.
+  const frontendAfterDom = repairFrontendContracts(projectDir, files);
   const copy = repairPlaceholderCopy(projectDir, files);
   const failures = inspectGeneratedArtifacts(projectDir, files);
   return {
-    fixes: [...normalized.fixes, ...frontend.fixes, ...copy.fixes],
-    changed: { ...normalized.changed, ...frontend.changed, ...copy.changed },
+    fixes: [...normalized.fixes, ...frontend.fixes, ...dom.fixes, ...frontendAfterDom.fixes, ...copy.fixes],
+    changed: { ...normalized.changed, ...frontend.changed, ...dom.changed, ...frontendAfterDom.changed, ...copy.changed },
     failures,
   };
 }
 
-module.exports = { repairGeneratedProject, hasProviderFailureText, _test: { classNamesFromHtml, cssSelectors, repairFrontendContracts } };
+module.exports = { repairGeneratedProject, hasProviderFailureText, _test: { classNamesFromHtml, cssSelectors, repairFrontendContracts, repairDomContracts } };

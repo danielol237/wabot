@@ -3,6 +3,8 @@ const os = require("os");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 
+try { require("dotenv").config(); } catch (_) {}
+
 function dockerAvailable() {
   try { execFileSync("docker", ["version", "--format", "{{.Server.Version}}"], { stdio: "ignore", timeout: 4000 }); return true; } catch (_) { return false; }
 }
@@ -43,12 +45,15 @@ function runProcess(command, args, options = {}) {
 
 function runDocker(args, options = {}) {
   const root = path.resolve(options.cwd || process.cwd());
-  const network = options.network || "none";
+  const configuredNetwork = String(process.env.SANDBOX_DOCKER_NETWORK || "").trim().toLowerCase();
+  const network = ["none", "bridge", "host"].includes(configuredNetwork) ? configuredNetwork : (options.network || "none");
   const command = [
     "run", "--rm", "--network", network, "--user", "1000:1000",
     "--read-only", "--tmpfs", "/tmp:size=256m", "--memory", "768m", "--cpus", "1",
     "--pids-limit", "128", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-    "--ulimit", "nproc=128:128", "--ulimit", "nofile=256:256",
+    // RLIMIT_NPROC is counted against the host UID on shared-UID hosts and
+    // can prevent npm/node from starting. The container pids limit remains active.
+    "--ulimit", "nofile=256:256",
     "-e", "CI=1", "-e", "HOST=127.0.0.1", "-e", "PORT=0", "-e", "NPM_CONFIG_CACHE=/tmp/npm-cache",
     "-v", `${root}:/workspace:rw`, "-w", "/workspace", "node:22-slim", ...args,
   ];

@@ -71,7 +71,9 @@ async function runSandboxed(code, lang, opts = {}) {
     "--pids-limit", "64",                       // hard cap on processes (no fork bomb)
     "--cap-drop", "ALL",                        // no Linux capabilities
     "--security-opt", "no-new-privileges",      // can't escalate via setuid/execve
-    "--ulimit", "nproc=64:64",                  // per-user process limit
+    // Do not set RLIMIT_NPROC: Docker counts it against the host UID, and
+    // shared-UID hosts can exhaust it before Node/Python starts. The
+    // container-level --pids-limit above still caps process creation.
     "--ulimit", "nofile=64:64",                 // file-descriptor limit
     "--stop-timeout", "3",
     "-v", `${filePath}:/work/main.${ext}:ro`,

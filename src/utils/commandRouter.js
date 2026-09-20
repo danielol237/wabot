@@ -751,9 +751,10 @@ async function handleAlive(sock, msg, args, ctx) {
 
 async function handleHelp(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
-  const { isCapabilityQuestion, formatCapabilityReport } = require("../tools/capabilityProfile");
+  const { isCapabilityQuestion, formatCapabilityReport, formatConnectorReport } = require("../tools/capabilityProfile");
   const requestText = String(ctx.text || args || "").trim();
   await react(sock, msg, "✨");
+  if (/\b(?:what\s+connectors\s+do\s+i\s+have|show\s+(?:me\s+)?(?:my\s+)?connectors|which\s+tools\s+(?:are|do)\s+you\s+have)\b/i.test(requestText)) return reply(sock, msg, formatConnectorReport());
   if (isCapabilityQuestion(requestText) && /\b(?:axon|another|better|can'?t|difference)\b/i.test(requestText)) {
     return reply(sock, msg, formatCapabilityReport());
   }

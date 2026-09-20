@@ -1,6 +1,12 @@
 const { execFileSync } = require("child_process");
 
 const CAPABILITIES = Object.freeze([
+  { name: "media.inspect_image", description: "Inspect incoming image or sticker bytes locally for format, dimensions, animation, alpha, and checksum.", inputSchema: { buffer: "Buffer", ocr: "boolean" }, outputSchema: { success: "boolean", format: "string|null", width: "number|null", height: "number|null", sha256: "string" }, requirements: ["Sharp runtime"], permissions: "conversation participant", limitations: ["metadata is local; semantic visual understanding still requires a multimodal model"] },
+  { name: "media.convert_image", description: "Resize, crop, compress, and convert image bytes locally.", inputSchema: { buffer: "Buffer", format: "string", width: "number", height: "number" }, outputSchema: { success: "boolean", buffer: "Buffer", sha256: "string" }, requirements: ["Sharp runtime"], permissions: "conversation participant", limitations: ["does not invent or interpret image content"] },
+  { name: "media.transcode", description: "Convert audio and video locally with FFmpeg.", inputSchema: { buffer: "Buffer", audioOnly: "boolean", videoOnly: "boolean", extension: "string" }, outputSchema: { success: "boolean", buffer: "Buffer", sha256: "string" }, requirements: ["FFmpeg executable"], permissions: "conversation participant", limitations: ["codec support follows the installed FFmpeg build"] },
+  { name: "speech.synthesize_local", description: "Generate speech locally with an installed system speech synthesizer.", inputSchema: { text: "string", voice: "string" }, outputSchema: { success: "boolean", buffer: "Buffer", mimetype: "string" }, requirements: ["espeak, espeak-ng, or pico2wave"], permissions: "conversation participant", limitations: ["voice quality and language coverage follow the installed runtime"] },
+  { name: "whatsapp.send_media", description: "Send a verified image, sticker, audio, video, or document through the active WhatsApp socket.", inputSchema: { chatId: "string", buffer: "Buffer", mediaType: "string" }, outputSchema: { success: "boolean", messageId: "string|null" }, requirements: ["active WhatsApp socket"], permissions: "explicit user request and recipient scope", limitations: ["delivery confirmation depends on the WhatsApp socket"] },
+  { name: "connectors.discover", description: "List configured native tools and external connectors from the actual runtime registry.", inputSchema: { query: "string" }, outputSchema: { tools: "array", connectors: "array" }, requirements: ["runtime inspection"], permissions: "conversation participant", limitations: ["not configured does not mean authenticated"] },
   { name: "memory.write", description: "Persist a user-provided fact or preference for later retrieval.", inputSchema: { userId: "string", value: "string" }, outputSchema: { persisted: "boolean", recordCount: "number" }, requirements: ["persistent profile storage"], permissions: "conversation participant", limitations: ["bounded per-user storage"] },
   { name: "memory.read", description: "Read persisted memories and profile facts for a user.", inputSchema: { userId: "string" }, outputSchema: { memories: "array", profile: "object" }, requirements: ["persistent profile storage"], permissions: "conversation participant", limitations: ["returns stored records only"] },
   { name: "project.build", description: "Plan, generate, cross-check, validate, test, and package a project.", inputSchema: { chatId: "string", goal: "string" }, outputSchema: { success: "boolean", projectId: "string", validation: "object", task: "object" }, requirements: ["coding provider", "filesystem workspace"], permissions: "owner for bot engineering operations", limitations: ["runtime checks depend on installed tools"] },
@@ -27,6 +33,8 @@ function inspectEnvironment() {
   const ffmpeg = commandStatus("ffmpeg");
   const ytDlp = commandStatus("yt-dlp");
   const chromium = commandStatus("chromium");
+  let nativeMedia = null;
+  try { nativeMedia = require("../tools/nativeMedia").inspectLocalRuntimes(); } catch (_) {}
   let github = envStatus("GITHUB_TOKEN", ["repository inspection", "branch and pull-request workflows"]);
   try {
     const status = require("../tools/githubCredentialVault").status();
@@ -45,6 +53,7 @@ function inspectEnvironment() {
       ffmpeg: { ...ffmpeg, healthy: ffmpeg.available, capabilities: ["audio and video processing"] },
       ytDlp: { ...ytDlp, healthy: ytDlp.available, capabilities: ["public media download"] },
       chromium: { ...chromium, healthy: chromium.available, capabilities: ["real browser smoke verification"] },
+      nativeMedia: nativeMedia || { sharp: false, ffmpeg: ffmpeg.available, ffprobe: false, tesseract: false, espeak: false },
     },
     connectors,
     storage: { filesystem: true, projectMemory: true, database: Boolean(process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)) },

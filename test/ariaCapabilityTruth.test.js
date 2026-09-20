@@ -9,7 +9,7 @@ const id = `test_${process.pid}_${Date.now()}`;
 
 test("capability catalog describes real memory, build, deployment, and engineering seams", () => {
   const names = listCapabilities().map((capability) => capability.name);
-  assert.deepEqual(names, ["memory.write", "memory.read", "project.build", "project.deploy", "project.deliver", "engineering.inspect"]);
+  for (const name of ["memory.write", "memory.read", "project.build", "project.deploy", "project.deliver", "engineering.inspect", "media.inspect_image", "media.convert_image", "media.transcode", "speech.synthesize_local", "whatsapp.send_media", "connectors.discover"]) assert.ok(names.includes(name), `missing capability: ${name}`);
   assert.equal(getCapability("project.deploy").outputSchema.verified, "boolean");
 });
 

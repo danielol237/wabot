@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const minimax = require("./minimaxMedia");
+const nativeMedia = require("./nativeMedia");
 const { log, error, warn } = require("../utils/logger");
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
@@ -16,6 +17,8 @@ const ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"; // "Rachel" default
 // ── Transcription ─────────────────────────────────────────────
 
 async function transcribeVoice(audioBuffer, mimetype = "audio/ogg") {
+  const local = await localSpeechToText(audioBuffer, mimetype);
+  if (local.success) return local;
   const id = uuidv4();
   const ext = mimetype.includes("ogg") ? "ogg" : mimetype.includes("mp3") ? "mp3" : "m4a";
   const filePath = path.join(TEMP_DIR, `${id}.${ext}`);
@@ -39,6 +42,26 @@ async function transcribeVoice(audioBuffer, mimetype = "audio/ogg") {
   // Fallback: free Google Web Speech STT (no key) via gstt.py.
   // Removes the hard dependency on GROQ_API_KEY so voice notes work out of the box.
   return await freeSpeechToText(audioBuffer, mimetype);
+}
+
+// Optional local Whisper-compatible CLI. If it is absent, ARIA falls through
+// to the existing configured/free routes and reports the actual provider used.
+async function localSpeechToText(audioBuffer, mimetype = "audio/ogg") {
+  const { execFile, execFileSync } = require("child_process");
+  let whisper = null;
+  try { whisper = execFileSync("sh", ["-lc", "command -v whisper"], { encoding: "utf8", timeout: 1500 }).trim(); } catch (_) {}
+  if (!whisper) return { success: false, error: "local speech recognizer unavailable" };
+  const id = uuidv4();
+  const ext = mimetype.includes("ogg") ? "ogg" : mimetype.includes("mp3") ? "mp3" : "m4a";
+  const filePath = path.join(TEMP_DIR, `${id}.${ext}`);
+  const transcriptPath = path.join(TEMP_DIR, `${id}.txt`);
+  try {
+    fs.writeFileSync(filePath, audioBuffer);
+    const result = await new Promise((resolve) => execFile(whisper, [filePath, "--output_format", "txt", "--output_dir", TEMP_DIR], { timeout: 120000 }, (err, stdout, stderr) => resolve({ err, stdout, stderr })));
+    if (!result.err && fs.existsSync(transcriptPath)) return { success: true, text: fs.readFileSync(transcriptPath, "utf8").trim(), provider: "local-whisper" };
+    return { success: false, error: "Local speech recognition returned no transcript." };
+  } catch (error) { return { success: false, error: error.message }; }
+  finally { for (const file of [filePath, transcriptPath]) { try { fs.unlinkSync(file); } catch (_) {} } }
 }
 
 // Free, no-key speech-to-text via the legacy Google Web Speech endpoint.
@@ -70,6 +93,8 @@ async function freeSpeechToText(audioBuffer, mimetype = "audio/ogg") {
 // ElevenLabs as primary, falls back to FreeTTS
 
 async function textToSpeech(text, voice = "en-US-JennyNeural") {
+  const local = await nativeMedia.textToSpeechLocal(text, { voice: process.env.ARIA_LOCAL_TTS_VOICE });
+  if (local.success) return local;
   if (minimax.configured() && process.env.MINIMAX_VOICE_ENABLED !== "0") {
     const result = await minimax.generateSpeech(text, { voiceId: process.env.MINIMAX_VOICE_ID });
     if (result.success) return result;
@@ -194,4 +219,4 @@ async function voiceConversation(audioBuffer, senderName, chatId, isOwner) {
   }
 }
 
-module.exports = { transcribeVoice, textToSpeech, listVoices, voiceConversation };
+module.exports = { transcribeVoice, textToSpeech, listVoices, voiceConversation, _test: { localSpeechToText } };

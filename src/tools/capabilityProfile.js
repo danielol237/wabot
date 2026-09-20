@@ -53,6 +53,8 @@ function getCapabilityProfile() {
         `${runtime.environment.tools.git.healthy ? "Git is available" : "Git is unavailable"}`,
         `${runtime.environment.tools.ffmpeg.healthy ? "FFmpeg is available" : "FFmpeg is unavailable"}`,
         `${runtime.environment.tools.chromium.healthy ? "real browser verification is available" : "real browser unavailable; static verification fallback is available"}`,
+        `${runtime.environment.tools.nativeMedia?.sharp ? "local image inspection/conversion is available" : "local image processing is unavailable"}`,
+        `${runtime.environment.tools.nativeMedia?.espeak ? "local speech synthesis is available" : "local speech synthesis is unavailable; voice generation may use configured fallbacks"}`,
       ] : []),
     ],
     boundaries: [
@@ -66,7 +68,20 @@ function getCapabilityProfile() {
 }
 
 function isCapabilityQuestion(text) {
-  return /\b(?:what\s+can\s+you\s+do|what\s+do\s+you\s+do|what\s+are\s+your\s+capabilities|show\s+(?:me\s+)?your\s+capabilities|what\s+can\s+you\s+do\s+that|what\s+can\s+you\s+do\s+better|what\s+can\s+you\s+do\s+that\s+.+?\s+can'?t|difference\s+between\s+you\s+and|what\s+can\s+aria\s+do|axon)\b/i.test(String(text || ""));
+  return /\b(?:what\s+can\s+you\s+do|what\s+do\s+you\s+do|what\s+are\s+your\s+capabilities|show\s+(?:me\s+)?your\s+capabilities|what\s+can\s+you\s+do\s+that|what\s+can\s+you\s+do\s+better|what\s+can\s+you\s+do\s+that\s+.+?\s+can'?t|difference\s+between\s+you\s+and|what\s+can\s+aria\s+do|what\s+connectors\s+do\s+i\s+have|show\s+(?:me\s+)?(?:my\s+)?connectors|which\s+tools\s+(?:are|do)\s+you\s+have|axon)\b/i.test(String(text || ""));
+}
+
+function formatConnectorReport() {
+  let environment = { tools: {}, connectors: [], storage: {} };
+  let registered = [];
+  try { environment = require("../utils/capabilityCatalog").inspectEnvironment(); } catch (_) {}
+  try { registered = require("./capabilityExecutor").listRegisteredCapabilities(); } catch (_) {}
+  const tools = Object.entries(environment.tools || {}).map(([name, value]) => {
+    const available = name === "nativeMedia" ? Boolean(value?.sharp || value?.ffmpeg || value?.ffprobe || value?.tesseract || value?.espeak) : Boolean(value?.healthy || value === true);
+    return `• ${name}: ${available ? "available" : "unavailable"}`;
+  }).join("\n");
+  const connectors = (environment.connectors || []).map((item) => `• ${item.name}: ${item.configured ? `configured (${item.source || "environment"})` : "not configured"}`).join("\n");
+  return `🔌 *ARIA runtime connections*\n\n*Native tools*\n${tools || "• No native tool report available."}\n\n*Configured connectors*\n${connectors || "• None configured."}\n\n*Registered action capabilities*\n${registered.map((item) => `• ${item.name} — ${item.description}`).join("\n") || "• None registered."}\n\nI only list what the current runtime reports. A connector marked not configured is not secretly usable.`;
 }
 
 function formatCapabilityReport() {
@@ -79,4 +94,4 @@ function formatCapabilityContext() {
   return `\n\n[Verified ARIA capability profile]\nWhat ARIA can do now:\n${profile.immediate.map((item) => `- ${item}`).join("\n")}\n\nRuntime-dependent status:\n${profile.conditional.map((item) => `- ${item}`).join("\n")}\n\nComparison rules:\n${profile.boundaries.map((item) => `- ${item}`).join("\n")}\nWhen asked what ARIA can do that another bot cannot, compare only verified capabilities and say that the other bot's private implementation is unknown. Highlight ARIA's strongest practical differences: persistent memory, tool execution, full coding/build workflows, group administration, visual/media workflows, durable missions, and owner-scoped project operations.`;
 }
 
-module.exports = { getCapabilityProfile, isCapabilityQuestion, formatCapabilityReport, formatCapabilityContext, _test: { configured } };
+module.exports = { getCapabilityProfile, isCapabilityQuestion, formatCapabilityReport, formatConnectorReport, formatCapabilityContext, _test: { configured } };

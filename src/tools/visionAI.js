@@ -4,6 +4,7 @@ const axios = require("axios");
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 const zai = require("./zaiMedia");
 const providerHealth = require("./providerHealth");
+const nativeMedia = require("./nativeMedia");
 
 function providerAvailable(name) {
   try { return providerHealth.isAvailable(name); } catch (_) { return true; }
@@ -178,7 +179,13 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
   if (String(process.env.ZHIPU_API_KEY || process.env.GROQ_API_KEY || process.env.OPENROUTER_API_KEY || "").trim()) {
     return "I received the visual, but the vision routes are unavailable right now. Send it again in a moment.";
   }
-  return "I received the visual, but visual analysis is not configured on this deployment yet.";
+  try {
+    const local = await nativeMedia.inspectImage(Buffer.from(base64Image, "base64"));
+    const dimensions = local.width && local.height ? ` It is ${local.width}×${local.height}${local.animated ? " animated" : ""} ${local.format || "image"} media.` : "";
+    return `I received the visual, but semantic vision is not configured on this deployment yet.${dimensions} I won't pretend I can identify the scene or read text without a local vision model or a configured multimodal provider.`;
+  } catch (_) {
+    return "I received the visual, but semantic vision is not configured on this deployment yet.";
+  }
 }
 
 async function respondToMedia(base64Image, mimeType, options = {}) {

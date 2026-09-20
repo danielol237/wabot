@@ -9,7 +9,7 @@ test("delivery workflow formats verified project, live URL, and screenshot summa
     deployment: { url: "https://aria.example" },
     github: { url: "https://github.com/example/aria-portfolio" },
   });
-  assert.match(report, /ARIA finished the delivery workflow/);
+  assert.match(report, /ARIA finished the (?:verified )?delivery workflow/);
   assert.match(report, /https:\/\/aria\.example/);
   assert.match(report, /Browser smoke: \*passed\*/);
   assert.match(report, /github\.com\/example\/aria-portfolio/);

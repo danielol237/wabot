@@ -2098,18 +2098,20 @@ async function handleWikipedia(sock, msg, args, ctx) {
 function formatBuildResult(result) {
   if (!result) return "❌ Build returned nothing.";
   if (result.success === false) return "❌ " + (result.error || "Build failed.");
-  if (result.success && result.downloadUrl) {
-    let t = "✅ *Project built!*\n";
-    if (result.projectId) t += `🆔 Project: \`${result.projectId}\`\n`;
-    if (result.fileCount) t += `📄 ${result.fileCount} file(s)\n`;
-    if (result.warnings?.length) t += `⚠️ ${result.warnings.length} file(s) with warnings\n`;
+  if (result.success === true) {
+    let t = "✅ *Project built and verified.*\n";
+    if (result.projectName || result.projectId) t += `🏷️ ${result.projectName || "Project"}${result.projectId ? ` (\`${result.projectId}\`)` : ""}\n`;
+    if (result.fileCount) t += `📄 ${result.fileCount} file(s) checked\n`;
+    if (result.buildVerification === "passed") t += "🧪 Build check: passed\n";
+    if (result.browserSmoke?.success && !result.browserSmoke?.skipped) t += "🖥️ Browser check: passed\n";
+    if (result.browserSmoke?.skipped) t += "🖥️ Browser check: static fallback used\n";
+    if (result.warnings?.length) t += `⚠️ ${result.warnings.length} warning(s)\n`;
     if (result.previewUrl) t += `🌐 Preview: ${result.previewUrl}\n`;
-    if (result.browserSmoke?.success) t += `🖥️ Browser check: verified\n`;
-    if (result.buildVerification === "passed") t += `🧪 Build check: passed\n`;
-    t += `📦 Download: ${result.downloadUrl}`;
-    return t;
+    if (result.downloadUrl) t += `📦 Download: ${result.downloadUrl}\n`;
+    if (!result.previewUrl && !result.downloadUrl) t += "📌 This was built locally; no public link exists until it is deployed.\n";
+    return t.trim();
   }
-  return JSON.stringify(result).slice(0, 1500);
+  return "⚠️ ARIA returned an unusable build result, so I will not claim that the project is complete. Try the build again.";
 }
 
 function formatProjectStatus(result) {
@@ -2236,9 +2238,13 @@ async function handleBuild(sock, msg, args, ctx) {
   let request = String(args || "").trim();
   if (/^(?:this|it|that|the brief|the project)$/i.test(request)) request = getQuotedMessageText(msg) || "";
   if (!request) return reply(sock, msg, "Tell me what to build, or reply to a project brief and say “ARIA, build this”.");
+  const websiteRequest = /\b(?:website|web\s*app|webpage|landing\s+page|portfolio|dashboard|site)\b/i.test(request);
+  const vagueWebsiteRequest = /^(?:a|an|the)?\s*(?:website|web\s*app|webpage|landing\s+page|portfolio|dashboard|site|app|project)\s*$/i.test(request);
+  if (websiteRequest && vagueWebsiteRequest) return reply(sock, msg, "Tell me what the website is for and what it should include. Example: *build a website for a barbershop with services, prices, booking, and WhatsApp contact*. ");
   if (/\b(?:screenshot|send\s+me\s+(?:the\s+)?link|give\s+me\s+(?:the\s+)?link|show\s+me\s+what\s+you\s+built|put\s+it\s+online)\b/i.test(request)) {
     return handleDeliver(sock, msg, request, ctx);
   }
+  if (websiteRequest) return handleDeliver(sock, msg, request, ctx);
 
   // Treat “build ... and deploy on Vercel” as one explicit owner request. The
   // project must still pass the builder’s deterministic repair and real build

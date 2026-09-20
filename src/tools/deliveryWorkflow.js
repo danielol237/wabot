@@ -55,7 +55,7 @@ async function verifyLiveUrl(url) {
 
 function formatDeliveryReport({ project, deployment, screenshot, github }) {
   const lines = [
-    "✅ *ARIA finished the delivery workflow.*",
+    deployment?.url ? "✅ *ARIA finished the verified delivery workflow.*" : "✅ *ARIA built and verified the project locally.*",
     "",
     `🏗️ Project: *${safeText(project.projectName || project.goal || project.projectId, 180)}*`,
     `🧪 Verification: *${project.verificationState || "VALID"}*`,
@@ -65,9 +65,10 @@ function formatDeliveryReport({ project, deployment, screenshot, github }) {
   if (project.browserSmoke?.success) lines.push(`👀 Browser smoke: *passed*`);
   if (deployment?.url) lines.push(`🌐 Live website: ${deployment.url}`);
   if (github?.url) lines.push(`🐙 GitHub: ${github.url}`);
-  lines.push("", screenshot?.success
+  if (deployment?.url) lines.push("", screenshot?.success
     ? "I built it, ran the verification checks, checked the live page, and captured the screenshot below."
     : "I built it, ran the verification checks, and checked the live page. Screenshot capture is reported separately.");
+  else lines.push("", "No public URL was created. I will not invent a link; deploy the verified project after hosting is configured.");
   return lines.join("\n");
 }
 

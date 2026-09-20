@@ -97,11 +97,14 @@ async function buildProject(request, senderName, chatId, onProgress = null, user
   for (const file of result.files) {
     if (!project.files.some((plannedFile) => plannedFile.path === file.path)) saveFileContent(project.id, file.path, file.content);
   }
-  const verifyStep = await actionTask.runStep(task, "verify", async () => ({
+  const verifyStep = await actionTask.runStep(task, "verify", async () => {
+    if (result.verification?.success !== true) throw new Error("The project did not complete verification.");
+    return {
     validation: result.verification?.validation || null,
     browser: result.verification?.browser || null,
     build: result.verification?.build || null,
-  }), { verify: (value) => result.verification?.success !== false });
+    };
+  }, { verify: (value) => result.verification?.success === true && Boolean(value?.validation) });
   if (verifyStep.state !== actionTask.STATES.COMPLETED) {
     actionTask.finish(task);
     setProjectStatus(project.id, "failed");

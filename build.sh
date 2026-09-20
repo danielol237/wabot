@@ -25,6 +25,15 @@ if ! command -v ffmpeg >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1 && 
   apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg >/dev/null 2>&1 || true
 fi
 
+# Browser smoke verification is part of the coding-agent quality gate. Render's
+# Node buildpack does not include Chromium by default, so install it into the
+# build/runtime image when the build environment permits apt packages.
+if ! command -v chromium >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+  echo "=== [build] browser runtime (Chromium) ==="
+  apt-get update -qq && apt-get install -y -qq --no-install-recommends chromium >/dev/null 2>&1 || \
+    echo "warn: Chromium could not be installed; set ARIA_CHROMIUM_PATH or disable browser smoke explicitly."
+fi
+
 if ! command -v ffmpeg >/dev/null 2>&1; then
   echo "warn: ffmpeg not found — trying project-local static build"
   curl -fsSL -o /tmp/ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"

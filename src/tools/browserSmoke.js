@@ -2,6 +2,7 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const { execFile } = require("child_process");
+const { execFileSync } = require("child_process");
 
 const CONTENT_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -37,7 +38,13 @@ function createStaticServer(root) {
 }
 
 function browserPath() {
-  return process.env.ARIA_CHROMIUM_PATH || "chromium";
+  if (process.env.ARIA_CHROMIUM_PATH) return process.env.ARIA_CHROMIUM_PATH;
+  for (const candidate of ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"]) {
+    try {
+      return execFileSync("sh", ["-lc", `command -v ${candidate}`], { encoding: "utf8", timeout: 2000 }).trim() || candidate;
+    } catch (_) {}
+  }
+  return "chromium";
 }
 
 function runBrowserSmoke(projectDir, options = {}) {
@@ -55,7 +62,10 @@ function runBrowserSmoke(projectDir, options = {}) {
         "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
         "--hide-scrollbars", "--virtual-time-budget=5000", "--dump-dom", url,
       ], { timeout: options.timeoutMs || 30000, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
-        if (error) return finish({ success: false, error: `Browser smoke failed: ${error.message}`, output: String(stderr || stdout || "").slice(-6000) });
+        if (error) {
+          const missing = error.code === "ENOENT" ? " Chromium is not installed; set ARIA_CHROMIUM_PATH or install the chromium package during deployment." : error.message;
+          return finish({ success: false, error: `Browser smoke failed: ${missing}`, output: String(stderr || stdout || "").slice(-6000) });
+        }
         const dom = String(stdout || "");
         if (!/<body\b[\s\S]*<\/body>/i.test(dom)) return finish({ success: false, error: "Browser smoke returned no document body", output: dom.slice(-6000) });
         const text = dom.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();

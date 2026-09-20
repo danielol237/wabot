@@ -8,6 +8,7 @@ ARG YTDLP_EJS_VERSION=0.8.0
 
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
       ffmpeg \
+      chromium \
       python3 \
       python3-pip \
       ca-certificates \
@@ -17,6 +18,7 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
     && command -v yt-dlp >/dev/null \
     && command -v ffmpeg >/dev/null \
     && command -v ffprobe >/dev/null \
+    && command -v chromium >/dev/null \
     && node --version \
     && yt-dlp --version \
     && rm -rf /var/lib/apt/lists/*

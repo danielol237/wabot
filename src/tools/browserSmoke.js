@@ -1,8 +1,7 @@
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
-const { execFile } = require("child_process");
-const { execFileSync } = require("child_process");
+const { execFile, execFileSync } = require("child_process");
 
 const CONTENT_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -41,15 +40,50 @@ function browserPath() {
   if (process.env.ARIA_CHROMIUM_PATH) return process.env.ARIA_CHROMIUM_PATH;
   for (const candidate of ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"]) {
     try {
-      return execFileSync("sh", ["-lc", `command -v ${candidate}`], { encoding: "utf8", timeout: 2000 }).trim() || candidate;
+      const resolved = execFileSync("sh", ["-lc", `command -v ${candidate}`], { encoding: "utf8", timeout: 2000 }).trim();
+      if (resolved) return resolved;
     } catch (_) {}
   }
-  return "chromium";
+  return null;
+}
+
+function visibleText(html) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function inspectDocument(dom, mode, url = null) {
+  const html = String(dom || "");
+  if (!/<body\b[\s\S]*<\/body>/i.test(html)) return { success: false, error: `${mode} smoke returned no document body`, output: html.slice(-6000) };
+  const text = visibleText(html);
+  if (text.length < 20) return { success: false, error: `${mode} smoke rendered less than 20 characters of visible text`, output: html.slice(-6000) };
+  if (/lorem ipsum|your company|build something great|AI request failed on all providers/i.test(text)) return { success: false, error: `${mode} smoke detected placeholder or provider-failure copy`, output: text.slice(0, 1000) };
+  return {
+    success: true,
+    ...(url ? { url } : {}),
+    title: (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [null, ""])[1].trim(),
+    textLength: text.length,
+  };
+}
+
+function runStaticSmoke(root, warning) {
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const result = inspectDocument(html, "Static");
+  if (!result.success) return result;
+  return { ...result, skipped: true, warning };
 }
 
 function runBrowserSmoke(projectDir, options = {}) {
   const root = fs.existsSync(path.join(projectDir, "dist", "index.html")) ? path.join(projectDir, "dist") : projectDir;
   if (!fs.existsSync(path.join(root, "index.html"))) return Promise.resolve({ success: false, error: "Browser smoke test requires index.html or dist/index.html" });
+  const executable = browserPath();
+  if (!executable) return Promise.resolve(runStaticSmoke(root, "Chromium is unavailable; static HTML smoke validation was used."));
   const server = createStaticServer(root);
   return new Promise((resolve) => {
     let settled = false;
@@ -58,23 +92,18 @@ function runBrowserSmoke(projectDir, options = {}) {
     server.listen(0, "127.0.0.1", () => {
       const port = server.address().port;
       const url = `http://127.0.0.1:${port}/`;
-      execFile(browserPath(), [
+      execFile(executable, [
         "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
         "--hide-scrollbars", "--virtual-time-budget=5000", "--dump-dom", url,
       ], { timeout: options.timeoutMs || 30000, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
         if (error) {
-          const missing = error.code === "ENOENT" ? " Chromium is not installed; set ARIA_CHROMIUM_PATH or install the chromium package during deployment." : error.message;
-          return finish({ success: false, error: `Browser smoke failed: ${missing}`, output: String(stderr || stdout || "").slice(-6000) });
+          if (error.code === "ENOENT") return finish(runStaticSmoke(root, "Chromium became unavailable; static HTML smoke validation was used."));
+          return finish({ success: false, error: `Browser smoke failed: ${error.message}`, output: String(stderr || stdout || "").slice(-6000) });
         }
-        const dom = String(stdout || "");
-        if (!/<body\b[\s\S]*<\/body>/i.test(dom)) return finish({ success: false, error: "Browser smoke returned no document body", output: dom.slice(-6000) });
-        const text = dom.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-        if (text.length < 20) return finish({ success: false, error: "Browser smoke rendered less than 20 characters of visible text", output: dom.slice(-6000) });
-        if (/lorem ipsum|your company|build something great|AI request failed on all providers/i.test(text)) return finish({ success: false, error: "Browser smoke detected placeholder or provider-failure copy", output: text.slice(0, 1000) });
-        finish({ success: true, url, title: (dom.match(/<title[^>]*>([^<]*)<\/title>/i) || [null, ""])[1].trim(), textLength: text.length });
+        finish(inspectDocument(stdout, "Browser", url));
       });
     });
   });
 }
 
-module.exports = { runBrowserSmoke, createStaticServer };
+module.exports = { runBrowserSmoke, createStaticServer, _test: { browserPath, visibleText, inspectDocument, runStaticSmoke } };

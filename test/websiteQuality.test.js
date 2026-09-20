@@ -67,6 +67,20 @@ test("browser smoke renders the upgraded landing template", async () => {
   assert.ok(result.textLength > 200);
 });
 
+test("browser smoke falls back to static validation when Chromium is unavailable", async () => {
+  const { _test: smokeTest } = require("../src/tools/browserSmoke");
+  const dir = fixture({
+    "index.html": "<html><head><title>Static fallback</title></head><body><main><h1>ARIA project</h1><p>This page is valid without a browser executable.</p></main></body></html>",
+  });
+  try {
+    const result = smokeTest.runStaticSmoke(dir, "simulated missing Chromium");
+    assert.equal(result.success, true, result.error);
+    assert.equal(result.skipped, true);
+    assert.match(result.warning, /Chromium/);
+    assert.ok(result.textLength > 20);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("builder exposes complete verified starter fallback plans", async () => {
   assert.equal(builderTest.matchTemplate("make a focused product landing page"), "landing");
   const starter = await builderTest.scaffoldFromTemplate("make a todo app", "todo");

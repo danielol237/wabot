@@ -8,7 +8,6 @@ const { handleWcgReply } = require("../tools/pasquaCommands");
 const { isBanned, isMuted, isOwner: checkOwner } = require("../utils/permissions");
 const { trackInteraction } = require("../utils/userMemory");
 const { getMemory, saveMemory } = require("../utils/memory");
-const { startSession, endSession, isSessionActive, touchSession } = require("../utils/chatSessions");
 const { createSticker, downloadStickerMedia } = require("../tools/sticker");
 const { analyzeFile } = require("../tools/fileUnderstanding");
 const { transcribeVoice } = require("../tools/voice");
@@ -38,6 +37,14 @@ function claimInboundMessage(messageId, chatId, senderJid, text) {
   if (recentInboundTexts.has(textKey)) return false;
   recentInboundTexts.set(textKey, now);
   return true;
+}
+
+function shouldReplyInGroup({ isGroup, mentioned, isReplyToBot, hasNameTrigger, isCommand }) {
+  if (!isGroup) return true;
+  // In groups, ARIA may be addressed by name, a valid command, a real
+  // WhatsApp mention, or a direct reply. Do not let an active session alone
+  // turn every unrelated group message into a response.
+  return Boolean(mentioned || isReplyToBot || hasNameTrigger || isCommand);
 }
 
 async function handleMessage(sock, msg, loadedPlugins = []) {
@@ -133,6 +140,17 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // ── Build context ──────────────────────────────────────────
   const context = { text, lower, senderJid, senderName, chatId, isGroup, loadedPlugins, msg, platformContext, platformActor, revenueContext, revenueObservation };
 
+  // ── GROUP ADDRESSING GATE ──────────────────────────────────
+  // Group messages must address ARIA by name, command, mention, or reply.
+  // Keep the gate before conversational flow handlers so an active session
+  // alone cannot make her reply to unrelated group traffic.
+  const configuredPrefix = String(process.env.BOT_PREFIX || "").trim().toLowerCase();
+  const isCommand = (configuredPrefix && lower.startsWith(configuredPrefix)) || lower.startsWith("!");
+  const hasNameTrigger = triggeredByName(text);
+  const mentioned = isBotMentioned(msg, botJids);
+  const isReplyToBot = isQuotingBotMessage(msg);
+  if (!shouldReplyInGroup({ isGroup, mentioned, isReplyToBot, hasNameTrigger, isCommand })) return;
+
   if (isGroup) {
     const protection = checkGroupProtection({ text, msg, chatId, senderJid, isGroup });
     if (protection) {
@@ -179,16 +197,6 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   }
 
   // ── DECIDE WHETHER TO REPLY (checked for text AND media/voice) ──
-  const configuredPrefix = String(process.env.BOT_PREFIX || "").trim().toLowerCase();
-  const isCommand = (configuredPrefix && lower.startsWith(configuredPrefix)) || lower.startsWith("!");
-  const hasNameTrigger = triggeredByName(text);
-  const sessionActive = isSessionActive(chatId);
-  const mentioned = isBotMentioned(msg, botJids);
-  // In groups, only act when actually addressed. In DMs, always act.
-  const isReplyToBot = isQuotingBotMessage(msg);
-  const shouldReply = !isGroup || hasNameTrigger || isCommand || mentioned || sessionActive || isReplyToBot;
-  if (!shouldReply) return;
-
   // Direct commands, mentions, and named action requests should feel immediate.
   // Keep the optional typing delay only for ordinary conversational messages.
   if (!isCommand && !hasNameTrigger && !mentioned) {
@@ -362,5 +370,4 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
 
   return routeMessage(sock, msg, context);
 }
-
-module.exports = { handleMessage, _test: { claimInboundMessage } };
+module.exports = { handleMessage, _test: { claimInboundMessage, shouldReplyInGroup } };

@@ -4,6 +4,7 @@ const axios = require("axios");
 const { generateCodingText } = require("./codingProvider");
 const { hasProviderFailureText } = require("./generatedProjectRepair");
 const agent = require("./codingAgent");
+const actionTask = require("./actionTask");
 const {
   createProject, getProject, getActiveProjectForChat, getAllProjectsForChat, resolveProjectForChat,
   recordRevision, markFileStatus, setProjectStatus, recordDeployment, getProgress, getFileContent,
@@ -40,27 +41,50 @@ function getPendingPlan(chatId) {
 async function buildProject(request, senderName, chatId, onProgress = null, userId = null) {
   const brief = String(request || "").trim();
   if (!brief) return { success: false, error: "Tell me what to build." };
+  const task = actionTask.createTask({
+    type: "project.build",
+    goal: brief,
+    chatId,
+    steps: [
+      { id: "plan", label: "Define project contract" },
+      { id: "generate", label: "Generate connected codebase", dependsOn: ["plan"] },
+      { id: "verify", label: "Run validation, repair, and runtime checks", dependsOn: ["generate"] },
+      { id: "persist", label: "Persist verified project artifact", dependsOn: ["verify"] },
+    ],
+  });
   try {
     const bridge = require("../core/productBridge");
     bridge.recordProductActivity({ product: "developer", action: "build.requested", context: bridge.ownerContext("developer-whatsapp"), aggregateType: "chat", aggregateId: chatId, metadata: { request: brief.slice(0, 180) }, usage: { category: "developer", metric: "build-requests", units: 1 } });
   } catch (_) {}
 
   if (onProgress) await onProgress("Understanding the brief and defining the complete project contract...");
-  const pending = getPendingPlan(chatId);
-  const planned = pending?.files || (await planProject(brief, senderName, userId)).files;
-  if (!planned?.length) return { success: false, error: "I could not create a safe project plan." };
+  let planned;
+  const planStep = await actionTask.runStep(task, "plan", async () => {
+    const pending = getPendingPlan(chatId);
+    const plan = pending?.files ? { files: pending.files } : await planProject(brief, senderName, userId);
+    if (!plan?.files?.length) throw new Error("I could not create a safe project plan.");
+    planned = plan.files;
+    return { fileCount: planned.length, files: planned.map((file) => file.path) };
+  }, { verify: (result) => Number(result?.fileCount) > 0 });
+  if (planStep.state !== actionTask.STATES.COMPLETED) return { success: false, task: actionTask.summary(task), error: planStep.error || "I could not create a safe project plan." };
   pendingPlans.delete(chatId);
   const files = agent.mandatoryFiles ? agent.mandatoryFiles(brief, planned) : planned;
   const project = createProject(chatId, brief, files, { workflow: "contract-first" });
   trackBuildEvent(project.id, "planned", { fileCount: files.length, workflow: "contract-first" });
   if (onProgress) await onProgress(`Generating the complete project as one connected codebase (${files.length} files)...`);
 
-  const result = await agent.executeBuild({ request: brief, manifest: files, projectId: project.id, onProgress });
-  if (!result.success) {
+  let result;
+  const generateStep = await actionTask.runStep(task, "generate", async () => {
+    result = await agent.executeBuild({ request: brief, manifest: files, projectId: project.id, onProgress });
+    if (!result.success) throw new Error(result.error || "Project generation failed.");
+    return { fileCount: result.files?.length || 0, generatedFallback: Boolean(result.generatedFallback) };
+  }, { verify: (value) => Number(value?.fileCount) > 0 });
+  if (generateStep.state !== actionTask.STATES.COMPLETED) {
+    actionTask.finish(task);
     setProjectStatus(project.id, "failed");
-    trackBuildEvent(project.id, "failed", { error: result.error, stage: result.verification?.stage || "generation" });
-    if (result.root) agent.cleanup(result.root);
-    return { success: false, projectId: project.id, error: result.error, verification: result.verification };
+    trackBuildEvent(project.id, "failed", { error: generateStep.error, stage: result?.verification?.stage || "generation", taskId: task.id });
+    if (result?.root) agent.cleanup(result.root);
+    return { success: false, projectId: project.id, error: generateStep.error, verification: result?.verification, task: actionTask.summary(task) };
   }
 
   const finalPaths = result.files.map((file) => file.path);
@@ -73,9 +97,29 @@ async function buildProject(request, senderName, chatId, onProgress = null, user
   for (const file of result.files) {
     if (!project.files.some((plannedFile) => plannedFile.path === file.path)) saveFileContent(project.id, file.path, file.content);
   }
-  setProjectStatus(project.id, "done");
-  recordRevision(project.id, "verified-build", "Generated and verified as one connected project", finalPaths);
-  trackBuildEvent(project.id, "completed", { fileCount: finalPaths.length, workflow: "contract-first" });
+  const verifyStep = await actionTask.runStep(task, "verify", async () => ({
+    validation: result.verification?.validation || null,
+    browser: result.verification?.browser || null,
+    build: result.verification?.build || null,
+  }), { verify: (value) => result.verification?.success !== false });
+  if (verifyStep.state !== actionTask.STATES.COMPLETED) {
+    actionTask.finish(task);
+    setProjectStatus(project.id, "failed");
+    trackBuildEvent(project.id, "failed", { error: verifyStep.error, stage: "verification", taskId: task.id });
+    if (result.root) agent.cleanup(result.root);
+    return { success: false, projectId: project.id, error: verifyStep.error || "Project verification was not completed.", verification: result.verification, task: actionTask.summary(task) };
+  }
+  const persistStep = await actionTask.runStep(task, "persist", async () => {
+    setProjectStatus(project.id, "done");
+    recordRevision(project.id, "verified-build", "Generated and verified as one connected project", finalPaths);
+    trackBuildEvent(project.id, "completed", { fileCount: finalPaths.length, workflow: "contract-first", taskId: task.id });
+    return { projectId: project.id, fileCount: finalPaths.length };
+  }, { verify: (value) => value?.projectId === project.id });
+  actionTask.finish(task);
+  if (persistStep.state !== actionTask.STATES.COMPLETED) {
+    if (result.root) agent.cleanup(result.root);
+    return { success: false, projectId: project.id, error: persistStep.error || "The verified project could not be persisted.", task: actionTask.summary(task) };
+  }
   try { if (result.root) agent.cleanup(result.root); } catch (_) {}
   return {
     success: true,
@@ -92,6 +136,7 @@ async function buildProject(request, senderName, chatId, onProgress = null, user
     qualityWarnings: result.verification.quality?.warnings || [],
     zipPath: result.zipPath,
     generatedFallback: result.generatedFallback,
+    task: actionTask.summary(task),
   };
 }
 

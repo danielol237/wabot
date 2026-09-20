@@ -1808,6 +1808,15 @@ router.get("/api/logs/stream", checkAuth, (req, res) => {
   req.on("close", () => { clearInterval(heartbeat); unsubscribe(); });
 });
 
+// Durable coding workflows. This is read-only telemetry from the actual task
+// executor; the dashboard never fabricates progress or completion states.
+router.get("/api/action-tasks", checkAuth, (req, res) => {
+  try {
+    const { listTasks } = require("./tools/actionTask");
+    return res.json({ tasks: listTasks({ chatId: req.query.chatId || undefined }) });
+  } catch (e) { return res.status(500).json({ error: "Could not load action tasks" }); }
+});
+
 router.get("/", checkAuth, (req, res) => {
   try {
     const d = collectData();

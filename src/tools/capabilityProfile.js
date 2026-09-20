@@ -7,6 +7,8 @@ function configured(name) {
 let runtimeCache = { at: 0, value: null };
 function runtimeStatus() {
   if (runtimeCache.value && Date.now() - runtimeCache.at < 30_000) return runtimeCache.value;
+  let environment = null;
+  try { environment = require("../utils/capabilityCatalog").inspectEnvironment(); } catch (_) {}
   let health = null;
   try { health = require("./providerHealth").getHealth(); } catch (_) {}
   let media = null;
@@ -21,6 +23,7 @@ function runtimeStatus() {
     visionReady: configured("ZHIPU_API_KEY") || configured("GROQ_API_KEY") || configured("OPENROUTER_API_KEY"),
     vercelReady: configured("VERCEL_TOKEN"),
     webReady: configured("TAVILY_API_KEY") || configured("BRAVE_API_KEY"),
+    environment,
   };
   runtimeCache = { at: Date.now(), value };
   return value;
@@ -46,6 +49,11 @@ function getCapabilityProfile() {
       `${runtime.ytDlp.available ? `media download runtime ready (${runtime.ytDlp.version || "yt-dlp"})` : "media download runtime is unavailable until yt-dlp is installed"}`,
       `${runtime.vercelReady ? "Vercel deployment credential is configured" : "Vercel hosting needs VERCEL_TOKEN"}`,
       `${runtime.webReady ? "live web search is configured" : "live web search needs TAVILY_API_KEY or BRAVE_API_KEY"}`,
+      ...(runtime.environment ? [
+        `${runtime.environment.tools.git.healthy ? "Git is available" : "Git is unavailable"}`,
+        `${runtime.environment.tools.ffmpeg.healthy ? "FFmpeg is available" : "FFmpeg is unavailable"}`,
+        `${runtime.environment.tools.chromium.healthy ? "real browser verification is available" : "real browser unavailable; static verification fallback is available"}`,
+      ] : []),
     ],
     boundaries: [
       "Do not claim real-time 3D game creation, arbitrary Cloudflare hosting, unrestricted downloads, or external actions unless the corresponding installed tool and credential actually exist.",

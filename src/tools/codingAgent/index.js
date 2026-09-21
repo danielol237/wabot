@@ -12,6 +12,7 @@ const { checkProject } = require("../websiteQuality");
 const { runBrowserSmoke } = require("../browserSmoke");
 const { validateProject } = require("../projectValidator");
 const { verifyPackageInSandbox } = require("./sandboxRunner");
+const { analyzeRequirements, contractPrompt } = require("../codingRequirements");
 
 const MAX_FILES = 16;
 const TEMP_DIR = path.join(__dirname, "../../../temp");
@@ -107,23 +108,26 @@ function fallbackFiles(request) {
 
 async function planProject(request) {
   const fallback = fallbackManifest(request);
+  const requirements = await analyzeRequirements(request);
   try {
-    const response = await generateCodingText(`Create a file manifest for this request: ${String(request || "").slice(0, 1200)}\n\nReturn JSON: {"files":[{"path":"relative/path","description":"purpose"}]}. Include every file needed for a complete runnable project. Keep it under ${MAX_FILES} files.`, { system: PLAN_SYSTEM, maxTokens: 3000, temperature: 0.1 });
-    return { success: true, files: mandatoryFiles(request, normalizeManifest(cleanJson(response))) };
+    const response = await generateCodingText(`Create the complete file manifest for this product contract:\n${contractPrompt(requirements)}\n\nReturn JSON: {"files":[{"path":"relative/path","description":"purpose"}]}. Include every file needed for a complete runnable project, documentation, and the requested interactions. Keep it under ${MAX_FILES} files.`, { system: PLAN_SYSTEM, maxTokens: 4000, temperature: 0.1 });
+    return { success: true, requirements, files: mandatoryFiles(request, normalizeManifest(cleanJson(response))) };
   } catch (error) {
-    return { success: true, fallback: true, providerError: error.code || "CODING_PROVIDER_ERROR", files: mandatoryFiles(request, fallback) };
+    return { success: true, requirements, fallback: true, providerError: error.code || "CODING_PROVIDER_ERROR", files: mandatoryFiles(request, fallback) };
   }
 }
 
-async function generateWholeProject(request, manifest) {
-  const fallback = fallbackFiles(request);
+async function generateWholeProject(request, manifest, requirements = null) {
   try {
-    const response = await generateCodingText(`Build the complete project for this brief:\n${String(request || "").slice(0, 1800)}\n\nFile contract:\n${manifest.map((f) => `- ${f.path}: ${f.description}`).join("\n")}\n\nReturn JSON only in this exact shape: {"files":[{"path":"...","content":"complete file content"}]}. Return every planned file. Do not use markdown fences, placeholder copy, fake assets, undefined DOM selectors, missing in-page targets, or invented imports. HTML, CSS, and JavaScript must share one explicit contract.`, { system: CODE_SYSTEM, maxTokens: 50000, temperature: 0.15 });
-    return { success: true, files: normalizeGeneratedFiles(cleanJson(response)) };
+    const contract = requirements || await analyzeRequirements(request);
+    const response = await generateCodingText(`Implement this complete product, not a code sample.\n\nPRODUCT CONTRACT:\n${contractPrompt(contract)}\n\nFILE CONTRACT:\n${manifest.map((f) => `- ${f.path}: ${f.description}`).join("\n")}\n\nReturn JSON only in this exact shape: {"files":[{"path":"...","content":"complete file content"}]}. Return every planned file, with complete content. Implement the user's actual domain instead of a generic dashboard. Include realistic copy, working interactions, responsive behavior, accessibility, error/empty states, and README run instructions. Do not use markdown fences, placeholder copy, fake buttons, undefined DOM selectors, missing in-page targets, invented imports, or unexplained dependencies. HTML, CSS, JavaScript, and package scripts must share one explicit contract.`, { system: CODE_SYSTEM, maxTokens: 60000, temperature: 0.15 });
+    const files = normalizeGeneratedFiles(cleanJson(response));
+    const generatedPaths = new Set(files.map((file) => file.path));
+    const missing = manifest.map((file) => file.path).filter((file) => !generatedPaths.has(file));
+    if (missing.length) throw new Error(`Coding provider omitted planned files: ${missing.join(", ")}`);
+    return { success: true, files, requirements: contract };
   } catch (error) {
-    const requestedWeb = manifest.some((f) => /\.html?$/i.test(f.path));
-    if (!requestedWeb) return { success: false, error: `Coding generation failed: ${String(error.message || error).slice(0, 500)}` };
-    return { success: true, fallback: true, providerError: error.code || "CODING_PROVIDER_ERROR", files: fallback };
+    return { success: false, error: `Complete project generation failed: ${String(error.message || error).slice(0, 700)}`, providerError: error.code || "CODING_PROVIDER_ERROR" };
   }
 }
 
@@ -199,10 +203,11 @@ async function zipDirectory(root, outPath) {
 
 function cleanup(root) { try { fs.rmSync(root, { recursive: true, force: true }); } catch (_) {} }
 
-async function executeBuild({ request, manifest, projectId, onProgress }) {
+async function executeBuild({ request, manifest, requirements, projectId, onProgress }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `aria-build-${projectId || "project"}-`));
   try {
-    const generated = await generateWholeProject(request, manifest);
+    const generated = await generateWholeProject(request, manifest, requirements);
+    if (!generated.success) return generated;
     writeFiles(root, generated.files);
     const paths = generated.files.map((f) => f.path);
     let verification = await verifyProject(root, generated.files);
@@ -217,13 +222,13 @@ async function executeBuild({ request, manifest, projectId, onProgress }) {
       if (!aiRepair.success) break;
       verification = await verifyProject(root, readProjectFiles(root));
     }
-    if (!verification.success) return { success: false, error: `Project could not be verified after complete-project repair: ${verification.error}`, verification, generatedFallback: generated.fallback };
+    if (!verification.success) return { success: false, error: `Project could not be verified after complete-project repair: ${verification.error}`, verification, generatedFallback: generated.fallback, requirements: generated.requirements };
     const finalFiles = readProjectFiles(root);
     const zipPath = path.join(TEMP_DIR, `${projectId || Date.now()}.zip`);
     fs.mkdirSync(TEMP_DIR, { recursive: true });
     const zipped = await zipDirectory(root, zipPath);
     if (!zipped.success) return { success: false, error: zipped.error };
-    return { success: true, files: finalFiles, repairFixes: repairs, verification, zipPath, generatedFallback: generated.fallback, root };
+    return { success: true, files: finalFiles, repairFixes: repairs, verification, zipPath, generatedFallback: generated.fallback, requirements: generated.requirements, root };
   } catch (error) { return { success: false, error: String(error.message || error) }; }
   finally { /* root is retained until the caller copies project files, then removed */ }
 }

@@ -2101,6 +2101,8 @@ function formatBuildResult(result) {
   if (result.success === true) {
     let t = "✅ *Project built and verified.*\n";
     if (result.projectName || result.projectId) t += `🏷️ ${result.projectName || "Project"}${result.projectId ? ` (\`${result.projectId}\`)` : ""}\n`;
+    if (result.requirements?.productType) t += `🧭 Product: ${result.requirements.productType}\n`;
+    if (result.requirements?.features?.length) t += `✨ Included: ${result.requirements.features.slice(0, 4).join(", ")}\n`;
     if (result.fileCount) t += `📄 ${result.fileCount} file(s) checked\n`;
     if (result.buildVerification === "passed") t += "🧪 Build check: passed\n";
     if (result.browserSmoke?.success && !result.browserSmoke?.skipped) t += "🖥️ Browser check: passed\n";

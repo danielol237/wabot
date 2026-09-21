@@ -24,7 +24,7 @@ async function planProject(request, senderName, userId = null) {
 async function thinkAboutProject(request, senderName, chatId, userId = null) {
   const result = await planProject(request, senderName, userId);
   if (!result.success) return result;
-  pendingPlans.set(chatId, { request, files: result.files, plannedAt: Date.now() });
+  pendingPlans.set(chatId, { request, files: result.files, requirements: result.requirements || null, plannedAt: Date.now() });
   return {
     success: true,
     message: `*Plan for: ${request}*\n\n${result.files.map((f) => `- *${f.path}* — ${f.description}`).join("\n")}\n\n${result.files.length} files planned. Say “build it” to generate the complete project.`,
@@ -59,12 +59,14 @@ async function buildProject(request, senderName, chatId, onProgress = null, user
 
   if (onProgress) await onProgress("Understanding the brief and defining the complete project contract...");
   let planned;
+  let requirements;
   const planStep = await actionTask.runStep(task, "plan", async () => {
     const pending = getPendingPlan(chatId);
-    const plan = pending?.files ? { files: pending.files } : await planProject(brief, senderName, userId);
+    const plan = pending?.files ? { files: pending.files, requirements: pending.requirements } : await planProject(brief, senderName, userId);
     if (!plan?.files?.length) throw new Error("I could not create a safe project plan.");
     planned = plan.files;
-    return { fileCount: planned.length, files: planned.map((file) => file.path) };
+    requirements = plan.requirements || null;
+    return { fileCount: planned.length, files: planned.map((file) => file.path), productType: requirements?.productType || "software project" };
   }, { verify: (result) => Number(result?.fileCount) > 0 });
   if (planStep.state !== actionTask.STATES.COMPLETED) return { success: false, task: actionTask.summary(task), error: planStep.error || "I could not create a safe project plan." };
   pendingPlans.delete(chatId);
@@ -75,7 +77,7 @@ async function buildProject(request, senderName, chatId, onProgress = null, user
 
   let result;
   const generateStep = await actionTask.runStep(task, "generate", async () => {
-    result = await agent.executeBuild({ request: brief, manifest: files, projectId: project.id, onProgress });
+    result = await agent.executeBuild({ request: brief, manifest: files, requirements, projectId: project.id, onProgress });
     if (!result.success) throw new Error(result.error || "Project generation failed.");
     return { fileCount: result.files?.length || 0, generatedFallback: Boolean(result.generatedFallback) };
   }, { verify: (value) => Number(value?.fileCount) > 0 });
@@ -139,6 +141,7 @@ async function buildProject(request, senderName, chatId, onProgress = null, user
     qualityWarnings: result.verification.quality?.warnings || [],
     zipPath: result.zipPath,
     generatedFallback: result.generatedFallback,
+    requirements: result.requirements || requirements,
     task: actionTask.summary(task),
   };
 }

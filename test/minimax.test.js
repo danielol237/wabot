@@ -62,6 +62,7 @@ test("minimax: OpenAI-compatible request sends bearer auth and extracts text", a
 test("minimax: configured provider is selected before fallback providers", async () => {
   const originalChat = minimax.chat;
   const originalApiKey = process.env.MINIMAX_API_KEY;
+  const originalPrimary = process.env.MINIMAX_PRIMARY;
   const originalCerebras = process.env.CEREBRAS_API_KEY;
   const originalGemini = process.env.GEMINI_API_KEY;
   const originalGroq = process.env.GROQ_API_KEY;
@@ -70,6 +71,7 @@ test("minimax: configured provider is selected before fallback providers", async
 
   try {
     process.env.MINIMAX_API_KEY = "unit-test-key";
+    process.env.MINIMAX_PRIMARY = "true";
     delete process.env.CEREBRAS_API_KEY;
     delete process.env.GEMINI_API_KEY;
     delete process.env.GROQ_API_KEY;
@@ -90,6 +92,8 @@ test("minimax: configured provider is selected before fallback providers", async
     minimax.chat = originalChat;
     if (originalApiKey === undefined) delete process.env.MINIMAX_API_KEY;
     else process.env.MINIMAX_API_KEY = originalApiKey;
+    if (originalPrimary === undefined) delete process.env.MINIMAX_PRIMARY;
+    else process.env.MINIMAX_PRIMARY = originalPrimary;
     if (originalCerebras === undefined) delete process.env.CEREBRAS_API_KEY;
     else process.env.CEREBRAS_API_KEY = originalCerebras;
     if (originalGemini === undefined) delete process.env.GEMINI_API_KEY;

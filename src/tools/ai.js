@@ -22,7 +22,7 @@ function providerAvailable(name) {
 function isRateLimitedError(error) {
   const status = error?.response?.status || error?.status || error?.statusCode;
   const message = error?.response?.data?.error?.message || error?.response?.data?.message || error?.message || error;
-  return status === 429 || /(?:rate.?limit|too many requests|quota exceeded|resource exhausted)/i.test(String(message));
+  return status === 429 || /(?:rate.?limit|too many requests|quota exceeded|resource exhausted|high demand|payment required|unavailable for free)/i.test(String(message));
 }
 
 function providerErrorMessage(error, fallback) {
@@ -39,21 +39,15 @@ const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 // Keep this list on currently supported Google API model IDs. Update it from
 // Google's model catalogue before a model retirement reaches production.
-const GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"];
+const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
 // Groq's free tier caps total tokens-per-minute (prompt + history + response) at
 // 8000 for some models, and Groq retires models without much notice — so this is
 // a fallback chain (primary → next) and Groq gets a safer, lower token cap.
 // Hoisted here (audit #24) instead of re-created inside the hot path.
-const GROQ_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "llama-3.1-8b-instant"];
+const GROQ_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
 // Free OpenRouter models rate-limit hard (shared quota), so keep a longer chain
 // so a rate-limited model falls through to the next one. Hoisted per audit #24.
-const OPENROUTER_MODELS = [
-  "openrouter/free",
-  "google/gemma-4-31b-it:free",
-  "nvidia/nemotron-3-super-120b-a12b:free",
-  "nvidia/nemotron-nano-12b-v2-vl:free",
-  "openrouter/free",
-];
+const OPENROUTER_MODELS = ["openrouter/free"];
 
 // Cerebras' free tier: 1M tokens/day, no credit card — genuinely the highest free
 // ceiling available right now, added after repeatedly hitting Gemini's daily 429s
@@ -230,9 +224,41 @@ const { chatGPT } = require("./gpt5Cli");
     }
   }
 
-  // MiniMax is the configured primary when MINIMAX_API_KEY is present. Set
-  // MINIMAX_PRIMARY=false to keep the existing provider order while retaining
-  // MiniMax as an available fallback in a future provider policy.
+  // OpenRouter is the fast, verified primary route on this deployment. Keep
+  // the free router first so one working provider answers without walking stale
+  // or paid routes before reaching it.
+  if (process.env.OPENROUTER_API_KEY && providerAvailable("OpenRouter")) {
+    try {
+      const res = await axios.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          model: "openrouter/free",
+          messages: [{ role: "system", content: systemPrompt }, ...messages],
+          max_tokens: requestNeedsLargeOutput ? maxTokens : Math.min(maxTokens, 1200),
+          temperature: 0.7,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          timeout: AI_PROVIDER_TIMEOUT_MS,
+        }
+      );
+      const rawContent = res.data.choices[0]?.message?.content;
+      if (!isUsableProviderText(rawContent)) throw new Error("OpenRouter returned an unusable response");
+      lastProvider = "openrouter";
+      markProviderSuccess("OpenRouter", requestStartedAt);
+      return withTruncationNotice(rawContent, null, "length", requestNeedsLargeOutput);
+    } catch (err) {
+      lastError = providerErrorMessage(err, "OpenRouter request failed");
+      markProviderFailure("OpenRouter", lastError, requestStartedAt);
+      error("OpenRouter primary error:", lastError);
+    }
+  }
+
+  // MiniMax is opt-in because it can require a paid balance. Set
+  // MINIMAX_PRIMARY=true only when that account is intentionally enabled.
   if (minimax.configured() && minimax.getConfig().primary) {
     try {
       const result = await minimax.chat(

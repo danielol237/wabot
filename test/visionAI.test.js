@@ -38,5 +38,5 @@ test("detail requests keep useful visual text but remove reasoning markers", () 
 });
 
 test("vision model selection keeps the visual route separate from coding", () => {
-  assert.equal(vision._test.OPENROUTER_VISION_MODEL, "google/gemini-3.1-pro-preview");
+  assert.equal(vision._test.OPENROUTER_VISION_MODEL, "google/gemini-3.1-flash-lite");
 });

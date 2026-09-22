@@ -10,8 +10,8 @@ function providerAvailable(name) {
   try { return providerHealth.isAvailable(name); } catch (_) { return true; }
 }
 
-const VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct", "qwen/qwen3.6-27b"];
-const OPENROUTER_VISION_MODEL = "google/gemini-3.1-pro-preview";
+const VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"];
+const OPENROUTER_VISION_MODEL = String(process.env.OPENROUTER_VISION_MODEL || "google/gemini-3.1-flash-lite").trim();
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 
 const DEFAULT_VISION_PROMPT = `Look at this media and explain what is actually happening, not just a list of objects. Cover the visible action, people or characters, expressions, any readable text, the emotional tone, and useful context clues. Distinguish what is clearly visible from what is only an inference. Talk like you're explaining it to a friend who cannot see it.`;
@@ -104,7 +104,7 @@ async function analyzeWithOpenRouter(base64Image, mimeType, prompt) {
             { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
           ],
         }],
-        max_tokens: 1800,
+        max_tokens: 900,
         temperature: 0.65,
       },
       {
@@ -132,7 +132,7 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
 
   if (zai.configured() && providerAvailable("Z.AI")) {
     const startedAt = Date.now();
-    const result = await zai.analyzeImage(base64Image, mimeType, prompt, { maxTokens: 1800 });
+    const result = await zai.analyzeImage(base64Image, mimeType, prompt, { maxTokens: 900 });
     if (result.success) {
       providerHealth.recordSuccess("Z.AI", { latency: Date.now() - startedAt });
       return sanitizeVisionReply(result.text, { kind, question });
@@ -154,7 +154,7 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
               { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
             ],
           }],
-          max_tokens: 1800,
+          max_tokens: 900,
           temperature: 0.65,
         });
         const text = res.choices[0]?.message?.content;

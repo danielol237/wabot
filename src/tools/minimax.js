@@ -8,7 +8,7 @@ function getConfig(env = process.env) {
     apiKey: String(env.MINIMAX_API_KEY || "").trim(),
     baseUrl: String(env.MINIMAX_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, ""),
     model: String(env.MINIMAX_MODEL || DEFAULT_MODEL).trim(),
-    primary: String(env.MINIMAX_PRIMARY || "true").toLowerCase() !== "false",
+    primary: String(env.MINIMAX_PRIMARY || "false").toLowerCase() === "true",
   };
 }
 

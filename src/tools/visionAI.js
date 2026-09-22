@@ -130,6 +130,14 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
   const kind = options.kind || "image";
   const prompt = options.prompt || buildVisionPrompt({ question, kind, history: options.history, quotedContext: options.quotedContext });
 
+  // OpenRouter is the verified multimodal route on this deployment. Try it first
+  // so vision does not waste time on unavailable Z.AI/Groq models.
+  const primaryOpenRouterText = await analyzeWithOpenRouter(base64Image, mimeType, prompt);
+  if (primaryOpenRouterText) {
+    providerHealth.recordSuccess("OpenRouter", { latency: 0 });
+    return sanitizeVisionReply(primaryOpenRouterText, { kind, question });
+  }
+
   if (zai.configured() && providerAvailable("Z.AI")) {
     const startedAt = Date.now();
     const result = await zai.analyzeImage(base64Image, mimeType, prompt, { maxTokens: 900 });

@@ -97,7 +97,7 @@ function isBotMentioned(msg, botJid) {
     const infos = contextInfos(msg);
     const mentioned = infos.flatMap((info) => Array.isArray(info.mentionedJid) ? info.mentionedJid : []);
     const botIds = (Array.isArray(botJid) ? botJid : [botJid]).filter(Boolean).map(normalizeJid);
-    if (mentioned.length && botIds.length && mentioned.some((jid) => botIds.includes(normalizeJid(jid)))) return true;
+    if (mentioned.length && botIds.length && mentioned.some((jid) => botIds.some((bot) => jidMatches(jid, bot)))) return true;
 
     if (infos.some((info) => info.stanzaId && wasSentByBot(info.stanzaId))) return true;
   } catch (_) {}
@@ -108,6 +108,18 @@ function normalizeJid(value) {
   const raw = String(value || "").trim().toLowerCase();
   const bare = raw.split(":")[0].split("@")[0];
   return bare || raw;
+}
+
+function jidMatches(left, right) {
+  const a = normalizeJid(left);
+  const b = normalizeJid(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const digitsA = a.replace(/\D/g, "");
+  const digitsB = b.replace(/\D/g, "");
+  // Device suffixes and formatting can differ while the WhatsApp number is
+  // identical. Compare the stable international-number tail, not display text.
+  return digitsA.length >= 8 && digitsB.length >= 8 && (digitsA.endsWith(digitsB) || digitsB.endsWith(digitsA));
 }
 
 function getBotMentionJids(sock) {

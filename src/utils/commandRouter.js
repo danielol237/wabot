@@ -686,9 +686,13 @@ async function routeMessage(sock, msg, context) {
   }
 
   // ── AUTOMATIC SOCIAL MEDIA DOWNLOADS ───────────────────────
-  // A pasted public YouTube/Facebook/TikTok/Instagram/Pinterest/etc. URL is
-  // an explicit media handoff. Download and send it before AI can summarize it.
-  const autoMediaUrl = detectAutoMediaLink(text);
+  // A public media URL in either the current message or the message being
+  // replied to is an explicit media handoff. The URL—not a trigger phrase—
+  // determines the capability.
+  const quotedText = (() => {
+    try { return require("./baileysHelpers").getQuotedMessageText(msg) || ""; } catch (_) { return ""; }
+  })();
+  const autoMediaUrl = detectAutoMediaLink(`${text}\n${quotedText}`);
   if (autoMediaUrl) {
     await handleYtDownload(sock, msg, autoMediaUrl, context);
     return;
@@ -1569,7 +1573,7 @@ async function handleDownload(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
   const raw = String(args || "").trim();
   const url = raw.match(/https?:\/\/[^\s<>"']+/i)?.[0]?.replace(/[),.!?]+$/, "");
-  if (!url) return reply(sock, msg, "Send me a public video link and say “download this”, or use !dl <url>.");
+  if (!url) return reply(sock, msg, "I need a public media link, either in your message or in the message you replied to.");
   const { mediaDownloadEnabled, mediaDownloadMaxMb } = require("../tools/mediaTools");
   if (!mediaDownloadEnabled()) return reply(sock, msg, "🎬 Video downloads are currently disabled by the ARIA configuration.");
   await react(sock, msg, "⬇️");

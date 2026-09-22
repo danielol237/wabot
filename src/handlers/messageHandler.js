@@ -1,7 +1,7 @@
 // Slimmed-down message handler — routes to commandRouter
 // Previously 1669 lines, now ~150. New commands go in commandRouter, not here.
 
-const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNote, downloadMediaFromMsg, downloadQuotedMedia, findQuotedMediaReference, getQuotedMessageText, isQuotingBotMessage, isBotMentioned } = require("../utils/baileysHelpers");
+const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNote, downloadMediaFromMsg, downloadQuotedMedia, findQuotedMediaReference, getQuotedMessageText, isQuotingBotMessage, isBotMentioned, getBotMentionJids } = require("../utils/baileysHelpers");
 const { routeMessage, triggeredByName } = require("../utils/commandRouter");
 const { checkGroupProtection } = require("../tools/groupProtection");
 const { handleWcgReply } = require("../tools/pasquaCommands");
@@ -52,7 +52,9 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   const senderJid = msg.key.participant || msg.key.remoteJid;
   const senderName = getSenderName(msg);
   const isGroup = chatId?.includes("g.us");
-  const botJids = [sock?.user?.id, sock?.user?.jid, sock?.user?.lid, sock?.user?.phoneNumber].filter(Boolean);
+  // WhatsApp may expose the bot as a phone JID, device JID, or LID. Use the
+  // canonical helper so @mentions work across all three representations.
+  const botJids = getBotMentionJids(sock);
   const text = getMessageText(msg);
   const lower = text.toLowerCase().trim();
 

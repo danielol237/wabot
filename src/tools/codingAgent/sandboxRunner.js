@@ -47,6 +47,7 @@ function runDocker(args, options = {}) {
   const root = path.resolve(options.cwd || process.cwd());
   const configuredNetwork = String(process.env.SANDBOX_DOCKER_NETWORK || "").trim().toLowerCase();
   const network = ["none", "bridge", "host"].includes(configuredNetwork) ? configuredNetwork : (options.network || "none");
+  const image = options.image || "node:22-slim";
   const command = [
     "run", "--rm", "--network", network, "--user", "1000:1000",
     "--read-only", "--tmpfs", "/tmp:size=256m", "--memory", "768m", "--cpus", "1",
@@ -55,7 +56,7 @@ function runDocker(args, options = {}) {
     // can prevent npm/node from starting. The container pids limit remains active.
     "--ulimit", "nofile=256:256",
     "-e", "CI=1", "-e", "HOST=127.0.0.1", "-e", "PORT=0", "-e", "NPM_CONFIG_CACHE=/tmp/npm-cache",
-    "-v", `${root}:/workspace:rw`, "-w", "/workspace", "node:22-slim", ...args,
+    "-v", `${root}:/workspace:rw`, "-w", "/workspace", image, ...args,
   ];
   return runProcess("docker", command, { ...options, sandbox: "docker" });
 }
@@ -63,7 +64,7 @@ function runDocker(args, options = {}) {
 async function runSandboxCommand(projectDir, args, label, options = {}) {
   const timeout = options.timeout || 120000;
   const result = dockerAvailable()
-    ? await runDocker(args, { cwd: projectDir, timeout, network: options.network || "none", observe: options.observe, observeAfter: options.observeAfter })
+    ? await runDocker(args, { cwd: projectDir, timeout, network: options.network || "none", image: options.image || (args[0] === "python3" ? "python:3.12-slim" : "node:22-slim"), observe: options.observe, observeAfter: options.observeAfter })
     : process.env.ARIA_ALLOW_UNSANDBOXED_BUILDS === "true"
       ? await runProcess(args[0], args.slice(1), { cwd: projectDir, timeout, sandbox: "explicit-process-opt-in", observe: options.observe, observeAfter: options.observeAfter })
       : { success: false, sandbox: "unavailable", output: "", error: "Docker sandbox is unavailable. Set ARIA_ALLOW_UNSANDBOXED_BUILDS=true only when the owner explicitly accepts direct-process verification." };

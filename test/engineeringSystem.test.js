@@ -53,6 +53,8 @@ test("engineering requests can target an explicit repository and Android paths",
   assert.equal(_test.repositoryFromRequest("change the dashboard in danielol237/wabot"), "danielol237/wabot");
   assert.equal(_test.repositoryFromRequest("update the companion app", "unknown-user@s.whatsapp.net"), null);
   assert.equal(_test.repositoryFromRequest("work on danielol237/aria-android-companion"), "danielol237/aria-android-companion");
+  assert.equal(_test.repositoryReferenceFromRequest("ARIA check my Wabot repo and tell me what it's for"), "Wabot");
+  assert.equal(_test.repositoryReferenceFromRequest("audit the wabot repository"), "wabot");
   assert.equal(_test.safeRelativePath("app/src/main/AndroidManifest.xml"), "app/src/main/AndroidManifest.xml");
   assert.equal(_test.safeRelativePath("gradle/libs.versions.toml"), "gradle/libs.versions.toml");
 });

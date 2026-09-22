@@ -346,8 +346,22 @@ async function listUserRepositories(actorJid) {
   return { success: true, repositories };
 }
 
+async function resolveRepositoryReference(reference, actorJid) {
+  const value = clean(reference, 180).replace(/^repo(?:sitory)?\s+/i, "").trim();
+  if (!value) return githubCredentialVault.getWorkspaceForUser(actorJid) || null;
+  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) return value;
+  const listed = await listUserRepositories(actorJid);
+  if (!listed.success) throw new Error(listed.error);
+  const matches = listed.repositories.filter((repo) => repo.name.split("/").pop().toLowerCase() === value.toLowerCase());
+  if (matches.length === 1) return matches[0].name;
+  if (matches.length > 1) throw new Error(`More than one repository is named ${value}. Use owner/repo so I can select the right one.`);
+  throw new Error(`I could not find a repository named ${value} in the connected GitHub account.`);
+}
+
 async function inspectUserRepository(repository, actorJid) {
-  const target = repository || githubCredentialVault.getWorkspaceForUser(actorJid);
+  let target;
+  try { target = await resolveRepositoryReference(repository, actorJid); }
+  catch (error) { return { success: false, error: clean(error.message, 300) }; }
   if (!target) {
     const listed = await listUserRepositories(actorJid);
     if (!listed.success) return listed;
@@ -389,11 +403,17 @@ async function handleEngineeringRequest(rawInput, senderName, chatId, actorJid) 
     const lines = result.repositories.map((repo) => `• ${repo.name}${repo.private ? " 🔒" : ""}`).join("\n") || "No repositories were returned for this GitHub account.";
     return { success: true, message: `📚 *Your GitHub repositories*\n\n${lines}\n\nSay “ARIA use my GitHub repo owner/repo” to select one.` };
   }
-  if (/^(?:check|inspect|look\s+at|show\s+me)\s+(?:my\s+)?(?:github\s+)?repo(?:sitory)?\b/i.test(raw) && !/\brepo(?:sitories)?\b\s*$/i.test(raw)) {
-    const explicit = raw.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/)?.[1];
+  if (/^(?:audit|review)\b/i.test(raw)) {
+    const explicit = raw.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/)?.[1]
+      || raw.match(/\b(?:repo(?:sitory)?\s+)([A-Za-z0-9_.-]+)\b/i)?.[1]
+      || raw.match(/\b([A-Za-z0-9_.-]+)\s+repo(?:sitory)?\b/i)?.[1];
     return inspectUserRepository(explicit, actorJid);
   }
-  if (/^(?:check|inspect|look\s+at|show\s+me)\s+(?:my\s+)?(?:github\s+)?repo(?:sitory)?$/i.test(raw)) return inspectUserRepository(null, actorJid);
+  if (/^(?:audit|review|check|inspect|look\s+at|show\s+me)\s+(?:my\s+)?(?:github\s+)?(?:repo(?:sitory)?|codebase)\b/i.test(raw) && !/\brepo(?:sitories)?\b\s*$/i.test(raw)) {
+    const explicit = raw.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/)?.[1] || raw.match(/\b(?:repo(?:sitory)?|codebase)\s+([A-Za-z0-9_.-]+)\b/i)?.[1];
+    return inspectUserRepository(explicit, actorJid);
+  }
+  if (/^(?:audit|review|check|inspect|look\s+at|show\s+me)\s+(?:my\s+)?(?:github\s+)?(?:repo(?:sitory)?|codebase)$/i.test(raw)) return inspectUserRepository(null, actorJid);
   const workspaceRequest = raw.match(/^(?:use|select|switch(?:\s+to)?)\s+(?:my\s+)?(?:github\s+)?(?:repo(?:sitory)?\s+)?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/i);
   if (workspaceRequest) return selectUserRepository(workspaceRequest[1], actorJid);
   if (/^(?:clear|forget|remove)\s+(?:my\s+)?(?:active\s+)?(?:github\s+)?workspace$/i.test(raw)) {

@@ -51,6 +51,19 @@ test("natural routing understands human repository-check language", () => {
   }
 });
 
+test("natural routing sends conversational repository audits to engineering", () => {
+  for (const phrase of [
+    "Audit Wabot repo only audit",
+    "ARIA audit the Wabot repo",
+    "ARIA review my repository wabot",
+    "ARIA check my GitHub repo wabot",
+  ]) {
+    const action = router.resolveNaturalAction(phrase);
+    assert.equal(action?.intent, "engineering", phrase);
+    assert.equal(action?.command?.ownerOnly, false, phrase);
+  }
+});
+
 test("natural routing recognizes broad social-media download requests", () => {
   for (const phrase of [
     "ARIA, download this link https://www.youtube.com/watch?v=abc123",

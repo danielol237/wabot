@@ -367,7 +367,7 @@ function detectIntent(text) {
   if (/https?:\/\/\S+/i.test(lower) && /\b(?:download|save|get|fetch|grab|send)\b/i.test(lower) && /\b(?:this|that|it|link|video|clip|reel|media)\b/i.test(lower)) return "download";
   const engineeringAction = /\b(?:check|inspect|look\s+at|review|audit|understand|explain|work(?:\s+\w+){0,2}\s+on|improve|fix|change|update|edit|modify|implement|add|remove|build|test|run|plan|propose|open|list|show|use|select|switch|connect|link|approve|verify|merge|ship|push)\b/i;
   const engineeringTarget = /\b(?:github|git\s*hub|repo(?:sitory)?|codebase|source\s*code|dashboard|android\s+companion)\b|\b(?!src\/|app\/|plugins\/|test\/|gradle\/|data\/|node_modules\/)[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i;
-  if (engineeringAction.test(lower) && engineeringTarget.test(lower) && /\b(?:my|the|this|that)\b|\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i.test(lower)) return "engineering";
+  if (engineeringAction.test(lower) && engineeringTarget.test(lower) && (/\b(?:my|the|this|that)\b|\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b|\b(?:repo|repository)\s+[a-z0-9_.-]+\b/i.test(lower))) return "engineering";
   const deliveryIntent = /^(?:please\s+)?(?:build|create|make|design|develop|code)\b/i.test(lower)
     && /\b(?:website|web\s*app|webpage|site|landing\s+page|portfolio|dashboard|app)\b/i.test(lower)
     && /\b(?:deploy|host|publish|online|preview|link|url|screenshot|screen\s*shot|show\s+me|send\s+me)\b/i.test(lower);
@@ -2059,7 +2059,7 @@ function formatResearchResult(result) {
 async function handleGitHub(sock, msg, args, ctx) {
   const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
   let query = String(args || "").trim();
-  const engineeringAction = query.match(/^(help|status|inspect|inventory|list|proposals|upgrades|plan|propose|implement|build|fix|change|approve|apply|execute|verify|check|test|merge|ship)\b/i);
+  const engineeringAction = query.match(/^(help|status|inspect|inventory|list|proposals|upgrades|plan|propose|implement|build|fix|change|audit|review|approve|apply|execute|verify|check|test|merge|ship)\b/i);
   if (engineeringAction) {
     const { handleEngineeringRequest } = require("../tools/engineeringSystem");
     const result = await handleEngineeringRequest(query, ctx.senderName, ctx.chatId, ctx.senderJid);

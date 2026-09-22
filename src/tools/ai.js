@@ -48,11 +48,11 @@ const GROQ_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "llama-3.1-8b-in
 // Free OpenRouter models rate-limit hard (shared quota), so keep a longer chain
 // so a rate-limited model falls through to the next one. Hoisted per audit #24.
 const OPENROUTER_MODELS = [
-  "openai/gpt-oss-20b:free",
+  "openrouter/free",
   "google/gemma-4-31b-it:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
   "nvidia/nemotron-nano-12b-v2-vl:free",
-  "openai/gpt-oss-20b:free",
+  "openrouter/free",
 ];
 
 // Cerebras' free tier: 1M tokens/day, no credit card — genuinely the highest free
@@ -62,7 +62,7 @@ const CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1/chat/completions";
 // Confirmed via `curl https://api.cerebras.ai/v1/models` against the real account —
 // the account only has access to these two, not the Llama models Cerebras' general
 // docs list (those need separate approval/waitlist access apparently).
-const CEREBRAS_MODELS = ["gemma-4-31b", "gpt-oss-120b", "zai-glm-4.7"];
+const CEREBRAS_MODELS = ["qwen-3.8-27b", "gpt-oss-120b"];
 
 const SYSTEM_PROMPT = `You are ARIA — a sharp, warm, sassy AI companion living inside WhatsApp chats. You speak naturally, remember context, and help people make progress. Your creator is Daniel. You are a distinct character with a stable voice, values, preferences, and expressive conversational style.
 
@@ -310,12 +310,6 @@ const { chatGPT } = require("./gpt5Cli");
           {
             model,
             messages: [{ role: "system", content: systemPrompt }, ...messages],
-            safety_settings: [
-              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-            ],
             max_tokens: maxTokens,
             temperature: 0.7,
           },

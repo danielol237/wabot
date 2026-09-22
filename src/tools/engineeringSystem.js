@@ -153,7 +153,7 @@ async function createUpgradePlan(objective, senderName, chatId, actorJid) {
   const request = clean(objective, 1200);
   if (!request) return { success: false, error: "Tell me what you want upgraded." };
   const targetRepository = repositoryFromRequest(request, actorJid);
-  if (!targetRepository) return { success: false, error: "Tell me the repository as owner/repo, or choose one first with “ARIA use my GitHub repo owner/repo”. I will not assume another user’s repository." };
+  if (!targetRepository) return { success: false, error: "I can handle this engineering request, but I need to know which repository it applies to. Name the repository naturally and I’ll use the connected GitHub account." };
   const prompt = `${request}\n\nRepository: ${targetRepository}\nAllowed paths: ${ALLOWED_PATHS.join(", ")}\nForbidden paths: ${DENIED_PATHS.join(", ")}\n\nCreate a bounded plan with at most ${MAX_FILES} files. Include exact relative paths, a summary, tests, risks, and rollback. This is a proposal only; do not write code yet.`;
   try {
     const response = await generateCodingText(prompt, { system: PLAN_PROMPT, maxTokens: 6000, temperature: 0.1 });
@@ -366,7 +366,7 @@ async function inspectUserRepository(repository, actorJid) {
     const listed = await listUserRepositories(actorJid);
     if (!listed.success) return listed;
     const lines = listed.repositories.map((repo) => `• ${repo.name}${repo.private ? " 🔒" : ""}`).join("\n") || "No repositories were returned for this GitHub account.";
-    return { success: true, message: `📚 I found your GitHub repositories, but you have not selected an active workspace yet.\n\n${lines}\n\nTell me “ARIA use my GitHub repo owner/repo” and I’ll inspect that repository.` };
+    return { success: true, message: `📚 I found your GitHub repositories, but no active workspace is selected yet.\n\n${lines}\n\nI can inspect, audit, review, test, or modify one of them. Name the repository and the outcome you want in your own words.` };
   }
   try {
     const repo = await githubRequest("GET", "", undefined, { repository: target, actorJid });
@@ -401,7 +401,7 @@ async function handleEngineeringRequest(rawInput, senderName, chatId, actorJid) 
     const result = await listUserRepositories(actorJid);
     if (!result.success) return result;
     const lines = result.repositories.map((repo) => `• ${repo.name}${repo.private ? " 🔒" : ""}`).join("\n") || "No repositories were returned for this GitHub account.";
-    return { success: true, message: `📚 *Your GitHub repositories*\n\n${lines}\n\nSay “ARIA use my GitHub repo owner/repo” to select one.` };
+    return { success: true, message: `📚 *Your GitHub repositories*\n\n${lines}\n\nI can inspect, audit, review, test, or modify any of these. Name the repository and the outcome you want in your own words.` };
   }
   if (/^(?:audit|review)\b/i.test(raw)) {
     const explicit = raw.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/)?.[1]

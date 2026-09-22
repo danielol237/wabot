@@ -76,6 +76,16 @@ const BOT_NAME = (process.env.BOT_NAME || "aria").toLowerCase();
 // Natural-language routing is the default. The legacy prefix remains accepted
 // as a compatibility path so existing chats and scheduled instructions survive.
 const PREFIX = String(process.env.BOT_PREFIX || "").trim().toLowerCase();
+
+// Public social-media URLs are handled before generic AI so ARIA sends the
+// actual media instead of merely describing a link. yt-dlp supports these
+// hosts and the detector deliberately excludes arbitrary websites.
+const AUTO_MEDIA_HOSTS = /(?:youtube\.com|youtu\.be|tiktok\.com|vm\.tiktok\.com|facebook\.com|fb\.watch|instagram\.com|pinterest\.com|pin\.it|twitter\.com|x\.com|reddit\.com|redd\.it|snapchat\.com|streamable\.com)/i;
+function detectAutoMediaLink(text) {
+  const match = String(text || '').match(/https?:\/\/[^\s<>'"]+/i);
+  if (!match || !AUTO_MEDIA_HOSTS.test(match[0])) return null;
+  return match[0].replace(/[),.!?]+$/, '');
+}
 const LEGACY_PREFIX = "!";
 
 function getMatchedPrefix(lower) {
@@ -672,6 +682,15 @@ async function routeMessage(sock, msg, context) {
       const { reply: _rp } = require("./baileysHelpers");
       await _rp(sock, msg, `⚠️ Business Mode could not start: ${String(err?.message || err).slice(0, 300)}`);
     }
+    return;
+  }
+
+  // ── AUTOMATIC SOCIAL MEDIA DOWNLOADS ───────────────────────
+  // A pasted public YouTube/Facebook/TikTok/Instagram/Pinterest/etc. URL is
+  // an explicit media handoff. Download and send it before AI can summarize it.
+  const autoMediaUrl = detectAutoMediaLink(text);
+  if (autoMediaUrl) {
+    await handleYtDownload(sock, msg, autoMediaUrl, context);
     return;
   }
 
@@ -3181,5 +3200,5 @@ module.exports = {
   resolveNaturalAction,
   naturalArgs,
   detectCommandCollisions,
-  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation, handlePrivateGithubCredential, cleanDeliveryRequest },
+  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation, handlePrivateGithubCredential, cleanDeliveryRequest, detectAutoMediaLink },
 };

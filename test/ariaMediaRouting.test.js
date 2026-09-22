@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { detectIntent, resolveNaturalAction, naturalArgs } = require("../src/utils/commandRouter");
+const { detectIntent, resolveNaturalAction, naturalArgs, _test } = require("../src/utils/commandRouter");
 
 test("natural image requests resolve without a prefix", () => {
   assert.equal(detectIntent("generate a pic of a dog"), "image");
@@ -23,4 +23,12 @@ test("natural hosting request resolves to the protected deployment action", () =
   const action = resolveNaturalAction("host it");
   assert.equal(action.intent, "deploy");
   assert.equal(action.command.ownerOnly, true);
+});
+
+test("automatic media routing detects supported social video links", () => {
+  assert.equal(_test.detectAutoMediaLink("https://youtu.be/demo"), "https://youtu.be/demo");
+  assert.equal(_test.detectAutoMediaLink("check this https://www.tiktok.com/@aria/video/123"), "https://www.tiktok.com/@aria/video/123");
+  assert.equal(_test.detectAutoMediaLink("https://www.facebook.com/reel/123"), "https://www.facebook.com/reel/123");
+  assert.equal(_test.detectAutoMediaLink("https://pin.it/demo"), "https://pin.it/demo");
+  assert.equal(_test.detectAutoMediaLink("https://example.com/article"), null);
 });

@@ -26,7 +26,8 @@ function isRateLimitedError(error) {
 }
 
 function providerErrorMessage(error, fallback) {
-  return error?.response?.data?.error?.message || error?.response?.data?.message || error?.message || fallback;
+  const data = error?.response?.data;
+  return data?.error?.message || data?.message || error?.message || (data ? JSON.stringify(data).slice(0, 500) : fallback);
 }
 
 const AI_PROVIDER_TIMEOUT_MS = Math.max(5000, Math.min(Number(process.env.AI_PROVIDER_TIMEOUT_MS) || 20000, 60000));
@@ -372,17 +373,25 @@ const { chatGPT } = require("./gpt5Cli");
   if (process.env.GEMINI_API_KEY && providerAvailable("Gemini")) {
     for (const model of GEMINI_MODELS) {
       try {
-        // Build the native Gemini "contents" array from the OpenAI-style messages.
-        const contents = [
-          { role: "user", parts: [{ text: systemPrompt }] },
-          ...messages.map((m) => ({
-            role: m.role === "assistant" ? "model" : "user",
-            parts: [{ text: m.content }],
-          })),
-        ];
+        // Gemini requires alternating user/model turns and rejects requests that
+        // end in a model turn. Send the system prompt through systemInstruction,
+        // then normalize history and guarantee the final turn is user content.
+        const contents = [];
+        for (const message of messages) {
+          const role = message.role === "assistant" ? "model" : "user";
+          const text = String(message.content || "").trim();
+          if (!text) continue;
+          const previous = contents[contents.length - 1];
+          if (previous?.role === role) previous.parts[0].text += "\n" + text;
+          else contents.push({ role, parts: [{ text }] });
+        }
+        if (!contents.length || contents[contents.length - 1].role !== "user") {
+          contents.push({ role: "user", parts: [{ text: String(userMessage || "Please respond naturally.") }] });
+        }
         const res = await axios.post(
           `${GEMINI_BASE_URL}/${model}:generateContent`,
           {
+            systemInstruction: { parts: [{ text: systemPrompt }] },
             contents,
             generationConfig: {
               maxOutputTokens: maxTokens,

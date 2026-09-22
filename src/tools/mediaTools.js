@@ -57,6 +57,18 @@ function ytBaseFlags() {
   return flags;
 }
 
+function summarizeYtError(stderr, code) {
+  const lines = String(stderr || "")
+    .replace(/https?:\/\/[^\s]+/g, "[url]")
+    .replace(/--cookies\s+[^\s]+/g, "--cookies [redacted]")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^\[debug\]/i.test(line));
+  const useful = lines.slice(-1)[0] || `yt-dlp exited ${code}`;
+  return useful.slice(0, 360);
+}
+
 // yt-dlp search: query -> { title, id, url } best match.
 // Uses flat extraction (--flat-playlist --print) so search works without needing
 // a resolvable format. The old -J approach made yt-dlp try to resolve formats and
@@ -121,9 +133,13 @@ async function downloadVideo(sourceUrl, maxMB = 50) {
   return new Promise((resolve) => {
     const args = [
       ...ytBaseFlags(),
-      "-f", "bv*+ba/b",
+      // Prefer a single MP4 so public Facebook/TikTok share URLs work even
+      // when the VPS has no ffmpeg stream-merging binary.
+      "-f", "best[ext=mp4]/best",
       "--merge-output-format", "mp4",
       "--max-filesize", `${maxMB}M`,
+      "--retries", "2",
+      "--extractor-retries", "2",
       "-o", outBase + ".%(ext)s",
       "--no-playlist",
     ];
@@ -132,13 +148,15 @@ async function downloadVideo(sourceUrl, maxMB = 50) {
     if (!command) return resolve({ success: false, error: "yt-dlp unavailable" });
     const proc = spawn(command.file, commandArgs(command, args), { env: command.env, timeout: 600000 });
     proc.on("error", () => resolve({ success: false, error: "yt-dlp unavailable" }));
+    let stderr = "";
+    proc.stderr?.on("data", (chunk) => { stderr += String(chunk); });
     proc.on("close", (code) => {
       const file = fs.readdirSync(TEMP_DIR).find((f) => f.startsWith(path.basename(outBase)));
       if (code === 0 && file) {
         const fp = path.join(TEMP_DIR, file);
         return resolve({ success: true, filePath: fp, size: fs.statSync(fp).size, title: "" });
       }
-      resolve({ success: false, error: code !== 0 ? "yt-dlp exited " + code : "no video produced" });
+      resolve({ success: false, error: code !== 0 ? summarizeYtError(stderr, code) : "no video produced" });
     });
   });
 }

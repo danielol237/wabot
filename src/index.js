@@ -207,6 +207,10 @@ async function startBot() {
     auth: state,
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
+    // ARIA processes live incoming messages and persists its own session; a
+    // full linked-device history replay is unnecessary and can feed stale
+    // Signal key batches back into libsignal after reconnects.
+    syncFullHistory: false,
     // WhatsApp rejects phone-number pairing codes for some custom browser
     // identities even though Baileys successfully generates the code. Use a
     // known-compatible desktop identity for both pairing and normal sessions.

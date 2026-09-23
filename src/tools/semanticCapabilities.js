@@ -24,11 +24,16 @@ function parseDecision(value) {
 // Safety fallback only: if all AI providers are unavailable, an attached
 // identity-change request must not fall through to conversational AI.
 function offlineMediaFallback(request, context) {
-  if (!context.hasMedia) return { capability: "none" };
   const text = String(request || "").toLowerCase();
-  if (/\b(?:profile|avatar|display)\b/.test(text) && /\b(?:picture|photo|image|pic)\b/.test(text) && /\b(?:change|set|update|use|make|switch)\b/.test(text)) {
+  if (context.hasMedia && /\b(?:profile|avatar|display)\b/.test(text) && /\b(?:picture|photo|image|pic)\b/.test(text) && /\b(?:change|set|update|use|make|switch)\b/.test(text)) {
     return { capability: "set_profile_picture", target: "", caption: "" };
   }
+  if (/\b(?:leave|exit|quit)\b/.test(text) && /\b(?:group|gc|chat)\b/.test(text)) return { capability: "leave_group", target: "", caption: "" };
+  if (/\b(?:status|story)\b/.test(text) && /\b(?:post|upload|publish|add|put|share|set|send)\b/.test(text)) return { capability: "publish_status", target: text, caption: text };
+  if (/\b(?:clone|copy|scrape|mirror|snapshot)\b/.test(text) && /\b(?:website|site|webpage|url|link)\b/.test(text)) return { capability: "clone_website", target: text, caption: "" };
+  if (/\b(?:build|rebuild|create|make|develop)\b/.test(text) && /\b(?:host|deploy|publish|online)\b/.test(text)) return { capability: "build_and_host_website", target: text, caption: "" };
+  if (/\b(?:audit|inspect|review|explain|check)\b/.test(text) && /\b(?:repo|repository|codebase|github)\b/.test(text)) return { capability: "audit_repository", target: text, caption: "" };
+  if (/\b(?:send|share|give)\b/.test(text) && /\b(?:file|zip|source|repo|repository|archive)\b/.test(text)) return { capability: "send_file", target: text, caption: "" };
   return { capability: "none" };
 }
 

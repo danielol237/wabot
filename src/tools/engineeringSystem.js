@@ -38,6 +38,14 @@ function repositoryFromRequest(input, actorJid) {
   return githubCredentialVault.getWorkspaceForUser(actorJid) || null;
 }
 
+function repositoryReferenceFromRequest(input) {
+  const request = String(input || "").trim();
+  const full = request.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/);
+  if (full) return full[1];
+  const named = request.match(/\b([A-Za-z0-9_.-]+)\s+repo(?:sitory)?\b/i);
+  return named ? named[1] : null;
+}
+
 function githubToken(actorJid) {
   if (actorJid) return String(githubCredentialVault.getTokenForUser(actorJid) || "").trim();
   return String(process.env.GITHUB_TOKEN || process.env.SESSION_GITHUB_TOKEN || "").trim();
@@ -182,8 +190,8 @@ function formatProposal(proposal) {
   return `🧠 *Upgrade proposal ${proposal.id}*\n\n*Repository:* ${proposal.repository}\n*Base:* ${proposal.baseBranch}\n\n${proposal.summary}\n\n*Files in scope*\n${files}\n\n*Checks:* ${(proposal.tests || []).join(", ")}\n*Risks:* ${(proposal.risks || []).join("; ")}\n*Rollback:* ${proposal.rollback}\n\nNo files have been changed. Say *ARIA approve upgrade ${proposal.id}* to generate a branch and draft GitHub PR.`;
 }
 
-async function getRemoteFile(repository, filePath, ref) {
-  const data = await githubRequest("GET", `/contents/${filePath.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`, undefined, { repository });
+async function getRemoteFile(repository, filePath, ref, actorJid) {
+  const data = await githubRequest("GET", `/contents/${filePath.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`, undefined, { repository, actorJid });
   if (Array.isArray(data) || !data?.content) throw new Error(`GitHub did not return file content for ${filePath}.`);
   return Buffer.from(String(data.content).replace(/\n/g, ""), "base64").toString("utf8");
 }
@@ -214,7 +222,7 @@ async function createGitHubUpgrade(proposalId, senderName, actorJid) {
     const branch = `aria/${slugify(proposal.objective)}-${Date.now().toString(36)}`;
     const generatedFiles = [];
     for (const file of proposal.files) {
-      const current = await getRemoteFile(proposal.repository, file.path, proposal.baseBranch);
+      const current = await getRemoteFile(proposal.repository, file.path, proposal.baseBranch, actorJid || proposal.createdByJid);
       const content = await generateUpgradeFile(proposal.repository, file, proposal.objective, current, senderName);
       generatedFiles.push({ ...file, content, status: "generated" });
     }
@@ -347,7 +355,7 @@ async function listUserRepositories(actorJid) {
 }
 
 async function inspectUserRepository(repository, actorJid) {
-  const target = repository || githubCredentialVault.getWorkspaceForUser(actorJid);
+  const target = repository || githubCredentialVault.getWorkspaceForUser(actorJid) || repositoryName();
   if (!target) {
     const listed = await listUserRepositories(actorJid);
     if (!listed.success) return listed;
@@ -356,10 +364,33 @@ async function inspectUserRepository(repository, actorJid) {
   }
   try {
     const repo = await githubRequest("GET", "", undefined, { repository: target, actorJid });
+    const branch = repo.default_branch || "main";
+    const ref = await githubRequest("GET", `/git/ref/heads/${encodeURIComponent(branch)}`, undefined, { repository: target, actorJid });
+    const tree = ref?.object?.sha
+      ? await githubRequest("GET", `/git/trees/${ref.object.sha}?recursive=1`, undefined, { repository: target, actorJid })
+      : { tree: [] };
+    const files = (tree.tree || []).filter((entry) => entry.type === "blob" && !/(^|\/)(node_modules|\.git|data|temp|sessions)(\/|$)/i.test(entry.path));
+    const shownFiles = files.slice(0, 80).map((entry) => entry.path);
+    const counts = files.reduce((acc, entry) => {
+      const ext = path.extname(entry.path).toLowerCase() || "[no extension]";
+      acc[ext] = (acc[ext] || 0) + 1;
+      return acc;
+    }, {});
+    const keyFiles = ["README.md", "package.json", "src/index.js", "src/handlers/messageHandler.js"];
+    const keySummaries = [];
+    for (const filePath of keyFiles) {
+      if (!files.some((entry) => entry.path === filePath)) continue;
+      try {
+        const content = await getRemoteFile(target, filePath, branch, actorJid);
+        keySummaries.push(`*${filePath}*\n${clean(content, 900)}`);
+      } catch (_) {}
+    }
+    const fileList = shownFiles.length ? shownFiles.map((file) => `• ${file}`).join("\n") : "No readable source files were returned.";
+    const typeSummary = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([ext, count]) => `${ext}: ${count}`).join(", ");
     return {
       success: true,
       repository: target,
-      message: `🔎 *Repository check*\n\n*${repo.full_name || target}*${repo.private ? " 🔒" : ""}\n${repo.description || "No description provided."}\n\n• Default branch: *${repo.default_branch || "main"}*\n• Open issues: *${Number(repo.open_issues_count || 0)}*\n• Last updated: *${repo.updated_at || "unknown"}*\n\nTell me what you want changed, reviewed, or tested and I’ll use this repository.`
+      message: `🔎 *Repository audit*\n\n*${repo.full_name || target}*${repo.private ? " 🔒" : ""}\n${repo.description || "No description provided."}\n\n• Default branch: *${branch}*\n• Open issues: *${Number(repo.open_issues_count || 0)}*\n• Last updated: *${repo.updated_at || "unknown"}*\n• Readable files: *${files.length}*\n• File types: ${typeSummary || "unknown"}\n\n*Repository files* (showing ${shownFiles.length}${files.length > shownFiles.length ? ` of ${files.length}` : ""})\n${fileList}\n\n${keySummaries.length ? `*Key file excerpts*\n${keySummaries.join("\n\n")}` : "No standard key files were found."}`
     };
   } catch (error) {
     return { success: false, error: `I could not check ${target} with your GitHub credential: ${clean(error.message, 300)}` };
@@ -417,5 +448,5 @@ module.exports = {
   formatInspection,
   listProposals,
   handleEngineeringRequest,
-    _test: { safeRelativePath, normalizePlan, slugify, repositoryName, repositoryFromRequest },
+    _test: { safeRelativePath, normalizePlan, slugify, repositoryName, repositoryFromRequest, repositoryReferenceFromRequest },
 };

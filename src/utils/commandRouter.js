@@ -367,7 +367,7 @@ function detectIntent(text) {
   if (/https?:\/\/\S+/i.test(lower) && /\b(?:download|save|get|fetch|grab|send)\b/i.test(lower) && /\b(?:this|that|it|link|video|clip|reel|media)\b/i.test(lower)) return "download";
   const engineeringAction = /\b(?:check|inspect|look\s+at|review|audit|understand|explain|work(?:\s+\w+){0,2}\s+on|improve|fix|change|update|edit|modify|implement|add|remove|build|test|run|plan|propose|open|list|show|use|select|switch|connect|link|approve|verify|merge|ship|push)\b/i;
   const engineeringTarget = /\b(?:github|git\s*hub|repo(?:sitory)?|codebase|source\s*code|dashboard|android\s+companion)\b|\b(?!src\/|app\/|plugins\/|test\/|gradle\/|data\/|node_modules\/)[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i;
-  if (engineeringAction.test(lower) && engineeringTarget.test(lower) && /\b(?:my|the|this|that)\b|\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b/i.test(lower)) return "engineering";
+  if (engineeringAction.test(lower) && engineeringTarget.test(lower) && (/\b(?:my|the|this|that)\b|\b[a-z0-9_.-]+\/[a-z0-9_.-]+\b|\b[a-z0-9_.-]+\s+repo(?:sitory)?\b/i.test(lower))) return "engineering";
   const deliveryIntent = /^(?:please\s+)?(?:build|create|make|design|develop|code)\b/i.test(lower)
     && /\b(?:website|web\s*app|webpage|site|landing\s+page|portfolio|dashboard|app)\b/i.test(lower)
     && /\b(?:deploy|host|publish|online|preview|link|url|screenshot|screen\s*shot|show\s+me|send\s+me)\b/i.test(lower);
@@ -2974,6 +2974,25 @@ async function handleAIResponse(sock, msg, text, ctx) {
   const intent = detectIntent(text);
   if (intent && intentHandlers[intent]) {
     return intentHandlers[intent](sock, msg, text, ctx);
+  }
+
+  // Directly addressed operational requests are classified semantically and
+  // dispatched to bounded executors before chat AI can merely describe them.
+  if (triggeredByName(text)) {
+    try {
+      const semantic = require("../tools/semanticCapabilities");
+      const decision = await semantic.decide(text, {
+        isGroup: ctx.isGroup,
+        hasMedia: hasMedia(msg),
+        quotedText: quotedText || "",
+      });
+      if (decision.capability !== "none") {
+        return await semantic.execute(decision, { sock, msg, ctx, reply, quotedText });
+      }
+    } catch (capabilityError) {
+      error(`Semantic capability failed: ${capabilityError.message}`);
+      return reply(sock, msg, `❌ I could not complete that operation: ${String(capabilityError.message || "unknown error").slice(0, 500)}`);
+    }
   }
 
   // ── Live research: if the message asks for current/up-to-date info, run a

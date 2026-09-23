@@ -145,6 +145,16 @@ function shouldSelfMention(inputText, responseText) {
 }
 
 function sanitizeOutboundText(text) {
+  if (text && typeof text === "object") {
+    if (typeof text.message === "string" && text.message.trim()) text = text.message;
+    else if (typeof text.error === "string" && text.error.trim()) text = `❌ ${text.error}`;
+    else if (text.success === true && text.kind) text = `✅ ${text.kind} published successfully.`;
+    else if (text.success === true && text.fileName) text = `✅ File delivered: ${text.fileName}`;
+    else if (text.success === true) text = "✅ Operation completed successfully.";
+    else {
+      try { text = JSON.stringify(text, null, 2); } catch (_) { text = "The operation returned an unreadable result."; }
+    }
+  }
   return String(text || "")
     .replace(/<think\b[^>]*>[\s\S]*?(?:<\/think>|$)/gi, "")
     .replace(/<analysis\b[^>]*>[\s\S]*?(?:<\/analysis>|$)/gi, "")

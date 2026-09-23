@@ -18,6 +18,12 @@ test("central outbound sanitizer preserves ordinary WhatsApp formatting", () => 
   assert.equal(result, "*ARIA* is ready — no @tag needed.");
 });
 
+test("central outbound sanitizer serializes structured action results safely", () => {
+  assert.equal(helpers._test.sanitizeOutboundText({ message: "✅ Status uploaded." }), "✅ Status uploaded.");
+  assert.equal(helpers._test.sanitizeOutboundText({ error: "Status upload failed." }), "❌ Status upload failed.");
+  assert.doesNotMatch(helpers._test.sanitizeOutboundText({ success: true, kind: "text" }), /\[object Object\]/);
+});
+
 test("reply returns a safe failure result when WhatsApp send fails", async () => {
   const result = await helpers.reply(
     { sendMessage: async () => { throw new Error("transport unavailable"); } },

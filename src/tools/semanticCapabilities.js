@@ -21,6 +21,17 @@ function parseDecision(value) {
   } catch (_) { return null; }
 }
 
+// Safety fallback only: if all AI providers are unavailable, an attached
+// identity-change request must not fall through to conversational AI.
+function offlineMediaFallback(request, context) {
+  if (!context.hasMedia) return { capability: "none" };
+  const text = String(request || "").toLowerCase();
+  if (/\b(?:profile|avatar|display)\b/.test(text) && /\b(?:picture|photo|image|pic)\b/.test(text) && /\b(?:change|set|update|use|make|switch)\b/.test(text)) {
+    return { capability: "set_profile_picture", target: "", caption: "" };
+  }
+  return { capability: "none" };
+}
+
 async function decide(text, context = {}) {
   const request = clean(text, 1400);
   if (!request) return { capability: "none" };
@@ -38,8 +49,12 @@ Never treat a hypothetical question as an action. Use target for a URL, reposito
 
 Context: group=${Boolean(context.isGroup)}, attachedMedia=${Boolean(context.hasMedia)}, quotedText=${clean(context.quotedText, 600) || "none"}
 User request: ${request}`;
-  const response = await getAIResponse(prompt, "ARIA", [], "You are a strict action classifier. Return JSON only. Do not emit tool calls, XML, markdown, or explanations.");
-  return parseDecision(response) || { capability: "none" };
+  try {
+    const response = await getAIResponse(prompt, "ARIA", [], "You are a strict action classifier. Return JSON only. Do not emit tool calls, XML, markdown, or explanations.");
+    return parseDecision(response) || offlineMediaFallback(request, context);
+  } catch (_) {
+    return offlineMediaFallback(request, context);
+  }
 }
 
 async function mediaFromMessage(sock, msg, helpers) {

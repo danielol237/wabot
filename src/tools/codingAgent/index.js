@@ -113,7 +113,7 @@ async function planProject(request) {
     const response = await generateCodingText(`Create the complete file manifest for this product contract:\n${contractPrompt(requirements)}\n\nReturn JSON: {"files":[{"path":"relative/path","description":"purpose"}]}. Include every file needed for a complete runnable project, documentation, and the requested interactions. Keep it under ${MAX_FILES} files.`, { system: PLAN_SYSTEM, maxTokens: 4000, temperature: 0.1 });
     return { success: true, requirements, files: mandatoryFiles(request, normalizeManifest(cleanJson(response))) };
   } catch (error) {
-    return { success: true, requirements, fallback: true, providerError: error.code || "CODING_PROVIDER_ERROR", files: mandatoryFiles(request, fallback) };
+    return { success: false, requirements, fallback: false, providerError: error.code || "CODING_PROVIDER_ERROR", error: `I could not safely plan this project: ${String(error.message || error).slice(0, 700)}` };
   }
 }
 

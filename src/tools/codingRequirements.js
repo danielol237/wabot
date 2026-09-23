@@ -33,9 +33,14 @@ function inferProduct(request) {
   const features = featureWords.filter(([pattern]) => new RegExp(pattern, "i").test(lower)).map(([, label]) => label);
   if (!features.length) features.push(type === "portfolio website" ? "project showcase and contact action" : "clear primary call to action and useful content sections");
   const stack = /react|vite|next\.js|nextjs/.test(lower) ? "the requested JavaScript framework" : "accessible HTML, CSS, and JavaScript with no unnecessary dependencies";
+  const selfRequested = /\b(?:aria|yourself|your own|the companion|the bot|the assistant)\b/i.test(text);
   return {
     originalRequest: text,
     productType: type,
+    selfRequested,
+    subjectContext: selfRequested
+      ? "The product is about ARIA, the WhatsApp AI companion: a persistent Node.js service with conversational AI, shared memory, media processing, vision, coding/build workflows, GitHub integration, and authenticated WhatsApp actions. Describe only capabilities actually available in the connected runtime; never invent links, credentials, or successful actions."
+      : "Use the user's stated domain and do not substitute a generic dashboard or starter app.",
     audience: clean(audience, 180),
     features: [...new Set(features)].slice(0, 8),
     stack,
@@ -72,6 +77,7 @@ function contractPrompt(contract) {
     `Product type: ${contract.productType}`,
     `Audience: ${contract.audience}`,
     `Original request: ${contract.originalRequest}`,
+    `Subject context: ${contract.subjectContext || "Use the user's stated domain; do not substitute a generic product."}`,
     `Features: ${(contract.features || []).join("; ")}`,
     `Pages/sections: ${(contract.pagesOrSections || []).join("; ") || "infer a coherent single-page information architecture"}`,
     `Interactions: ${(contract.interactions || []).join("; ") || "wire the primary actions and navigation"}`,

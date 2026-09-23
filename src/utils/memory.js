@@ -7,7 +7,7 @@ const MEMORY_FILE = path.join(DATA_DIR, "memory.json");
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const MAX_HISTORY = 30; // a bit more headroom now that it's not wiped on restart
+const MAX_HISTORY = Number(process.env.ARIA_CHAT_HISTORY_LIMIT || 240); // a bit more headroom now that it's not wiped on restart
 
 // Load memory from disk on startup. If the file doesn't exist yet or is corrupt,
 // start fresh instead of crashing — a bad/missing memory file should never take the bot down.

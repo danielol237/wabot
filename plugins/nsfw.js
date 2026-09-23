@@ -88,9 +88,21 @@ function makeNSFWCommand(category) {
     try {
       const img = await fetchNSFWImage(category);
       if (!img?.url) return ctx.reply(`❌ *!${category}*: no live image source right now.`);
-      await sock.sendMessage(msg.key.remoteJid, { image: { url: img.url }, caption: `🔞 ${category[0].toUpperCase()}${category.slice(1)}` });
-    } catch {
-      ctx.reply("Couldn't fetch image.");
+      const response = await axios.get(img.url, {
+        responseType: "arraybuffer",
+        timeout: 20000,
+        headers: { "User-Agent": UA, Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8" },
+        maxContentLength: 12 * 1024 * 1024,
+      });
+      const contentType = String(response.headers?.["content-type"] || "").toLowerCase();
+      if (!contentType.startsWith("image/")) throw new Error("the source did not return an image");
+      await sock.sendMessage(msg.key.remoteJid, {
+        image: Buffer.from(response.data),
+        mimetype: contentType.split(";")[0] || "image/jpeg",
+        caption: `🔞 ${category[0].toUpperCase()}${category.slice(1)}`,
+      });
+    } catch (error) {
+      ctx.reply(`❌ *!${category}* could not deliver an image right now: ${String(error?.message || error).slice(0, 180)}`);
     }
   };
 }

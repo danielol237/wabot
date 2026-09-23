@@ -153,7 +153,7 @@ async function createUpgradePlan(objective, senderName, chatId, actorJid) {
   const request = clean(objective, 1200);
   if (!request) return { success: false, error: "Tell me what you want upgraded." };
   const targetRepository = repositoryFromRequest(request, actorJid);
-  if (!targetRepository) return { success: false, error: "I can handle this engineering request, but I need to know which repository it applies to. Name the repository naturally and I’ll use the connected GitHub account." };
+  if (!targetRepository) return { success: false, error: "Tell me the repository as owner/repo, or choose one first with “ARIA use my GitHub repo owner/repo”. I will not assume another user’s repository." };
   const prompt = `${request}\n\nRepository: ${targetRepository}\nAllowed paths: ${ALLOWED_PATHS.join(", ")}\nForbidden paths: ${DENIED_PATHS.join(", ")}\n\nCreate a bounded plan with at most ${MAX_FILES} files. Include exact relative paths, a summary, tests, risks, and rollback. This is a proposal only; do not write code yet.`;
   try {
     const response = await generateCodingText(prompt, { system: PLAN_PROMPT, maxTokens: 6000, temperature: 0.1 });
@@ -346,41 +346,13 @@ async function listUserRepositories(actorJid) {
   return { success: true, repositories };
 }
 
-async function resolveRepositoryReference(reference, actorJid) {
-  const value = clean(reference, 180).replace(/^repo(?:sitory)?\s+/i, "").trim();
-  if (!value) return githubCredentialVault.getWorkspaceForUser(actorJid) || null;
-  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) return value;
-  const listed = await listUserRepositories(actorJid);
-  if (!listed.success) throw new Error(listed.error);
-  const matches = listed.repositories.filter((repo) => repo.name.split("/").pop().toLowerCase() === value.toLowerCase());
-  if (matches.length === 1) {
-    githubCredentialVault.setWorkspaceForUser(actorJid, matches[0].name);
-    return matches[0].name;
-  }
-  if (matches.length > 1) throw new Error(`More than one repository is named ${value}. Use owner/repo so I can select the right one.`);
-  throw new Error(`I could not find a repository named ${value} in the connected GitHub account.`);
-}
-
-function repositoryReferenceFromRequest(input) {
-  const raw = clean(input, 1400);
-  const full = raw.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/)?.[1];
-  if (full) return full;
-  const afterRepo = raw.match(/\b(?:repo(?:sitory)?|codebase)\s+([A-Za-z0-9_.-]+)\b/i)?.[1];
-  if (afterRepo && !/^(?:repo|repository|codebase|github|my|the|this|that|and|then|only|please|now|about|for)$/i.test(afterRepo)) return afterRepo;
-  const beforeRepo = raw.match(/\b([A-Za-z0-9_.-]+)\s+(?:repo(?:sitory)?|codebase)\b/i)?.[1];
-  if (beforeRepo && !/^(?:repo|repository|codebase|github|my|the|this|that|and|then|only|please|now|about|for)$/i.test(beforeRepo)) return beforeRepo;
-  return null;
-}
-
 async function inspectUserRepository(repository, actorJid) {
-  let target;
-  try { target = await resolveRepositoryReference(repository, actorJid); }
-  catch (error) { return { success: false, error: clean(error.message, 300) }; }
+  const target = repository || githubCredentialVault.getWorkspaceForUser(actorJid);
   if (!target) {
     const listed = await listUserRepositories(actorJid);
     if (!listed.success) return listed;
     const lines = listed.repositories.map((repo) => `• ${repo.name}${repo.private ? " 🔒" : ""}`).join("\n") || "No repositories were returned for this GitHub account.";
-    return { success: true, message: `📚 I found your GitHub repositories, but no active workspace is selected yet.\n\n${lines}\n\nI can inspect, audit, review, test, or modify one of them. Name the repository and the outcome you want in your own words.` };
+    return { success: true, message: `📚 I found your GitHub repositories, but you have not selected an active workspace yet.\n\n${lines}\n\nTell me “ARIA use my GitHub repo owner/repo” and I’ll inspect that repository.` };
   }
   try {
     const repo = await githubRequest("GET", "", undefined, { repository: target, actorJid });
@@ -415,11 +387,13 @@ async function handleEngineeringRequest(rawInput, senderName, chatId, actorJid) 
     const result = await listUserRepositories(actorJid);
     if (!result.success) return result;
     const lines = result.repositories.map((repo) => `• ${repo.name}${repo.private ? " 🔒" : ""}`).join("\n") || "No repositories were returned for this GitHub account.";
-    return { success: true, message: `📚 *Your GitHub repositories*\n\n${lines}\n\nI can inspect, audit, review, test, or modify any of these. Name the repository and the outcome you want in your own words.` };
+    return { success: true, message: `📚 *Your GitHub repositories*\n\n${lines}\n\nSay “ARIA use my GitHub repo owner/repo” to select one.` };
   }
-  if (/^(?:audit|review|check|inspect|look\s+at|show\s+me)\b/i.test(raw)) {
-    return inspectUserRepository(repositoryReferenceFromRequest(raw), actorJid);
+  if (/^(?:(?:please\s+)?(?:audit|review|inspect|check|look\s+at|show\s+me|explain))\b[\s\S]*\b(?:github\s+)?repo(?:sitory)?\b/i.test(raw)) {
+    const explicit = raw.match(/\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/)?.[1];
+    return inspectUserRepository(explicit, actorJid);
   }
+  if (/^(?:(?:please\s+)?(?:audit|review|inspect|check|look\s+at|show\s+me))\s+(?:my\s+)?(?:github\s+)?repo(?:sitory)?$/i.test(raw)) return inspectUserRepository(null, actorJid);
   const workspaceRequest = raw.match(/^(?:use|select|switch(?:\s+to)?)\s+(?:my\s+)?(?:github\s+)?(?:repo(?:sitory)?\s+)?([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/i);
   if (workspaceRequest) return selectUserRepository(workspaceRequest[1], actorJid);
   if (/^(?:clear|forget|remove)\s+(?:my\s+)?(?:active\s+)?(?:github\s+)?workspace$/i.test(raw)) {
@@ -443,5 +417,5 @@ module.exports = {
   formatInspection,
   listProposals,
   handleEngineeringRequest,
-    _test: { safeRelativePath, normalizePlan, slugify, repositoryName, repositoryFromRequest, repositoryReferenceFromRequest },
+    _test: { safeRelativePath, normalizePlan, slugify, repositoryName, repositoryFromRequest },
 };

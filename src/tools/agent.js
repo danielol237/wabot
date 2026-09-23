@@ -26,8 +26,13 @@ Respond ONLY with a numbered list of steps, one per line, like:
     .slice(0, MAX_STEPS);
 
   if (steps.length === 0) {
-    // Planning failed — just answer directly instead of erroring out
-    return await getAIResponse(userRequest, senderName, []);
+    const direct = await getAIResponse(
+      `Answer the user's request directly. Do not output XML, JSON tool calls, pseudo-code commands, or claims that a tool was executed. If the request requires a connected capability that is unavailable, say exactly what is unavailable.\n\nUser request: ${userRequest}`,
+      senderName,
+      [],
+      "You are ARIA. Return only the user-facing WhatsApp answer. Never emit <tool_call>, <arg_key>, or internal planning syntax."
+    );
+    return String(direct || "I could not complete that request safely.").replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "").trim() || "I could not complete that request safely.";
   }
 
   let gatheredInfo = "";

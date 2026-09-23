@@ -208,12 +208,14 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
   // Operational requests attached to media must be handled before the visual
   // conversation branch below. Otherwise a request such as “use this for my
   // status/profile” is answered by vision AI and never reaches the executor.
-  if (hasNameTrigger && text) {
+  const operationalMedia = hasMedia(msg) || Boolean(findQuotedMediaReference(msg));
+  const directOperationalRequest = hasNameTrigger || (checkOwner(senderJid) && (isReplyToBot || operationalMedia));
+  if (directOperationalRequest && text) {
     try {
       const semantic = require("../tools/semanticCapabilities");
       const decision = await semantic.decide(text, {
         isGroup,
-        hasMedia: hasMedia(msg),
+        hasMedia: operationalMedia,
         quotedText: getQuotedMessageText(msg) || "",
       });
       if (decision.capability !== "none") {

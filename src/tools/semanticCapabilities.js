@@ -4,7 +4,7 @@ const { getAIResponse } = require("./ai");
 const capabilities = require("./whatsappCapabilities");
 
 const ROOT = path.resolve(__dirname, "../..");
-const ALLOWED = new Set(["send_file", "clone_website", "publish_status", "leave_group", "set_profile_picture", "audit_repository", "none"]);
+const ALLOWED = new Set(["send_file", "clone_website", "build_and_host_website", "publish_status", "leave_group", "set_profile_picture", "audit_repository", "none"]);
 
 function clean(value, max = 500) {
   return String(value || "").replace(/[\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
@@ -28,6 +28,7 @@ async function decide(text, context = {}) {
 Allowed capabilities:
 - send_file: send a local file, source archive, repository archive, or generated artifact into this chat
 - clone_website: create a downloadable local snapshot of a public website and send it
+- build_and_host_website: use a public reference or user brief to build a new verified website, deploy it, and report the real URL; if deployment is unavailable, report that truthfully
 - publish_status: publish text, an image, or a video to the bot's WhatsApp status
 - leave_group: make the bot leave the current WhatsApp group
 - set_profile_picture: change the bot's WhatsApp profile picture using the attached or quoted image
@@ -56,8 +57,8 @@ async function mediaFromMessage(sock, msg, helpers) {
 async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
   const target = decision.target || "";
   if (decision.capability === "none") return false;
-  if (["leave_group", "publish_status", "set_profile_picture"].includes(decision.capability) && !require("../utils/permissions").isOwner(ctx.senderJid)) {
-    return reply(sock, msg, "🔐 Only ARIA's owner can change her WhatsApp status, profile picture, or group membership.");
+  if (["leave_group", "publish_status", "set_profile_picture", "build_and_host_website"].includes(decision.capability) && !require("../utils/permissions").isOwner(ctx.senderJid)) {
+    return reply(sock, msg, "🔐 Only ARIA's owner can change her WhatsApp status, profile picture, group membership, or deploy a website.");
   }
   if (decision.capability === "leave_group") {
     if (!ctx.isGroup) return reply(sock, msg, "I can only leave the group I am currently inside.");
@@ -83,6 +84,16 @@ async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
     if (!url) return reply(sock, msg, "Send the public website link you want copied.");
     const file = await capabilities.snapshotWebsite(url);
     await capabilities.sendDocument(sock, ctx.chatId, { ...file, caption: `Website snapshot from ${url}` }, msg);
+    return true;
+  }
+  if (decision.capability === "build_and_host_website") {
+    const url = capabilities.extractUrl(target) || capabilities.extractUrl(ctx.text);
+    const source = url
+      ? `Build a new website informed by this public reference URL: ${url}. Preserve the useful visible structure and purpose, but do not claim to copy private or authenticated functionality. Original request: ${ctx.text}`
+      : ctx.text;
+    const router = require("../utils/commandRouter");
+    if (typeof router.handleDeliver !== "function") return reply(sock, msg, "❌ The verified website delivery workflow is unavailable in this build.");
+    await router.handleDeliver(sock, msg, source, ctx);
     return true;
   }
   if (decision.capability === "set_profile_picture") {

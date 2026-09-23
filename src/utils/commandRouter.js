@@ -2970,12 +2970,6 @@ async function handleAIResponse(sock, msg, text, ctx) {
 
   // (Reactions now handled by the humanizer layer — mood-appropriate)
   
-  // Check intent for natural language triggers
-  const intent = detectIntent(text);
-  if (intent && intentHandlers[intent]) {
-    return intentHandlers[intent](sock, msg, text, ctx);
-  }
-
   // Directly addressed operational requests are classified semantically and
   // dispatched to bounded executors before chat AI can merely describe them.
   if (triggeredByName(text)) {
@@ -2993,6 +2987,13 @@ async function handleAIResponse(sock, msg, text, ctx) {
       error(`Semantic capability failed: ${capabilityError.message}`);
       return reply(sock, msg, `❌ I could not complete that operation: ${String(capabilityError.message || "unknown error").slice(0, 500)}`);
     }
+  }
+
+  // Existing intent handlers remain available for compatibility, but only
+  // after semantic capability dispatch has had the first opportunity to act.
+  const intent = detectIntent(text);
+  if (intent && intentHandlers[intent]) {
+    return intentHandlers[intent](sock, msg, text, ctx);
   }
 
   // ── Live research: if the message asks for current/up-to-date info, run a
@@ -3216,6 +3217,7 @@ async function handlePluginDisable(sock, msg, args, context) {
 
 module.exports = {
   routeMessage,
+  handleDeliver,
   registerCommand,
   commands,
   detectIntent,

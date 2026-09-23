@@ -56,6 +56,9 @@ async function mediaFromMessage(sock, msg, helpers) {
 async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
   const target = decision.target || "";
   if (decision.capability === "none") return false;
+  if (["leave_group", "publish_status", "set_profile_picture"].includes(decision.capability) && !require("../utils/permissions").isOwner(ctx.senderJid)) {
+    return reply(sock, msg, "🔐 Only ARIA's owner can change her WhatsApp status, profile picture, or group membership.");
+  }
   if (decision.capability === "leave_group") {
     if (!ctx.isGroup) return reply(sock, msg, "I can only leave the group I am currently inside.");
     await capabilities.leaveGroup(sock, ctx.chatId);

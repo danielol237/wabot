@@ -205,6 +205,27 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     await humanDelay(sock, chatId, senderJid, text.length + 1);
   }
 
+  // Operational requests attached to media must be handled before the visual
+  // conversation branch below. Otherwise a request such as “use this for my
+  // status/profile” is answered by vision AI and never reaches the executor.
+  if (hasNameTrigger && text) {
+    try {
+      const semantic = require("../tools/semanticCapabilities");
+      const decision = await semantic.decide(text, {
+        isGroup,
+        hasMedia: hasMedia(msg),
+        quotedText: getQuotedMessageText(msg) || "",
+      });
+      if (decision.capability !== "none") {
+        await semantic.execute(decision, { sock, msg, ctx: context, reply, quotedText: getQuotedMessageText(msg) || "" });
+        return;
+      }
+    } catch (capabilityError) {
+      await reply(sock, msg, `❌ I could not complete that operation: ${String(capabilityError.message || "unknown error").slice(0, 500)}`);
+      return;
+    }
+  }
+
   // ── STICKER AUTO-CREATE (attached or replied image/GIF/video) ──
   // Try this before generic file analysis. If no media is attached or quoted,
   // leave the message for commandRouter so it can return its normal guidance.

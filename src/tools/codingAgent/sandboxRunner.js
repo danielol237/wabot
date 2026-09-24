@@ -5,8 +5,34 @@ const { spawn, execFileSync } = require("child_process");
 
 try { require("dotenv").config(); } catch (_) {}
 
-function dockerAvailable() {
-  try { execFileSync("docker", ["version", "--format", "{{.Server.Version}}"], { stdio: "ignore", timeout: 4000 }); return true; } catch (_) { return false; }
+let cachedDockerAvailable = null;
+
+function dockerAvailable(forceRefresh = false) {
+  if (cachedDockerAvailable !== null && !forceRefresh) return cachedDockerAvailable;
+  try {
+    execFileSync("docker", ["version", "--format", "{{.Server.Version}}"], { stdio: "ignore", timeout: 4000 });
+  } catch (_) {
+    cachedDockerAvailable = false;
+    return false;
+  }
+
+  // If the primary sandbox image exists locally, verify that container execution works.
+  // Testing only when local avoids network pull delays when the image is not yet cached.
+  try {
+    execFileSync("docker", ["image", "inspect", "node:22-slim"], { stdio: "ignore", timeout: 2000 });
+    try {
+      execFileSync("docker", ["run", "--rm", "node:22-slim", "node", "-e", "process.exit(0)"], { stdio: "ignore", timeout: 4000 });
+      cachedDockerAvailable = true;
+    } catch (_) {
+      // Image exists locally, but container execution failed (e.g. unprivileged overlayfs issue).
+      cachedDockerAvailable = false;
+    }
+  } catch (_) {
+    // Image is not pre-pulled; rely on docker version check.
+    cachedDockerAvailable = true;
+  }
+
+  return cachedDockerAvailable;
 }
 
 function appendOutput(state, chunk) {

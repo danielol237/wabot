@@ -10,7 +10,7 @@ test("coding-agent package verification is sandboxed or explicitly refuses unsaf
   const previous = process.env.ARIA_ALLOW_UNSANDBOXED_BUILDS;
   delete process.env.ARIA_ALLOW_UNSANDBOXED_BUILDS;
   try {
-    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ scripts: { build: "node -e \"process.stdout.write('ok')\"" } }));
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "aria-sandbox-fixture", version: "1.0.0", scripts: { build: "node -e \"process.stdout.write('ok')\"" } }));
     const result = await sandbox.verifyPackageInSandbox(dir);
     if (sandbox.dockerAvailable()) assert.equal(result.success, true, result.error);
     else assert.match(result.error, /Docker sandbox is unavailable/);

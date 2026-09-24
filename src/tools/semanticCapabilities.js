@@ -2,27 +2,43 @@ const path = require("path");
 const fs = require("fs");
 const { getAIResponse } = require("./ai");
 const capabilities = require("./whatsappCapabilities");
+const mcpRegistry = require("./mcpServers");
 
 const ROOT = path.resolve(__dirname, "../..");
-const ALLOWED = new Set(["send_file", "clone_website", "build_and_host_website", "publish_status", "leave_group", "set_profile_picture", "audit_repository", "none"]);
+const ALLOWED = new Set(["send_file", "clone_website", "build_and_host_website", "publish_status", "leave_group", "set_profile_picture", "github_engineering", "list_capabilities", "use_connected_tool", "connect_app", "none"]);
+const MAX_TOOLS_IN_PROMPT = 40;
 
 function clean(value, max = 500) {
   return String(value || "").replace(/[\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-function parseDecision(value) {
+// liveTools is passed in (not re-fetched) so parsing always validates against
+// the exact list the model was actually shown this round — never a stale or
+// hypothetical one.
+function parseDecision(value, liveTools = []) {
   const text = String(value || "").replace(/```json|```/gi, "").trim();
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start < 0 || end <= start) return null;
-  try {
-    const parsed = JSON.parse(text.slice(start, end + 1));
-    return ALLOWED.has(parsed.capability) ? { capability: parsed.capability, target: clean(parsed.target, 700), caption: clean(parsed.caption, 500) } : null;
-  } catch (_) { return null; }
+  let parsed;
+  try { parsed = JSON.parse(text.slice(start, end + 1)); } catch (_) { return null; }
+  if (!ALLOWED.has(parsed.capability)) return null;
+  if (parsed.capability === "use_connected_tool") {
+    // Never call a tool the model merely claims exists — only dispatch when
+    // the name matches something tools/list actually returned this round.
+    const match = liveTools.find((tool) => tool.name === parsed.tool && (!parsed.server || tool.server === parsed.server));
+    if (!match) return null;
+    const args = parsed.arguments && typeof parsed.arguments === "object" && !Array.isArray(parsed.arguments) ? parsed.arguments : {};
+    return { capability: "use_connected_tool", server: match.server, tool: match.name, arguments: args, target: clean(parsed.target, 700) };
+  }
+  return { capability: parsed.capability, target: clean(parsed.target, 700), caption: clean(parsed.caption, 500) };
 }
 
 // Safety fallback only: if all AI providers are unavailable, an attached
-// identity-change request must not fall through to conversational AI.
+// identity-change request must not fall through to conversational AI. This
+// never sees live MCP tools (it has no model call to describe them to), so
+// it only ever recognizes the fixed built-in actions — by design, a narrower
+// net than the AI path above, not a replacement for it.
 function offlineMediaFallback(request, context) {
   const text = String(request || "").toLowerCase();
   if (context.hasMedia && /\b(?:profile|avatar|display)\b/.test(text) && /\b(?:picture|photo|image|pic)\b/.test(text) && /\b(?:change|set|update|use|make|switch)\b/.test(text)) {
@@ -32,15 +48,27 @@ function offlineMediaFallback(request, context) {
   if (/\b(?:status|story)\b/.test(text) && /\b(?:post|upload|publish|add|put|share|set|send)\b/.test(text)) return { capability: "publish_status", target: text, caption: text };
   if (/\b(?:clone|copy|scrape|mirror|snapshot)\b/.test(text) && /\b(?:website|site|webpage|url|link)\b/.test(text)) return { capability: "clone_website", target: text, caption: "" };
   if (/\b(?:build|rebuild|create|make|develop)\b/.test(text) && /\b(?:host|deploy|publish|online)\b/.test(text)) return { capability: "build_and_host_website", target: text, caption: "" };
-  if (/\b(?:audit|inspect|review|explain|check)\b/.test(text) && /\b(?:repo|repository|codebase|github)\b/.test(text)) return { capability: "audit_repository", target: text, caption: "" };
+  if (/\b(?:audit|inspect|review|explain|check|plan|approve|verify|merge)\b/.test(text) && /\b(?:repo|repository|codebase|github|upgrade)\b/.test(text)) return { capability: "github_engineering", target: text, caption: "" };
   if (/\b(?:send|share|give)\b/.test(text) && /\b(?:file|zip|source|repo|repository|archive)\b/.test(text)) return { capability: "send_file", target: text, caption: "" };
+  if (/\b(?:what|which)\b.*\b(?:can you|are you able|do you)\b/.test(text) || /\byour\s+(?:capabilities|tools|skills|abilities)\b/.test(text)) return { capability: "list_capabilities", target: "", caption: "" };
   return { capability: "none" };
 }
 
 async function decide(text, context = {}) {
   const request = clean(text, 1400);
   if (!request) return { capability: "none" };
-  const prompt = `Classify the user's direct request into exactly one capability. Return JSON only: {"capability":"...","target":"...","caption":"..."}.
+  // Composio tools are per-user (each WhatsApp user's own connected
+  // accounts, the same per-individual model githubOAuth.js already uses for
+  // GitHub) — so the live tool list depends on WHO is asking, not just
+  // whether Composio is configured at all.
+  const actorJid = context.senderJid || "";
+  let liveTools = [];
+  if (actorJid) { try { liveTools = await mcpRegistry.listAllTools(actorJid); } catch (_) {} }
+  const toolLines = liveTools.slice(0, MAX_TOOLS_IN_PROMPT).map((tool) => `- ${tool.server}.${tool.name}: ${clean(tool.description, 140)}`).join("\n");
+  const toolSection = liveTools.length
+    ? `\n\nThis user's own live connected tools — use capability "use_connected_tool" with the exact "server" and "tool" values shown, plus an "arguments" object matching what that tool needs, whenever one of these genuinely fits the request better than the fixed capabilities above (never invent a server/tool name that isn't listed here):\n${toolLines}${liveTools.length > MAX_TOOLS_IN_PROMPT ? `\n(+${liveTools.length - MAX_TOOLS_IN_PROMPT} more not shown this round)` : ""}`
+    : "";
+  const prompt = `Classify the user's direct request into exactly one capability. Return JSON only: {"capability":"...","target":"...","caption":"...","server":"...","tool":"...","arguments":{}}.
 Allowed capabilities:
 - send_file: send a local file, source archive, repository archive, or generated artifact into this chat
 - clone_website: create a downloadable local snapshot of a public website and send it
@@ -48,15 +76,18 @@ Allowed capabilities:
 - publish_status: publish text, an image, or a video to the bot's WhatsApp status
 - leave_group: make the bot leave the current WhatsApp group
 - set_profile_picture: change the bot's WhatsApp profile picture using the attached or quoted image
-- audit_repository: inspect the user's connected private repository and explain its files and purpose
+- github_engineering: anything about the user's connected GitHub repository or ARIA's engineering system — auditing/reviewing/explaining a repo, listing repos, switching the active repo, planning/proposing/building a code change, or approving/verifying/merging a pending upgrade
+- list_capabilities: the user is asking what you can do, or asking you to list your tools/abilities
+- connect_app: the user wants to connect/link/authorize a specific outside app or service (Gmail, Slack, Notion, Calendar, etc.) to their own account with ARIA — put the app/service name in target
+- use_connected_tool: the request is best served by one of this user's own live connected tools listed below
 - none: ordinary conversation or a request that is not one of these operations
-Never treat a hypothetical question as an action. Use target for a URL, repository name, file name, or requested description. Use caption only for status text.
+Never treat a hypothetical question as an action. Use target for a URL, repository name, upgrade id, file/app/service name, or the request itself when relevant. Use caption only for status text. Only use a "server"/"tool" pair that appears verbatim in the live tools list below — never invent one.
 
 Context: group=${Boolean(context.isGroup)}, attachedMedia=${Boolean(context.hasMedia)}, quotedText=${clean(context.quotedText, 600) || "none"}
-User request: ${request}`;
+User request: ${request}${toolSection}`;
   try {
     const response = await getAIResponse(prompt, "ARIA", [], "You are a strict action classifier. Return JSON only. Do not emit tool calls, XML, markdown, or explanations.");
-    return parseDecision(response) || offlineMediaFallback(request, context);
+    return parseDecision(response, liveTools) || offlineMediaFallback(request, context);
   } catch (_) {
     return offlineMediaFallback(request, context);
   }
@@ -74,20 +105,69 @@ async function mediaFromMessage(sock, msg, helpers) {
   return null;
 }
 
+// Built fresh each call (not hardcoded prose) so it always reflects what's
+// actually wired up right now for THIS user specifically — Composio tools
+// are per-user, so what shows here depends on what actorJid has connected,
+// the same way one person's GitHub token never shows up for another.
+async function describeCapabilities(actorJid) {
+  const liveTools = actorJid ? await mcpRegistry.listAllTools(actorJid).catch(() => []) : [];
+  const byServer = {};
+  for (const tool of liveTools) (byServer[tool.server] = byServer[tool.server] || []).push(tool.name);
+  const connectedLines = Object.entries(byServer)
+    .map(([server, names]) => `• *${server}*: ${names.slice(0, 12).join(", ")}${names.length > 12 ? ` (+${names.length - 12} more)` : ""}`)
+    .join("\n");
+  const composioHint = mcpRegistry.isConfigured()
+    ? (connectedLines ? `Your connected tools (live, via Composio):\n${connectedLines}` : "Composio is available, but you have not connected any apps yet — say something like \"connect my Gmail\" and I'll send you a link.")
+    : "No external app connections (Composio) are set up on this bot yet.";
+  return `🧩 *What I can actually do for you right now*\n\nBuilt in: send files, snapshot/clone a public website, build + host a new website, post to WhatsApp status, leave a group, change my profile picture, and work with your connected GitHub repo (audit, plan, approve, verify, merge upgrades) — that's your own GitHub, connected with your own link, never shared with anyone else.\n\n${composioHint}\n\nJust ask in plain language — I'll work out which of these fits, you don't need exact phrasing or a command.`;
+}
+
 async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
   const target = decision.target || "";
+  const actorJid = ctx.senderJid;
   if (decision.capability === "none") return false;
-  if (["leave_group", "publish_status", "set_profile_picture", "build_and_host_website"].includes(decision.capability) && !require("../utils/permissions").isOwner(ctx.senderJid)) {
-    return reply(sock, msg, "🔐 Only ARIA's owner can change her WhatsApp status, profile picture, group membership, or deploy a website.");
+  // Composio tools and connections are per-user (this user's own connected
+  // accounts, looked up by their own actorJid) — NOT blanket owner-gated,
+  // the same reasoning github_engineering below already uses. The bot-wide
+  // actions (status, pfp, group membership, deploying a shared website)
+  // stay owner-only because they affect ARIA's one shared WhatsApp identity.
+  if (["leave_group", "publish_status", "set_profile_picture", "build_and_host_website"].includes(decision.capability) && !require("../utils/permissions").isOwner(actorJid)) {
+    return reply(sock, msg, "🔐 Only ARIA's owner can change her WhatsApp status, profile picture, group membership, or deploy a shared website.");
   }
   if (decision.capability === "leave_group") {
     if (!ctx.isGroup) return reply(sock, msg, "I can only leave the group I am currently inside.");
     await capabilities.leaveGroup(sock, ctx.chatId);
     return true;
   }
-  if (decision.capability === "audit_repository") {
-    const result = await require("./engineeringSystem").handleEngineeringRequest(`audit ${target || "my repository"}`, ctx.senderName, ctx.chatId, ctx.senderJid);
-    await reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Repository audit completed."));
+  if (decision.capability === "list_capabilities") {
+    return reply(sock, msg, await describeCapabilities(actorJid));
+  }
+  if (decision.capability === "connect_app") {
+    if (!mcpRegistry.isConfigured()) return reply(sock, msg, "❌ External app connections (Composio) aren't set up on this bot yet.");
+    if (!target) return reply(sock, msg, "Which app do you want to connect — e.g. \"connect my Gmail\"?");
+    try {
+      const linkMessage = await mcpRegistry.requestConnectLink(actorJid, target);
+      return reply(sock, msg, `🔗 ${linkMessage}`);
+    } catch (error) {
+      return reply(sock, msg, `❌ I couldn't start connecting ${target}: ${clean(error.message, 300)}`);
+    }
+  }
+  if (decision.capability === "use_connected_tool") {
+    try {
+      const result = await mcpRegistry.callTool(actorJid, decision.server, decision.tool, decision.arguments || {});
+      if (result.isError) return reply(sock, msg, `❌ ${decision.server}.${decision.tool} reported an error: ${result.text || "no details given"}`);
+      return reply(sock, msg, result.text || `✅ ${decision.tool} ran, but returned no readable output.`);
+    } catch (error) {
+      return reply(sock, msg, `❌ I couldn't reach ${decision.server}.${decision.tool}: ${clean(error.message, 300)}`);
+    }
+  }
+  if (decision.capability === "github_engineering") {
+    // engineeringSystem does its own per-user GitHub-credential and
+    // per-proposal ownership checks (each upgrade is scoped to whoever
+    // created it, using their own connected token) — that per-user model is
+    // deliberately NOT collapsed into a blanket owner-only gate here.
+    const result = await require("./engineeringSystem").handleEngineeringRequest(target || "audit my repository", ctx.senderName, ctx.chatId, ctx.senderJid);
+    await reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Done."));
     return true;
   }
   if (decision.capability === "send_file") {
@@ -141,4 +221,4 @@ async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
   return false;
 }
 
-module.exports = { decide, execute, _test: { parseDecision, ALLOWED } };
+module.exports = { decide, execute, describeCapabilities, _test: { parseDecision, ALLOWED } };

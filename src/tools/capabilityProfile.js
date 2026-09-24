@@ -15,12 +15,12 @@ function runtimeStatus() {
   try { media = require("../utils/mediaRuntime").inspectYtDlp(); } catch (_) { media = { available: false, error: "media runtime unavailable" }; }
   const healthResults = health?.results || [];
   const healthy = healthResults.filter((item) => item.ok).map((item) => item.name);
-  const keyed = ["OPENROUTER_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "CEREBRAS_API_KEY"].filter(configured);
+  const keyed = ["GEMINI_API_KEY", "MISTRAL_API_KEY", "AGNES_API_KEY", "GROQ_API_KEY"].filter(configured);
   const value = {
     healthyProviders: healthy,
     configuredProviders: keyed,
     ytDlp: media,
-    visionReady: configured("ZHIPU_API_KEY") || configured("GROQ_API_KEY") || configured("OPENROUTER_API_KEY"),
+    visionReady: configured("GEMINI_API_KEY") || configured("MISTRAL_API_KEY") || configured("AGNES_API_KEY") || configured("ZHIPU_API_KEY") || configured("GROQ_API_KEY"),
     vercelReady: configured("VERCEL_TOKEN"),
     webReady: configured("TAVILY_API_KEY") || configured("BRAVE_API_KEY"),
     environment,
@@ -45,7 +45,7 @@ function getCapabilityProfile() {
     ],
     conditional: [
       providerLabel,
-      `${runtime.visionReady ? "visual analysis has a configured provider" : "visual analysis needs ZHIPU_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY"}`,
+      `${runtime.visionReady ? "visual analysis has a configured provider" : "visual analysis needs GEMINI_API_KEY, MISTRAL_API_KEY, AGNES_API_KEY, ZHIPU_API_KEY, or GROQ_API_KEY"}`,
       `${runtime.ytDlp.available ? `media download runtime ready (${runtime.ytDlp.version || "yt-dlp"})` : "media download runtime is unavailable until yt-dlp is installed"}`,
       `${runtime.vercelReady ? "Vercel deployment credential is configured" : "Vercel hosting needs VERCEL_TOKEN"}`,
       `${runtime.webReady ? "live web search is configured" : "live web search needs TAVILY_API_KEY or BRAVE_API_KEY"}`,

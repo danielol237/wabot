@@ -246,7 +246,7 @@ function collectData() {
   try { const hh = tryLoad("./tools/household"); households = hh && hh.listHouseholds ? hh.listHouseholds() : []; } catch (_) {}
   const providerConfig = tryLoad("./utils/providerConfig");
   const providerStatuses = providerConfig?.listStatus ? providerConfig.listStatus() : [];
-  const aiKeys = providerStatuses.length ? providerStatuses.map((item) => item.key) : ["OPENROUTER_API_KEY","GROQ_API_KEY","CEREBRAS_API_KEY","GEMINI_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"];
+  const aiKeys = providerStatuses.length ? providerStatuses.map((item) => item.key) : ["GEMINI_API_KEY","MISTRAL_API_KEY","AGNES_API_KEY","GROQ_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"];
   const keysSet = providerStatuses.length ? providerStatuses.filter((item) => item.configured).length : aiKeys.filter((k) => process.env[k]).length;
   let codingStatus = null;
   try { codingStatus = require("./tools/codingProvider").providerStatus(); } catch (_) {}

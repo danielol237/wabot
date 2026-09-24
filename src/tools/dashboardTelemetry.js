@@ -105,8 +105,9 @@ function liveStatus() {
   const errs = telemetry.events.filter((e) => e.type === "error" && e.t >= Date.now() - 5 * 60000).length;
 
   // Primary + fallback AI providers (best-effort from env order).
-  const order = ["CEREBRAS", "GEMINI", "GROQ", "OPENROUTER"];
-  const enabled = order.filter((k) => process.env[k + "_API_KEY"]);
+  const orderStr = String(process.env.AI_PROVIDER_ORDER || "gemini,mistral,agnes,groq,minimax").toLowerCase();
+  const configuredOrder = orderStr.split(",").map((s) => s.trim()).filter(Boolean);
+  const enabled = configuredOrder.filter((k) => process.env[k.toUpperCase() + "_API_KEY"]);
   const primary = (enabled[0] || "none").toLowerCase();
   const fallback = (enabled[1] || "none").toLowerCase();
 

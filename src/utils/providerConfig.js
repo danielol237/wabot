@@ -2,12 +2,12 @@
 // at call time so a process restart is the only required refresh after Render edits.
 
 const PROVIDERS = Object.freeze([
-  { id: "openrouter", label: "OpenRouter", key: "OPENROUTER_API_KEY", aliases: ["OPENROUTER_KEY", "OPEN_ROUTER_API_KEY"], role: "chat fallback, coding, vision" },
+  { id: "gemini", label: "Gemini", key: "GEMINI_API_KEY", aliases: ["GOOGLE_GEMINI_API_KEY"], role: "primary chat, coding, vision" },
+  { id: "mistral", label: "Mistral", key: "MISTRAL_API_KEY", aliases: [], role: "chat, coding, vision fallback" },
+  { id: "agnes", label: "Agnes AI", key: "AGNES_API_KEY", aliases: [], role: "chat, vision fallback" },
   { id: "groq", label: "Groq", key: "GROQ_API_KEY", aliases: [], role: "chat, vision, transcription" },
-  { id: "cerebras", label: "Cerebras", key: "CEREBRAS_API_KEY", aliases: [], role: "chat" },
-  { id: "gemini", label: "Gemini", key: "GEMINI_API_KEY", aliases: ["GOOGLE_GEMINI_API_KEY"], role: "chat and coding" },
-  { id: "zai", label: "Z.AI", key: "ZHIPU_API_KEY", aliases: ["ZAI_API_KEY"], role: "vision and media" },
   { id: "minimax", label: "MiniMax", key: "MINIMAX_API_KEY", aliases: [], role: "media and optional chat" },
+  { id: "zai", label: "Z.AI", key: "ZHIPU_API_KEY", aliases: ["ZAI_API_KEY"], role: "vision and media" },
   { id: "tavily", label: "Tavily", key: "TAVILY_API_KEY", aliases: [], role: "web search" },
   { id: "brave", label: "Brave Search", key: "BRAVE_API_KEY", aliases: [], role: "web search fallback" },
   { id: "elevenlabs", label: "ElevenLabs", key: "ELEVENLABS_API_KEY", aliases: [], role: "text to speech" },

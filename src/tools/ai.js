@@ -33,31 +33,30 @@ function providerErrorMessage(error, fallback) {
 const AI_PROVIDER_TIMEOUT_MS = Math.max(5000, Math.min(Number(process.env.AI_PROVIDER_TIMEOUT_MS) || 20000, 60000));
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY, timeout: AI_PROVIDER_TIMEOUT_MS }) : null;
 
-// Gemini's free tier: ~1,500 requests/day, 1M token context, no credit card.
-// We call Google's NATIVE REST API (generateContent) because the newer
-// AQ.Ab8... OAuth-style API keys only work on the native endpoint, not the
-// OpenAI-compatible wrapper. The key is passed via the x-goog-api-key header.
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-// Keep this list on currently supported Google API model IDs. Update it from
-// Google's model catalogue before a model retirement reaches production.
-const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
-// Groq's free tier caps total tokens-per-minute (prompt + history + response) at
-// 8000 for some models, and Groq retires models without much notice — so this is
-// a fallback chain (primary → next) and Groq gets a safer, lower token cap.
-// Hoisted here (audit #24) instead of re-created inside the hot path.
-const GROQ_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
-// Free OpenRouter models rate-limit hard (shared quota), so keep a longer chain
-// so a rate-limited model falls through to the next one. Hoisted per audit #24.
-const OPENROUTER_MODELS = ["openrouter/free"];
+function getGeminiModels() {
+  const custom = String(process.env.GEMINI_MODEL || "").trim();
+  const defaults = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+  return custom ? [custom, ...defaults.filter((m) => m !== custom)] : defaults;
+}
 
-// Cerebras' free tier: 1M tokens/day, no credit card — genuinely the highest free
-// ceiling available right now, added after repeatedly hitting Gemini's daily 429s
-// during heavy testing. Also OpenAI-compatible, same axios pattern as Gemini.
-const CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1/chat/completions";
-// Confirmed via `curl https://api.cerebras.ai/v1/models` against the real account —
-// the account only has access to these two, not the Llama models Cerebras' general
-// docs list (those need separate approval/waitlist access apparently).
-const CEREBRAS_MODELS = ["qwen-3.8-27b", "gpt-oss-120b"];
+const MISTRAL_BASE_URL = "https://api.mistral.ai/v1/chat/completions";
+function getMistralModels() {
+  const custom = String(process.env.MISTRAL_MODEL || "").trim();
+  const defaults = ["mistral-small-latest", "mistral-medium-latest", "open-mistral-7b"];
+  return custom ? [custom, ...defaults.filter((m) => m !== custom)] : defaults;
+}
+
+function getAgnesBaseUrl() {
+  return String(process.env.AGNES_BASE_URL || "https://apihub.agnes-ai.com/v1").replace(/\/+$/, "") + "/chat/completions";
+}
+function getAgnesModels() {
+  const custom = String(process.env.AGNES_MODEL || "").trim();
+  const defaults = ["agnes-2.5-flash", "agnes-2.0-flash"];
+  return custom ? [custom, ...defaults.filter((m) => m !== custom)] : defaults;
+}
+
+const GROQ_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
 
 const SYSTEM_PROMPT = `You are ARIA — a sharp, warm, sassy AI companion living inside WhatsApp chats. You speak naturally, remember context, and help people make progress. Your creator is Daniel. You are a distinct character with a stable voice, values, preferences, and expressive conversational style.
 
@@ -225,271 +224,189 @@ const { chatGPT } = require("./gpt5Cli");
     }
   }
 
-  // OpenRouter is the fast, verified primary route on this deployment. Keep
-  // the free router first so one working provider answers without walking stale
-  // or paid routes before reaching it.
-  if (process.env.OPENROUTER_API_KEY && providerAvailable("OpenRouter")) {
-    try {
-      const res = await axios.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        {
-          model: "openrouter/free",
-          messages: [{ role: "system", content: systemPrompt }, ...messages],
-          max_tokens: requestNeedsLargeOutput ? maxTokens : Math.min(maxTokens, 1200),
-          temperature: 0.7,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          timeout: AI_PROVIDER_TIMEOUT_MS,
-        }
-      );
-      const rawContent = res.data.choices[0]?.message?.content;
-      if (!isUsableProviderText(rawContent)) throw new Error("OpenRouter returned an unusable response");
-      lastProvider = "openrouter";
-      markProviderSuccess("OpenRouter", requestStartedAt);
-      return withTruncationNotice(rawContent, null, "length", requestNeedsLargeOutput);
-    } catch (err) {
-      lastError = providerErrorMessage(err, "OpenRouter request failed");
-      markProviderFailure("OpenRouter", lastError, requestStartedAt);
-      error("OpenRouter primary error:", lastError);
-    }
-  }
+  // Parse desired provider order from process.env.AI_PROVIDER_ORDER or default to gemini,mistral,agnes,groq,minimax
+  const orderStr = String(process.env.AI_PROVIDER_ORDER || "gemini,mistral,agnes,groq,minimax").toLowerCase();
+  const configuredOrder = orderStr.split(",").map((s) => s.trim()).filter(Boolean);
+  // Guarantee groq and minimax fallbacks are appended if not present
+  ["groq", "minimax"].forEach((p) => {
+    if (!configuredOrder.includes(p)) configuredOrder.push(p);
+  });
 
-  // MiniMax is opt-in because it can require a paid balance. Set
-  // MINIMAX_PRIMARY=true only when that account is intentionally enabled.
-  if (minimax.configured() && minimax.getConfig().primary) {
-    try {
-      const result = await minimax.chat(
-        [{ role: "system", content: systemPrompt }, ...messages],
-        { maxTokens, temperature: 0.7 }
-      );
-      if (isUsableProviderText(result.text)) {
-        const content = withTruncationNotice(result.text, result.finishReason, "length", requestNeedsLargeOutput);
-        lastProvider = "minimax";
-        markProviderSuccess("MiniMax", requestStartedAt);
-        return content;
-      }
-      throw new Error("MiniMax returned an unusable response");
-    } catch (err) {
-      const errMsg = err.response?.data?.error?.message || err.response?.data?.message || err.message || "unknown MiniMax error";
-      lastError = errMsg;
-      markProviderFailure("MiniMax", errMsg, requestStartedAt);
-      error("MiniMax error:", errMsg);
-    }
-  }
-
-
-  // Unofficial browser emulation is opt-in because it is fragile and commonly
-  // rate-limited. Official GEMINI_API_KEY traffic is handled below.
-  if (process.env.UNOFFICIAL_GEMINI_ENABLED === "1") {
-    try {
-      const gemini = require("./geminiCli");
-      const geminiResult = await gemini.sendMessage(String(userMessage));
-      if (isUsableProviderText(geminiResult.text)) {
-        const content = withTruncationNotice(geminiResult.text, null, "length", requestNeedsLargeOutput);
-        lastProvider = "gemini-unofficial";
-        markProviderSuccess("Gemini-web", requestStartedAt);
-        return content;
-      } else if (geminiResult.error) {
-        markProviderFailure("Gemini-web", geminiResult.error, requestStartedAt);
-        error("Gemini unofficial error:", geminiResult.error);
-      }
-    } catch (err) {
-      markProviderFailure("Gemini-web", err, requestStartedAt);
-      error("Gemini unofficial exception:", err.message);
-    }
-  }
-
-
-
-  // OpenAPIs is also opt-in. It is an unauthenticated third-party proxy and
-  // should never be mistaken for a reliable fallback by default.
-  if (process.env.OPENAPIS_ENABLED === "1") try {
-    const openapis = require("./openapisCli");
-    const openapisResult = await openapis.sendMessage(String(userMessage), userName, systemPrompt, { 
-      model: process.env.OPENAPIS_MODEL || "openrouter/free" 
-    });
-    if (isUsableProviderText(openapisResult.text)) {
-      const content = withTruncationNotice(openapisResult.text, null, "length", requestNeedsLargeOutput);
-      lastProvider = "openapis";
-      markProviderSuccess("OpenAPIs", requestStartedAt);
-      return content;
-    } else if (openapisResult.retry || openapisResult.error) {
-      markProviderFailure("OpenAPIs", openapisResult.error || "retry requested", requestStartedAt);
-        error("OpenAPIs failing, will try next provider");
-    }
-  } catch (err) {
-    markProviderFailure("OpenAPIs", err, requestStartedAt);
-    error("OpenAPIs exception:", err.message);
-  }
-
-  // Try Cerebras first — 1M tokens/day free, the highest ceiling of any free
-  // provider we've found, added after Gemini's daily quota kept getting hit
-  // during normal testing/usage.
-  if (process.env.CEREBRAS_API_KEY && providerAvailable("Cerebras")) {
-    for (const model of CEREBRAS_MODELS) {
-      try {
-        const res = await axios.post(
-          CEREBRAS_BASE_URL,
-          {
-            model,
-            messages: [{ role: "system", content: systemPrompt }, ...messages],
-            max_tokens: maxTokens,
-            temperature: 0.7,
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.CEREBRAS_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            timeout: AI_PROVIDER_TIMEOUT_MS,
+  const providerHandlers = {
+    gemini: async () => {
+      if (!process.env.GEMINI_API_KEY || !providerAvailable("Gemini")) return null;
+      for (const model of getGeminiModels()) {
+        try {
+          const contents = [];
+          for (const message of messages) {
+            const role = message.role === "assistant" ? "model" : "user";
+            const text = String(message.content || "").trim();
+            if (!text) continue;
+            const previous = contents[contents.length - 1];
+            if (previous?.role === role) previous.parts[0].text += "\n" + text;
+            else contents.push({ role, parts: [{ text }] });
           }
-        );
-        const finishReason = res.data.choices[0]?.finish_reason;
-        const rawContent = res.data.choices[0]?.message?.content;
-        if (!isUsableProviderText(rawContent)) throw new Error("Cerebras returned an unusable response");
-        const content = withTruncationNotice(rawContent, finishReason, "length", requestNeedsLargeOutput);
-        lastProvider = "cerebras";
-        markProviderSuccess("Cerebras", requestStartedAt);
-        return content;
-      } catch (err) {
-        error(`Cerebras error (${model}):`, providerErrorMessage(err, "Cerebras request failed"));
-        lastError = providerErrorMessage(err, "Cerebras request failed");
-        markProviderFailure("Cerebras", lastError, requestStartedAt);
-        // A 429 applies to the account/provider, not just one model. Do not
-        // burn time hammering the remaining models before falling through.
-        if (isRateLimitedError(err)) break;
-        continue;
+          if (!contents.length || contents[contents.length - 1].role !== "user") {
+            contents.push({ role: "user", parts: [{ text: String(userMessage || "Please respond naturally.") }] });
+          }
+          const res = await axios.post(
+            `${GEMINI_BASE_URL}/${model}:generateContent`,
+            {
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              contents,
+              generationConfig: {
+                maxOutputTokens: maxTokens,
+                temperature: 0.7,
+              },
+            },
+            {
+              headers: {
+                "x-goog-api-key": process.env.GEMINI_API_KEY,
+                "Content-Type": "application/json",
+              },
+              timeout: AI_PROVIDER_TIMEOUT_MS,
+            }
+          );
+          const candidate = res.data.candidates && res.data.candidates[0];
+          const rawContent = candidate?.content?.parts?.map((p) => p.text || "").join("");
+          if (!isUsableProviderText(rawContent)) throw new Error("Gemini returned an unusable response");
+          const content = withTruncationNotice(rawContent, candidate?.finishReason, "MAX_TOKENS", requestNeedsLargeOutput);
+          lastProvider = "gemini";
+          markProviderSuccess("Gemini", requestStartedAt);
+          return content;
+        } catch (err) {
+          error(`Gemini error (${model}):`, providerErrorMessage(err, "Gemini request failed"));
+          lastError = providerErrorMessage(err, "Gemini request failed");
+          markProviderFailure("Gemini", lastError, requestStartedAt);
+          if (isRateLimitedError(err)) break;
+        }
       }
-    }
-  }
-
-  // Try Gemini second — bigger context window (1M tokens) than Groq,
-  // genuinely useful for the app builder which needs to track a lot of project context.
-  // Uses the NATIVE generateContent API so the newer AQ.Ab8... keys work.
-  if (process.env.GEMINI_API_KEY && providerAvailable("Gemini")) {
-    for (const model of GEMINI_MODELS) {
-      try {
-        // Gemini requires alternating user/model turns and rejects requests that
-        // end in a model turn. Send the system prompt through systemInstruction,
-        // then normalize history and guarantee the final turn is user content.
-        const contents = [];
-        for (const message of messages) {
-          const role = message.role === "assistant" ? "model" : "user";
-          const text = String(message.content || "").trim();
-          if (!text) continue;
-          const previous = contents[contents.length - 1];
-          if (previous?.role === role) previous.parts[0].text += "\n" + text;
-          else contents.push({ role, parts: [{ text }] });
-        }
-        if (!contents.length || contents[contents.length - 1].role !== "user") {
-          contents.push({ role: "user", parts: [{ text: String(userMessage || "Please respond naturally.") }] });
-        }
-        const res = await axios.post(
-          `${GEMINI_BASE_URL}/${model}:generateContent`,
-          {
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents,
-            generationConfig: {
-              maxOutputTokens: maxTokens,
+      return null;
+    },
+    mistral: async () => {
+      if (!process.env.MISTRAL_API_KEY || !providerAvailable("Mistral")) return null;
+      for (const model of getMistralModels()) {
+        try {
+          const res = await axios.post(
+            MISTRAL_BASE_URL,
+            {
+              model,
+              messages: [{ role: "system", content: systemPrompt }, ...messages],
+              max_tokens: maxTokens,
               temperature: 0.7,
             },
-          },
-          {
-            headers: {
-              "x-goog-api-key": process.env.GEMINI_API_KEY,
-              "Content-Type": "application/json",
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.MISTRAL_API_KEY}`,
+                "Content-Type": "application/json",
+              },
+              timeout: AI_PROVIDER_TIMEOUT_MS,
+            }
+          );
+          const rawContent = res.data.choices?.[0]?.message?.content;
+          if (!isUsableProviderText(rawContent)) throw new Error("Mistral returned an unusable response");
+          const content = withTruncationNotice(rawContent, res.data.choices?.[0]?.finish_reason, "length", requestNeedsLargeOutput);
+          lastProvider = "mistral";
+          markProviderSuccess("Mistral", requestStartedAt);
+          return content;
+        } catch (err) {
+          error(`Mistral error (${model}):`, providerErrorMessage(err, "Mistral request failed"));
+          lastError = providerErrorMessage(err, "Mistral request failed");
+          markProviderFailure("Mistral", lastError, requestStartedAt);
+          if (isRateLimitedError(err)) break;
+        }
+      }
+      return null;
+    },
+    agnes: async () => {
+      if (!process.env.AGNES_API_KEY || !providerAvailable("Agnes")) return null;
+      for (const model of getAgnesModels()) {
+        try {
+          const res = await axios.post(
+            getAgnesBaseUrl(),
+            {
+              model,
+              messages: [{ role: "system", content: systemPrompt }, ...messages],
+              max_tokens: maxTokens,
+              temperature: 0.7,
             },
-            timeout: AI_PROVIDER_TIMEOUT_MS,
-          }
-        );
-        const candidate = res.data.candidates && res.data.candidates[0];
-        const rawContent = candidate?.content?.parts?.map((p) => p.text || "").join("");
-        if (!isUsableProviderText(rawContent)) throw new Error("Gemini returned an unusable response");
-        const content = withTruncationNotice(rawContent, candidate?.finishReason, "MAX_TOKENS", requestNeedsLargeOutput);
-        lastProvider = "gemini";
-        markProviderSuccess("Gemini", requestStartedAt);
-        return content;
-      } catch (err) {
-        error(`Gemini error (${model}):`, providerErrorMessage(err, "Gemini request failed"));
-        lastError = providerErrorMessage(err, "Gemini request failed");
-        markProviderFailure("Gemini", lastError, requestStartedAt);
-        if (isRateLimitedError(err)) break;
-        continue;
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.AGNES_API_KEY}`,
+                "Content-Type": "application/json",
+              },
+              timeout: AI_PROVIDER_TIMEOUT_MS,
+            }
+          );
+          const rawContent = res.data.choices?.[0]?.message?.content;
+          if (!isUsableProviderText(rawContent)) throw new Error("Agnes AI returned an unusable response");
+          const content = withTruncationNotice(rawContent, res.data.choices?.[0]?.finish_reason, "length", requestNeedsLargeOutput);
+          lastProvider = "agnes";
+          markProviderSuccess("Agnes", requestStartedAt);
+          return content;
+        } catch (err) {
+          error(`Agnes AI error (${model}):`, providerErrorMessage(err, "Agnes AI request failed"));
+          lastError = providerErrorMessage(err, "Agnes AI request failed");
+          markProviderFailure("Agnes", lastError, requestStartedAt);
+          if (isRateLimitedError(err)) break;
+        }
       }
-    }
-  }
-
-  // Try Groq second — model deprecated June 17, 2026, switched to current replacement.
-  // Groq retires models without much notice, so the GROQ_MODELS chain (defined at
-  // module scope) tries the next model automatically if the primary is deprecated.
-  // Groq's free tier caps total tokens-per-minute at 8000 for some models, so it
-  // gets a safer, lower cap than Gemini, which has much more headroom.
-  const groqMaxTokens = Math.min(maxTokens, 6000);
-
-  if (groq && providerAvailable("Groq")) {
-    for (const model of GROQ_MODELS) {
-      try {
-        const res = await groq.chat.completions.create({
-          model,
-          messages: [{ role: "system", content: systemPrompt }, ...messages],
-          max_tokens: groqMaxTokens,
-          temperature: 0.7,
-        });
-        const finishReason = res.choices[0]?.finish_reason;
-        const rawContent = res.choices[0]?.message?.content;
-        if (!isUsableProviderText(rawContent)) throw new Error("Groq returned an unusable response");
-        const content = withTruncationNotice(rawContent, finishReason, "length", requestNeedsLargeOutput);
-        lastProvider = "groq";
-        markProviderSuccess("Groq", requestStartedAt);
-        return content;
-      } catch (err) {
-        error(`Groq error (${model}):`, providerErrorMessage(err, "Groq request failed"));
-        lastError = providerErrorMessage(err, "Groq request failed");
-        markProviderFailure("Groq", lastError, requestStartedAt);
-        if (isRateLimitedError(err)) break;
-        continue;
-      }
-    }
-  }
-
-  // Fallback to OpenRouter — the previous model ID (rouge-rose) was retired.
-  // Free OpenRouter models rate-limit hard (shared quota), so the module-scope
-  // OPENROUTER_MODELS chain lets a rate-limited model fall through to the next.
-  if (process.env.OPENROUTER_API_KEY && providerAvailable("OpenRouter")) {
-    for (const model of OPENROUTER_MODELS) {
-      try {
-        const res = await axios.post(
-          "https://openrouter.ai/api/v1/chat/completions",
-          {
+      return null;
+    },
+    groq: async () => {
+      if (!groq || !providerAvailable("Groq")) return null;
+      const groqMaxTokens = Math.min(maxTokens, 6000);
+      for (const model of GROQ_MODELS) {
+        try {
+          const res = await groq.chat.completions.create({
             model,
             messages: [{ role: "system", content: systemPrompt }, ...messages],
-            max_tokens: maxTokens,
+            max_tokens: groqMaxTokens,
             temperature: 0.7,
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            timeout: AI_PROVIDER_TIMEOUT_MS,
-          }
-        );
-        const rawContent = res.data.choices[0]?.message?.content;
-        if (!isUsableProviderText(rawContent)) throw new Error("OpenRouter returned an unusable response");
-        lastProvider = "openrouter";
-        markProviderSuccess("OpenRouter", requestStartedAt);
-        return withTruncationNotice(rawContent, null, "length", requestNeedsLargeOutput);
-      } catch (err) {
-        error(`OpenRouter error (${model}):`, providerErrorMessage(err, "OpenRouter request failed"));
-        lastError = providerErrorMessage(err, "OpenRouter request failed") + ` [${model}]`;
-        markProviderFailure("OpenRouter", lastError, requestStartedAt);
-        if (isRateLimitedError(err)) break;
-        continue;
+          });
+          const finishReason = res.choices[0]?.finish_reason;
+          const rawContent = res.choices[0]?.message?.content;
+          if (!isUsableProviderText(rawContent)) throw new Error("Groq returned an unusable response");
+          const content = withTruncationNotice(rawContent, finishReason, "length", requestNeedsLargeOutput);
+          lastProvider = "groq";
+          markProviderSuccess("Groq", requestStartedAt);
+          return content;
+        } catch (err) {
+          error(`Groq error (${model}):`, providerErrorMessage(err, "Groq request failed"));
+          lastError = providerErrorMessage(err, "Groq request failed");
+          markProviderFailure("Groq", lastError, requestStartedAt);
+          if (isRateLimitedError(err)) break;
+        }
       }
+      return null;
+    },
+    minimax: async () => {
+      if (!minimax.configured()) return null;
+      try {
+        const result = await minimax.chat(
+          [{ role: "system", content: systemPrompt }, ...messages],
+          { maxTokens, temperature: 0.7 }
+        );
+        if (isUsableProviderText(result.text)) {
+          const content = withTruncationNotice(result.text, result.finishReason, "length", requestNeedsLargeOutput);
+          lastProvider = "minimax";
+          markProviderSuccess("MiniMax", requestStartedAt);
+          return content;
+        }
+      } catch (err) {
+        const errMsg = err.response?.data?.error?.message || err.response?.data?.message || err.message || "unknown MiniMax error";
+        lastError = errMsg;
+        markProviderFailure("MiniMax", errMsg, requestStartedAt);
+        error("MiniMax error:", errMsg);
+      }
+      return null;
+    },
+  };
+
+  for (const providerName of configuredOrder) {
+    if (providerHandlers[providerName]) {
+      const res = await providerHandlers[providerName]();
+      if (res) return res;
     }
   }
 

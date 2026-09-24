@@ -105,7 +105,7 @@ async function runMonitorPass(holder) {
         });
       }
       if (withKeys.length === 0 && shouldAlert("no-ai-keys")) {
-        alerts.push("🔌 I don't have any AI provider keys configured right now — I can't generate replies. Add one of OPENROUTER_API_KEY / GROQ_API_KEY / GEMINI_API_KEY.");
+        alerts.push("🔌 I don't have any AI provider keys configured right now — I can't generate replies. Add one of GEMINI_API_KEY / MISTRAL_API_KEY / AGNES_API_KEY / GROQ_API_KEY.");
       }
     }
   } catch (_) {}

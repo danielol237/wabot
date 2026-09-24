@@ -6,10 +6,11 @@
 const axios = require("axios");
 
 const KEY_ENV = {
-  OpenRouter: "OPENROUTER_API_KEY",
-  Groq: "GROQ_API_KEY",
-  Cerebras: "CEREBRAS_API_KEY",
   Gemini: "GEMINI_API_KEY",
+  Mistral: "MISTRAL_API_KEY",
+  Agnes: "AGNES_API_KEY",
+  Groq: "GROQ_API_KEY",
+  MiniMax: "MINIMAX_API_KEY",
   ElevenLabs: "ELEVENLABS_API_KEY",
   "Z.AI": "ZHIPU_API_KEY",
 };
@@ -19,10 +20,10 @@ const PROVIDER_ALIASES = {
   "gemini-unofficial": "Gemini-web",
   openapis: "OpenAPIs",
   minimax: "MiniMax",
-  cerebras: "Cerebras",
   gemini: "Gemini",
+  mistral: "Mistral",
+  agnes: "Agnes",
   groq: "Groq",
-  openrouter: "OpenRouter",
   zai: "Z.AI",
 };
 
@@ -143,11 +144,20 @@ async function probeGemini() {
   }
 }
 
+async function probeMistral() {
+  return probe("Mistral", "https://api.mistral.ai/v1/models", { "Content-Type": "application/json" });
+}
+
+async function probeAgnes() {
+  const baseUrl = String(process.env.AGNES_BASE_URL || "https://apihub.agnes-ai.com/v1").replace(/\/+$/, "");
+  return probe("Agnes", `${baseUrl}/models`, { "Content-Type": "application/json" });
+}
+
 const PROBES = [
-  () => probe("OpenRouter", "https://openrouter.ai/api/v1/models", { "Content-Type": "application/json" }),
-  () => probe("Groq", "https://api.groq.com/openai/v1/models", { "Content-Type": "application/json" }),
-  () => probe("Cerebras", "https://api.cerebras.ai/v1/models", { "Content-Type": "application/json" }),
   probeGemini,
+  probeMistral,
+  probeAgnes,
+  () => probe("Groq", "https://api.groq.com/openai/v1/models", { "Content-Type": "application/json" }),
   () => probe("ElevenLabs", "https://api.elevenlabs.io/v1/user", { "Content-Type": "application/json" }, "xi-api-key"),
 ];
 

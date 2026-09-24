@@ -2,11 +2,25 @@ const axios = require("axios");
 const providerConfig = require("../utils/providerConfig");
 
 const GEMINI_PROVIDER = "gemini";
-const GEMINI_MODEL = "gemini-3.5-flash-lite";
+function getGeminiModel() {
+  return String(process.env.GEMINI_MODEL || "gemini-2.0-flash").trim();
+}
 const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
-const OPENROUTER_PROVIDER = "openrouter";
-const OPENROUTER_MODEL = "anthropic/claude-opus-4.7";
-const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+
+const MISTRAL_PROVIDER = "mistral";
+function getMistralCodeModel() {
+  return String(process.env.MISTRAL_CODE_MODEL || process.env.MISTRAL_MODEL || "codestral-latest").trim();
+}
+const MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/chat/completions";
+
+const AGNES_PROVIDER = "agnes";
+function getAgnesModel() {
+  return String(process.env.AGNES_MODEL || "agnes-2.5-flash").trim();
+}
+function getAgnesEndpoint() {
+  return String(process.env.AGNES_BASE_URL || "https://apihub.agnes-ai.com/v1").replace(/\/+$/, "") + "/chat/completions";
+}
+
 const REQUEST_TIMEOUT_MS = 120000;
 
 function codingProviderError(message, code = "CODING_PROVIDER_ERROR", provider = null, model = null) {
@@ -22,42 +36,45 @@ function resolvedCredential(provider) {
 }
 
 function configured() {
-  return resolvedCredential("gemini").configured || resolvedCredential("openrouter").configured;
+  return resolvedCredential("gemini").configured || resolvedCredential("mistral").configured || resolvedCredential("agnes").configured;
 }
 
 function providerStatus() {
   const gemini = resolvedCredential("gemini");
-  const openrouter = resolvedCredential("openrouter");
-  const selected = gemini.configured ? gemini : openrouter;
+  const mistral = resolvedCredential("mistral");
+  const agnes = resolvedCredential("agnes");
+  const selected = gemini.configured ? gemini : (mistral.configured ? mistral : agnes);
+  let selectedModel = getGeminiModel();
+  if (selected.id === MISTRAL_PROVIDER) selectedModel = getMistralCodeModel();
+  else if (selected.id === AGNES_PROVIDER) selectedModel = getAgnesModel();
+
   return {
     configured: configured(),
     provider: selected.configured ? selected.id : "coding",
-    model: selected.id === GEMINI_PROVIDER ? GEMINI_MODEL : OPENROUTER_MODEL,
+    model: selectedModel,
     keyName: selected.key,
     keySource: selected.source,
     keyShape: selected.configured ? (selected.value.length >= 12 ? "present" : "short") : "missing",
-    aliasesChecked: [...new Set([...gemini.aliases, ...openrouter.aliases])],
+    aliasesChecked: [...new Set([...gemini.aliases, ...mistral.aliases, ...agnes.aliases])],
     providers: {
-      gemini: { configured: gemini.configured, source: gemini.source, model: GEMINI_MODEL },
-      openrouter: { configured: openrouter.configured, source: openrouter.source, model: OPENROUTER_MODEL },
+      gemini: { configured: gemini.configured, source: gemini.source, model: getGeminiModel() },
+      mistral: { configured: mistral.configured, source: mistral.source, model: getMistralCodeModel() },
+      agnes: { configured: agnes.configured, source: agnes.source, model: getAgnesModel() },
     },
   };
 }
 
-function geminiCredentialLooksUsable() {
-  return resolvedCredential("gemini").value.length >= 12;
-}
-
-function openRouterCredentialLooksUsable() {
-  return /^sk-or-v1-[A-Za-z0-9_-]{20,}$/.test(resolvedCredential("openrouter").value);
+function credentialLooksUsable(provider) {
+  return resolvedCredential(provider).value.length >= 8;
 }
 
 function normalizeProviderFailure(error, provider, model) {
   const status = error?.response?.status;
   const detail = String(error?.response?.data?.error?.message || error?.response?.data?.message || error?.message || "request failed").trim();
-  const label = provider === GEMINI_PROVIDER ? "Gemini" : "OpenRouter";
+  const label = provider === GEMINI_PROVIDER ? "Gemini" : (provider === MISTRAL_PROVIDER ? "Mistral" : "Agnes AI");
+  const keyName = provider === GEMINI_PROVIDER ? "GEMINI_API_KEY" : (provider === MISTRAL_PROVIDER ? "MISTRAL_API_KEY" : "AGNES_API_KEY");
   if (status === 401 || status === 403 || /user not found|invalid api key|invalid authentication|unauthorized|authentication failed|permission denied|api key/i.test(detail)) {
-    return codingProviderError(`${label} rejected the coding credential. Check ${provider === GEMINI_PROVIDER ? "GEMINI_API_KEY" : "OPENROUTER_API_KEY"} in Render, then redeploy ARIA.`, "CODING_PROVIDER_AUTH_FAILED", provider, model);
+    return codingProviderError(`${label} rejected the coding credential. Check ${keyName} in Render, then redeploy ARIA.`, "CODING_PROVIDER_AUTH_FAILED", provider, model);
   }
   if (status === 404 || /model.*(?:not found|does not exist)|unknown model/i.test(detail)) {
     return codingProviderError(`${label} could not access the configured coding model ${model}. Check model availability and retry.`, "CODING_PROVIDER_MODEL_UNAVAILABLE", provider, model);
@@ -76,13 +93,14 @@ function geminiContents(messages) {
 
 async function generateWithGemini(messages, maxTokens, temperature) {
   const credential = resolvedCredential("gemini");
-  if (!credential.configured) throw codingProviderError("Gemini coding credential is not configured.", "CODING_PROVIDER_NOT_CONFIGURED", GEMINI_PROVIDER, GEMINI_MODEL);
-  if (!geminiCredentialLooksUsable()) throw codingProviderError("GEMINI_API_KEY is present but too short to be usable.", "CODING_PROVIDER_INVALID_KEY", GEMINI_PROVIDER, GEMINI_MODEL);
+  const model = getGeminiModel();
+  if (!credential.configured) throw codingProviderError("Gemini coding credential is not configured.", "CODING_PROVIDER_NOT_CONFIGURED", GEMINI_PROVIDER, model);
+  if (!credentialLooksUsable("gemini")) throw codingProviderError("GEMINI_API_KEY is present but too short to be usable.", "CODING_PROVIDER_INVALID_KEY", GEMINI_PROVIDER, model);
 
   try {
     const system = messages.find((item) => item.role === "system")?.content;
     const response = await axios.post(
-      `${GEMINI_ENDPOINT}/${GEMINI_MODEL}:generateContent`,
+      `${GEMINI_ENDPOINT}/${model}:generateContent`,
       {
         ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
         contents: geminiContents(messages.filter((item) => item.role !== "system")),
@@ -94,45 +112,69 @@ async function generateWithGemini(messages, maxTokens, temperature) {
       { params: { key: credential.value }, timeout: REQUEST_TIMEOUT_MS, headers: { "Content-Type": "application/json" } },
     );
     const content = response.data?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-    if (!content) throw codingProviderError("Gemini returned an empty coding response.", "CODING_PROVIDER_EMPTY_RESPONSE", GEMINI_PROVIDER, GEMINI_MODEL);
+    if (!content) throw codingProviderError("Gemini returned an empty coding response.", "CODING_PROVIDER_EMPTY_RESPONSE", GEMINI_PROVIDER, model);
     return content;
   } catch (error) {
     if (error?.provider === GEMINI_PROVIDER) throw error;
-    throw normalizeProviderFailure(error, GEMINI_PROVIDER, GEMINI_MODEL);
+    throw normalizeProviderFailure(error, GEMINI_PROVIDER, model);
   }
 }
 
-async function generateWithOpenRouter(messages, maxTokens, temperature) {
-  const credential = resolvedCredential("openrouter");
-  if (!credential.configured) throw codingProviderError("OpenRouter coding credential is not configured.", "CODING_PROVIDER_NOT_CONFIGURED", OPENROUTER_PROVIDER, OPENROUTER_MODEL);
-  if (!openRouterCredentialLooksUsable()) throw codingProviderError("OPENROUTER_API_KEY is present but does not look like a valid OpenRouter key.", "CODING_PROVIDER_INVALID_KEY", OPENROUTER_PROVIDER, OPENROUTER_MODEL);
+async function generateWithMistral(messages, maxTokens, temperature) {
+  const credential = resolvedCredential("mistral");
+  const model = getMistralCodeModel();
+  if (!credential.configured) throw codingProviderError("Mistral coding credential is not configured.", "CODING_PROVIDER_NOT_CONFIGURED", MISTRAL_PROVIDER, model);
+  if (!credentialLooksUsable("mistral")) throw codingProviderError("MISTRAL_API_KEY is present but too short to be usable.", "CODING_PROVIDER_INVALID_KEY", MISTRAL_PROVIDER, model);
 
   try {
     const response = await axios.post(
-      OPENROUTER_ENDPOINT,
+      MISTRAL_ENDPOINT,
       {
-        model: OPENROUTER_MODEL,
+        model,
         messages,
         max_tokens: Math.min(Math.max(Number(maxTokens) || 12000, 256), 120000),
         temperature: typeof temperature === "number" ? temperature : 0.2,
-        provider: { allow_fallbacks: true },
       },
       {
-        headers: {
-          Authorization: `Bearer ${credential.value}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://aria.local",
-          "X-Title": "ARIA Coding Builder",
-        },
+        headers: { Authorization: `Bearer ${credential.value}`, "Content-Type": "application/json" },
         timeout: REQUEST_TIMEOUT_MS,
       },
     );
     const content = response.data?.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || !content.trim()) throw codingProviderError("OpenRouter returned an empty coding response.", "CODING_PROVIDER_EMPTY_RESPONSE", OPENROUTER_PROVIDER, OPENROUTER_MODEL);
+    if (typeof content !== "string" || !content.trim()) throw codingProviderError("Mistral returned an empty coding response.", "CODING_PROVIDER_EMPTY_RESPONSE", MISTRAL_PROVIDER, model);
     return content.trim();
   } catch (error) {
-    if (error?.provider === OPENROUTER_PROVIDER) throw error;
-    throw normalizeProviderFailure(error, OPENROUTER_PROVIDER, OPENROUTER_MODEL);
+    if (error?.provider === MISTRAL_PROVIDER) throw error;
+    throw normalizeProviderFailure(error, MISTRAL_PROVIDER, model);
+  }
+}
+
+async function generateWithAgnes(messages, maxTokens, temperature) {
+  const credential = resolvedCredential("agnes");
+  const model = getAgnesModel();
+  if (!credential.configured) throw codingProviderError("Agnes coding credential is not configured.", "CODING_PROVIDER_NOT_CONFIGURED", AGNES_PROVIDER, model);
+  if (!credentialLooksUsable("agnes")) throw codingProviderError("AGNES_API_KEY is present but too short to be usable.", "CODING_PROVIDER_INVALID_KEY", AGNES_PROVIDER, model);
+
+  try {
+    const response = await axios.post(
+      getAgnesEndpoint(),
+      {
+        model,
+        messages,
+        max_tokens: Math.min(Math.max(Number(maxTokens) || 12000, 256), 120000),
+        temperature: typeof temperature === "number" ? temperature : 0.2,
+      },
+      {
+        headers: { Authorization: `Bearer ${credential.value}`, "Content-Type": "application/json" },
+        timeout: REQUEST_TIMEOUT_MS,
+      },
+    );
+    const content = response.data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string" || !content.trim()) throw codingProviderError("Agnes AI returned an empty coding response.", "CODING_PROVIDER_EMPTY_RESPONSE", AGNES_PROVIDER, model);
+    return content.trim();
+  } catch (error) {
+    if (error?.provider === AGNES_PROVIDER) throw error;
+    throw normalizeProviderFailure(error, AGNES_PROVIDER, model);
   }
 }
 
@@ -148,31 +190,40 @@ async function generateCodingText(prompt, options = {}) {
   const maxTokens = options.maxTokens;
   const temperature = options.temperature;
   const gemini = resolvedCredential("gemini");
-  const openrouter = resolvedCredential("openrouter");
+  const mistral = resolvedCredential("mistral");
+  const agnes = resolvedCredential("agnes");
 
-  if (!gemini.configured && !openrouter.configured) {
-    throw codingProviderError("No coding provider is configured. Set GEMINI_API_KEY (recommended) or OPENROUTER_API_KEY in the bot runtime, then restart ARIA.", "CODING_PROVIDER_NOT_CONFIGURED", "coding", null);
+  if (!gemini.configured && !mistral.configured && !agnes.configured) {
+    throw codingProviderError("No coding provider is configured. Set GEMINI_API_KEY, MISTRAL_API_KEY, or AGNES_API_KEY in the bot runtime, then restart ARIA.", "CODING_PROVIDER_NOT_CONFIGURED", "coding", null);
   }
 
-  let firstError = null;
+  let errors = [];
   if (gemini.configured) {
     try {
       return await generateWithGemini(messages, maxTokens, temperature);
     } catch (error) {
-      firstError = error;
+      errors.push(error);
     }
   }
-  if (openrouter.configured) {
+  if (mistral.configured) {
     try {
-      return await generateWithOpenRouter(messages, maxTokens, temperature);
+      return await generateWithMistral(messages, maxTokens, temperature);
     } catch (error) {
-      if (firstError) {
-        error.message = `${error.message} Gemini fallback also failed: ${firstError.message}`;
-      }
-      throw error;
+      errors.push(error);
     }
   }
-  throw firstError || codingProviderError("No usable coding provider is configured.", "CODING_PROVIDER_NOT_CONFIGURED", "coding", null);
+  if (agnes.configured) {
+    try {
+      return await generateWithAgnes(messages, maxTokens, temperature);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  const lastErr = errors[errors.length - 1];
+  if (lastErr && errors.length > 1) {
+    lastErr.message = `${lastErr.message} (Previous provider fallbacks also failed: ${errors.slice(0, -1).map(e => e.message).join("; ")})`;
+  }
+  throw lastErr || codingProviderError("No usable coding provider is configured.", "CODING_PROVIDER_NOT_CONFIGURED", "coding", null);
 }
 
 module.exports = {
@@ -181,14 +232,12 @@ module.exports = {
   generateCodingText,
   _test: {
     GEMINI_PROVIDER,
-    GEMINI_MODEL,
     GEMINI_ENDPOINT,
-    OPENROUTER_PROVIDER,
-    OPENROUTER_MODEL,
-    OPENROUTER_ENDPOINT,
+    MISTRAL_PROVIDER,
+    MISTRAL_ENDPOINT,
+    AGNES_PROVIDER,
     codingProviderError,
-    geminiCredentialLooksUsable,
-    openRouterCredentialLooksUsable,
+    credentialLooksUsable,
     normalizeProviderFailure,
     resolvedCredential,
   },

@@ -10,9 +10,18 @@ function providerAvailable(name) {
   try { return providerHealth.isAvailable(name); } catch (_) { return true; }
 }
 
-const VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"];
-const OPENROUTER_VISION_MODEL = String(process.env.OPENROUTER_VISION_MODEL || "google/gemini-3.1-flash-lite").trim();
-const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+const GEMINI_VISION_MODEL = String(process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || "gemini-2.0-flash").trim();
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+
+const MISTRAL_VISION_MODEL = String(process.env.MISTRAL_VISION_MODEL || "pixtral-12b-latest").trim();
+const MISTRAL_BASE_URL = "https://api.mistral.ai/v1/chat/completions";
+
+const AGNES_VISION_MODEL = String(process.env.AGNES_VISION_MODEL || process.env.AGNES_MODEL || "agnes-2.5-flash").trim();
+function getAgnesVisionBaseUrl() {
+  return String(process.env.AGNES_BASE_URL || "https://apihub.agnes-ai.com/v1").replace(/\/+$/, "") + "/chat/completions";
+}
+
+const GROQ_VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"];
 
 const DEFAULT_VISION_PROMPT = `Look at this media and explain what is actually happening, not just a list of objects. Cover the visible action, people or characters, expressions, any readable text, the emotional tone, and useful context clues. Distinguish what is clearly visible from what is only an inference. Talk like you're explaining it to a friend who cannot see it.`;
 
@@ -90,53 +99,125 @@ ${howMode ? "The user is asking about your visual process: answer that directly 
 Return only ARIA's WhatsApp reply, with no analysis labels or provider commentary.`;
 }
 
-async function analyzeWithOpenRouter(base64Image, mimeType, prompt) {
-  if (!String(process.env.OPENROUTER_API_KEY || "").trim()) return null;
+async function analyzeWithGemini(base64Image, mimeType, prompt) {
+  if (!String(process.env.GEMINI_API_KEY || "").trim() || !providerAvailable("Gemini")) return null;
+  const startedAt = Date.now();
   try {
-    const response = await axios.post(
-      OPENROUTER_ENDPOINT,
+    const res = await axios.post(
+      `${GEMINI_BASE_URL}/${GEMINI_VISION_MODEL}:generateContent`,
       {
-        model: OPENROUTER_VISION_MODEL,
+        contents: [{
+          role: "user",
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: mimeType, data: base64Image } }
+          ]
+        }],
+        generationConfig: { maxOutputTokens: 900, temperature: 0.65 }
+      },
+      {
+        headers: { "x-goog-api-key": process.env.GEMINI_API_KEY, "Content-Type": "application/json" },
+        timeout: 60000,
+      }
+    );
+    const candidate = res.data?.candidates?.[0];
+    const text = candidate?.content?.parts?.map((p) => p.text || "").join("");
+    if (text && text.trim()) {
+      providerHealth.recordSuccess("Gemini", { latency: Date.now() - startedAt });
+      return text.trim();
+    }
+  } catch (error) {
+    providerHealth.recordFailure("Gemini", error, { latency: Date.now() - startedAt });
+    console.warn("Gemini vision error:", error.response?.data?.error?.message || error.message);
+  }
+  return null;
+}
+
+async function analyzeWithMistral(base64Image, mimeType, prompt) {
+  if (!String(process.env.MISTRAL_API_KEY || "").trim() || !providerAvailable("Mistral")) return null;
+  const startedAt = Date.now();
+  try {
+    const res = await axios.post(
+      MISTRAL_BASE_URL,
+      {
+        model: MISTRAL_VISION_MODEL,
         messages: [{
           role: "user",
           content: [
             { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
-          ],
+            { type: "image_url", image_url: `data:${mimeType};base64,${base64Image}` }
+          ]
         }],
         max_tokens: 900,
         temperature: 0.65,
       },
       {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://aria.local",
-          "X-Title": "ARIA Visual Companion",
-        },
+        headers: { Authorization: `Bearer ${process.env.MISTRAL_API_KEY}`, "Content-Type": "application/json" },
         timeout: 60000,
       }
     );
-    const text = response.data?.choices?.[0]?.message?.content;
-    return typeof text === "string" && text.trim() ? text.trim() : null;
+    const text = res.data?.choices?.[0]?.message?.content;
+    if (text && text.trim()) {
+      providerHealth.recordSuccess("Mistral", { latency: Date.now() - startedAt });
+      return text.trim();
+    }
   } catch (error) {
-    providerHealth.recordFailure("OpenRouter", error);
-    console.warn("OpenRouter vision error:", error.response?.data?.error?.message || error.message);
-    return null;
+    providerHealth.recordFailure("Mistral", error, { latency: Date.now() - startedAt });
+    console.warn("Mistral vision error:", error.response?.data?.error?.message || error.message);
   }
+  return null;
+}
+
+async function analyzeWithAgnes(base64Image, mimeType, prompt) {
+  if (!String(process.env.AGNES_API_KEY || "").trim() || !providerAvailable("Agnes")) return null;
+  const startedAt = Date.now();
+  try {
+    const res = await axios.post(
+      getAgnesVisionBaseUrl(),
+      {
+        model: AGNES_VISION_MODEL,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
+          ]
+        }],
+        max_tokens: 900,
+        temperature: 0.65,
+      },
+      {
+        headers: { Authorization: `Bearer ${process.env.AGNES_API_KEY}`, "Content-Type": "application/json" },
+        timeout: 60000,
+      }
+    );
+    const text = res.data?.choices?.[0]?.message?.content;
+    if (text && text.trim()) {
+      providerHealth.recordSuccess("Agnes", { latency: Date.now() - startedAt });
+      return text.trim();
+    }
+  } catch (error) {
+    providerHealth.recordFailure("Agnes", error, { latency: Date.now() - startedAt });
+    console.warn("Agnes vision error:", error.response?.data?.error?.message || error.message);
+  }
+  return null;
 }
 
 async function analyzeImage(base64Image, mimeType = "image/jpeg", question, options = {}) {
   const kind = options.kind || "image";
   const prompt = options.prompt || buildVisionPrompt({ question, kind, history: options.history, quotedContext: options.quotedContext });
 
-  // OpenRouter is the verified multimodal route on this deployment. Try it first
-  // so vision does not waste time on unavailable Z.AI/Groq models.
-  const primaryOpenRouterText = await analyzeWithOpenRouter(base64Image, mimeType, prompt);
-  if (primaryOpenRouterText) {
-    providerHealth.recordSuccess("OpenRouter", { latency: 0 });
-    return sanitizeVisionReply(primaryOpenRouterText, { kind, question });
-  }
+  // Primary: Gemini
+  const geminiText = await analyzeWithGemini(base64Image, mimeType, prompt);
+  if (geminiText) return sanitizeVisionReply(geminiText, { kind, question });
+
+  // Secondary: Mistral
+  const mistralText = await analyzeWithMistral(base64Image, mimeType, prompt);
+  if (mistralText) return sanitizeVisionReply(mistralText, { kind, question });
+
+  // Tertiary: Agnes
+  const agnesText = await analyzeWithAgnes(base64Image, mimeType, prompt);
+  if (agnesText) return sanitizeVisionReply(agnesText, { kind, question });
 
   if (zai.configured() && providerAvailable("Z.AI")) {
     const startedAt = Date.now();
@@ -150,7 +231,7 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
   }
 
   if (groq && providerAvailable("Groq")) {
-    for (const model of VISION_MODELS) {
+    for (const model of GROQ_VISION_MODELS) {
       const startedAt = Date.now();
       try {
         const res = await groq.chat.completions.create({
@@ -172,19 +253,14 @@ async function analyzeImage(base64Image, mimeType = "image/jpeg", question, opti
         }
         throw new Error("Groq vision returned an empty response");
       } catch (error) {
-        providerHealth.recordFailure("Groq", error);
+        providerHealth.recordFailure("Groq", error, { latency: Date.now() - startedAt });
         console.warn(`Vision AI error (${model}):`, error.message);
         continue;
       }
     }
   }
 
-  const openRouterText = await analyzeWithOpenRouter(base64Image, mimeType, prompt);
-  if (openRouterText) {
-    providerHealth.recordSuccess("OpenRouter", { latency: 0 });
-    return sanitizeVisionReply(openRouterText, { kind, question });
-  }
-  if (String(process.env.ZHIPU_API_KEY || process.env.GROQ_API_KEY || process.env.OPENROUTER_API_KEY || "").trim()) {
+  if (String(process.env.GEMINI_API_KEY || process.env.MISTRAL_API_KEY || process.env.AGNES_API_KEY || process.env.ZHIPU_API_KEY || process.env.GROQ_API_KEY || "").trim()) {
     return "I received the visual, but the vision routes are unavailable right now. Send it again in a moment.";
   }
   try {
@@ -208,5 +284,5 @@ module.exports = {
   analyzeImage,
   respondToMedia,
   extractText,
-  _test: { buildVisionPrompt, asksForDetails, asksHowVisionWorks, stripInternalReasoning, compactVisualReply, sanitizeVisionReply, fallbackReaction, OPENROUTER_VISION_MODEL },
+  _test: { buildVisionPrompt, asksForDetails, asksHowVisionWorks, stripInternalReasoning, compactVisualReply, sanitizeVisionReply, fallbackReaction },
 };

@@ -37,6 +37,7 @@ test("detail requests keep useful visual text but remove reasoning markers", () 
   assert.equal(reply.includes("<think>"), false);
 });
 
-test("vision model selection keeps the visual route separate from coding", () => {
-  assert.equal(vision._test.OPENROUTER_VISION_MODEL, "google/gemini-3.1-flash-lite");
+test("vision prompt formats properly", () => {
+  const prompt = vision._test.buildVisionPrompt({ kind: "image", question: "Hello" });
+  assert.ok(prompt.includes("ARIA"));
 });

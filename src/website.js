@@ -170,7 +170,7 @@ router.get("/api/system", async (req, res) => {
       cpus: os.cpus().length,
       missions: dm && dm.getAllMissions ? dm.getAllMissions().length : 0,
       recentErrors: errors.length,
-      aiKeys: ["OPENROUTER_API_KEY","GROQ_API_KEY","CEREBRAS_API_KEY","GEMINI_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"].filter((k) => process.env[k]).length,
+      aiKeys: ["GEMINI_API_KEY","MISTRAL_API_KEY","AGNES_API_KEY","GROQ_API_KEY","TAVILY_API_KEY","ELEVENLABS_API_KEY"].filter((k) => process.env[k]).length,
       runtimeDeps,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }

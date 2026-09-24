@@ -13,49 +13,50 @@ function restoreEnv(values) {
   }
 }
 
-test("coding provider prefers the official Gemini 3.5 Flash-Lite model", () => {
+test("coding provider configured endpoints and models", () => {
   assert.equal(codingProvider._test.GEMINI_PROVIDER, "gemini");
-  assert.equal(codingProvider._test.GEMINI_MODEL, "gemini-3.5-flash-lite");
   assert.match(codingProvider._test.GEMINI_ENDPOINT, /generativelanguage\.googleapis\.com/);
+  assert.equal(codingProvider._test.MISTRAL_PROVIDER, "mistral");
+  assert.match(codingProvider._test.MISTRAL_ENDPOINT, /mistral\.ai/);
 });
 
 test("coding provider recognizes a Gemini key and reports it as the selected provider", () => {
-  const previous = preserveEnv(["GEMINI_API_KEY", "OPENROUTER_API_KEY"]);
+  const previous = preserveEnv(["GEMINI_API_KEY", "MISTRAL_API_KEY", "AGNES_API_KEY"]);
   process.env.GEMINI_API_KEY = "AIzaSyabcdefghijklmnopqrstuvwxyz";
-  delete process.env.OPENROUTER_API_KEY;
+  delete process.env.MISTRAL_API_KEY;
+  delete process.env.AGNES_API_KEY;
   try {
     assert.equal(codingProvider.configured(), true);
-    assert.equal(codingProvider._test.geminiCredentialLooksUsable(), true);
+    assert.equal(codingProvider._test.credentialLooksUsable("gemini"), true);
     assert.equal(codingProvider.providerStatus().provider, "gemini");
-    assert.equal(codingProvider.providerStatus().model, "gemini-3.5-flash-lite");
   } finally {
     restoreEnv(previous);
   }
 });
 
-test("coding provider recognizes an OpenRouter alias when Gemini is absent", () => {
-  const previous = preserveEnv(["GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENROUTER_KEY"]);
+test("coding provider recognizes Mistral when Gemini is absent", () => {
+  const previous = preserveEnv(["GEMINI_API_KEY", "MISTRAL_API_KEY", "AGNES_API_KEY"]);
   delete process.env.GEMINI_API_KEY;
-  delete process.env.OPENROUTER_API_KEY;
-  process.env.OPENROUTER_KEY = "sk-or-v1-abcdefghijklmnopqrstuvwxyz";
+  delete process.env.AGNES_API_KEY;
+  process.env.MISTRAL_API_KEY = "mistral-key-123456789";
   try {
     assert.equal(codingProvider.configured(), true);
-    assert.equal(codingProvider._test.openRouterCredentialLooksUsable(), true);
-    assert.equal(codingProvider.providerStatus().keySource, "OPENROUTER_KEY");
-    assert.equal(codingProvider.providerStatus().provider, "openrouter");
+    assert.equal(codingProvider._test.credentialLooksUsable("mistral"), true);
+    assert.equal(codingProvider.providerStatus().provider, "mistral");
   } finally {
     restoreEnv(previous);
   }
 });
 
-test("coding provider rejects a present but malformed OpenRouter credential", async () => {
-  const previous = preserveEnv(["GEMINI_API_KEY", "OPENROUTER_API_KEY"]);
+test("coding provider rejects a present but too short credential", async () => {
+  const previous = preserveEnv(["GEMINI_API_KEY", "MISTRAL_API_KEY", "AGNES_API_KEY"]);
   delete process.env.GEMINI_API_KEY;
-  process.env.OPENROUTER_API_KEY = "User not found.";
+  delete process.env.AGNES_API_KEY;
+  process.env.MISTRAL_API_KEY = "short";
   try {
     await assert.rejects(
       codingProvider.generateCodingText("return a complete file", { system: "code only" }),
-      (error) => error.code === "CODING_PROVIDER_INVALID_KEY" && /valid OpenRouter key|sk-or-v1-/.test(error.message)
+      (error) => error.code === "CODING_PROVIDER_INVALID_KEY" && /too short/.test(error.message)
     );
   } finally {
     restoreEnv(previous);
@@ -66,19 +67,19 @@ test("coding provider normalizes Gemini authentication errors", () => {
   const error = codingProvider._test.normalizeProviderFailure(
     { response: { status: 403, data: { error: { message: "Permission denied" } } } },
     "gemini",
-    "gemini-3.5-flash-lite",
+    "gemini-2.0-flash",
   );
   assert.equal(error.code, "CODING_PROVIDER_AUTH_FAILED");
   assert.match(error.message, /GEMINI_API_KEY/);
 });
 
-test("coding provider fails clearly when both coding credentials are missing", async () => {
-  const previous = preserveEnv(["GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENROUTER_KEY", "OPEN_ROUTER_API_KEY"]);
+test("coding provider fails clearly when coding credentials are missing", async () => {
+  const previous = preserveEnv(["GEMINI_API_KEY", "MISTRAL_API_KEY", "AGNES_API_KEY"]);
   for (const name of Object.keys(previous)) delete process.env[name];
   try {
     await assert.rejects(
       codingProvider.generateCodingText("return a complete file", { system: "code only" }),
-      (error) => error.code === "CODING_PROVIDER_NOT_CONFIGURED" && /GEMINI_API_KEY.*OPENROUTER_API_KEY/.test(error.message)
+      (error) => error.code === "CODING_PROVIDER_NOT_CONFIGURED" && /GEMINI_API_KEY/.test(error.message)
     );
   } finally {
     restoreEnv(previous);

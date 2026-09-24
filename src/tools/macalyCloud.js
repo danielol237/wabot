@@ -298,6 +298,9 @@ async function defaultAsk(prompt, system) {
   return getAIResponse(prompt, "ARIA", [], system);
 }
 
+// Per-user execution lock to prevent race conditions or duplicate runs for the same user.
+const activeRequests = new Set();
+
 // One client (and MCP session) per WhatsApp user, each using that user's own sign-in.
 const clients = new Map();
 function clientKey(actorJid, env) { return `${actorJid}|${settings(env).url}`; }
@@ -361,39 +364,58 @@ async function runRequest({ request, quotedText = "", actorJid = "" }, deps = {}
 }
 
 async function handleRequest({ request, quotedText = "", actorJid, sock, msg, reply }, deps = {}) {
-  const oauth = deps.oauth || require("./macalyOAuth");
-  const notify = (text) => reply(sock, msg, text);
-  const again = () => handleRequest({ request, quotedText, actorJid, sock, msg, reply }, { ...deps, relinked: true });
-
-  // Not linked yet: send the sign-in link (or code), then carry on with the original request.
-  const link = async (intro) => {
-    await notify(intro);
-    const started = await oauth.startLink({ actorJid, notify, onLinked: again }, deps.oauthDeps);
-    if (!started.success) await notify(started.pending ? `⏳ ${started.error}` : `❌ ${started.error}`);
-    return { ok: false, linking: true };
-  };
-
-  if (!deps.client && !(await oauth.isLinked(actorJid))) {
-    return link("🔌 Your Macaly account isn't linked yet. I'll send a sign-in link, and once you approve it I'll carry on with your request.");
+  const userKey = String(actorJid || "").trim();
+  const isContinuation = Boolean(deps.relinked);
+  if (userKey && activeRequests.has(userKey) && !isContinuation) {
+    reply(sock, msg, "⏳ I'm already processing a Macaly request for you. Please wait for it to finish.");
+    return { ok: false, busy: true };
   }
+  if (userKey && !isContinuation) activeRequests.add(userKey);
 
-  await notify("⏳ On it - working in your Macaly account...");
   try {
-    const outcome = await runRequest({ request, quotedText, actorJid }, deps);
-    await notify(clip(outcome.message, REPLY_CHARS));
-    return outcome;
-  } catch (err) {
-    if (err.status === 401 && !deps.client) {
-      oauth.unlink(actorJid);
-      forget(actorJid, deps.env);
-      if (!deps.relinked) return link("🔐 Macaly signed me out of your account (the link expired or was revoked). Let's link it again.");
-      await notify("🔐 Macaly still rejects the sign-in. Please try connecting again in a bit.");
+    const oauth = deps.oauth || require("./macalyOAuth");
+    // If request comes from a group chat, send sign-in link via private DM to prevent link leakage.
+    const isGroup = Boolean(msg?.key?.remoteJid?.endsWith("@g.us"));
+    const notify = (text) => {
+      if (isGroup && /\b(?:Connect Macaly|sign-in|https:\/\/|code:)\b/i.test(text) && sock && userKey) {
+        return sock.sendMessage(userKey, { text }).catch(() => reply(sock, msg, text));
+      }
+      return reply(sock, msg, text);
+    };
+    const again = () => handleRequest({ request, quotedText, actorJid, sock, msg, reply }, { ...deps, relinked: true });
+
+    // Not linked yet: send the sign-in link (or code), then carry on with the original request.
+    const link = async (intro) => {
+      await notify(intro);
+      const started = await oauth.startLink({ actorJid, notify, onLinked: again }, deps.oauthDeps);
+      if (!started.success) await notify(started.pending ? `⏳ ${started.error}` : `❌ ${started.error}`);
+      return { ok: false, linking: true };
+    };
+
+    if (!deps.client && !(await oauth.isLinked(actorJid))) {
+      return await link("🔌 Your Macaly account isn't linked yet. I'll send a sign-in link, and once you approve it I'll carry on with your request.");
+    }
+
+    await notify("⏳ On it - working in your Macaly account...");
+    try {
+      const outcome = await runRequest({ request, quotedText, actorJid }, deps);
+      await notify(clip(outcome.message, REPLY_CHARS));
+      return outcome;
+    } catch (err) {
+      if (err.status === 401 && !deps.client) {
+        oauth.unlink(actorJid);
+        forget(actorJid, deps.env);
+        if (!deps.relinked) return await link("🔐 Macaly signed me out of your account (the link expired or was revoked). Let's link it again.");
+        await notify("🔐 Macaly still rejects the sign-in. Please try connecting again in a bit.");
+        return { ok: false, error: err.message };
+      }
+      await notify(err.status === 401
+        ? "🔐 Macaly rejected the sign-in."
+        : `❌ Macaly request failed: ${clip(err.message, 300)}`);
       return { ok: false, error: err.message };
     }
-    await notify(err.status === 401
-      ? "🔐 Macaly rejected the sign-in."
-      : `❌ Macaly request failed: ${clip(err.message, 300)}`);
-    return { ok: false, error: err.message };
+  } finally {
+    if (userKey && !isContinuation) activeRequests.delete(userKey);
   }
 }
 

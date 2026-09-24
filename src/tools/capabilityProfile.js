@@ -41,7 +41,7 @@ function getCapabilityProfile() {
       "Web search, URL reading, translation, summarization, weather/news, and factual research",
       "Full website/app generation with planning, file-by-file progress, quality gates, build verification, repair, ZIP delivery, and preview-first Vercel deployment",
       "Real WhatsApp group administration: hidden mentions, tag-all, warnings, anti-link, welcome/leave controls, and permission-checked participant actions",
-      "Reminders, recurring tasks, durable missions, project tracking, academy/LMS workflows, and owner-scoped Atlas project operations",
+      "Reminders, recurring tasks, durable missions, project tracking, academy/LMS workflows, owner-scoped Atlas project operations, and per-user Macaly Cloud integration for creating, inspecting, debugging, and publishing cloud apps",
     ],
     conditional: [
       providerLabel,
@@ -80,7 +80,7 @@ function formatConnectorReport() {
     const available = name === "nativeMedia" ? Boolean(value?.sharp || value?.ffmpeg || value?.ffprobe || value?.tesseract || value?.espeak) : Boolean(value?.healthy || value === true);
     return `• ${name}: ${available ? "available" : "unavailable"}`;
   }).join("\n");
-  const connectors = (environment.connectors || []).map((item) => `• ${item.name}: ${item.configured ? `configured (${item.source || "environment"})` : "not configured"}`).join("\n");
+  const connectors = [...(environment.connectors || []).map((item) => `• ${item.name}: ${item.configured ? `configured (${item.source || "environment"})` : "not configured"}`), "• macaly cloud: per-user sign-in (each person links their own account)"].join("\n");
   return `🔌 *ARIA runtime connections*\n\n*Native tools*\n${tools || "• No native tool report available."}\n\n*Configured connectors*\n${connectors || "• None configured."}\n\n*Registered action capabilities*\n${registered.map((item) => `• ${item.name} — ${item.description}`).join("\n") || "• None registered."}\n\nI only list what the current runtime reports. A connector marked not configured is not secretly usable.`;
 }
 

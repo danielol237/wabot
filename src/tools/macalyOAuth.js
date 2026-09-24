@@ -182,7 +182,12 @@ async function startDevice({ user, found, notify, onLinked }, deps) {
   const link = device.verification_uri || device.verification_uri_complete;
   const state = { cancelled: false };
   pending.set(user, { cancel: () => { state.cancelled = true; } });
-  await notify(`🔐 *Connect Macaly*\n\n1. Open: ${link}\n2. Enter this one-time code: *${device.user_code}*\n3. Approve access to your Macaly account.\n\nThis code expires in about ${minutes} minutes. ARIA never asks you to paste a token.`);
+  try {
+    await notify(`🔐 *Connect Macaly*\n\n1. Open: ${link}\n2. Enter this one-time code: *${device.user_code}*\n3. Approve access to your Macaly account.\n\nThis code expires in about ${minutes} minutes. ARIA never asks you to paste a token.`);
+  } catch (err) {
+    pending.delete(user);
+    throw err;
+  }
   (async () => {
     try {
       const tokens = await pollDevice({ device, client, found, state }, deps);
@@ -239,7 +244,7 @@ async function completeAuth(query) {
 
 async function ensureCallbackServer(redirectUri, env) {
   const port = Number(env.MACALY_CALLBACK_PORT || 8765);
-  const host = env.MACALY_CALLBACK_HOST || "0.0.0.0";
+  const host = env.MACALY_CALLBACK_HOST || "127.0.0.1";
   const route = new URL(redirectUri).pathname;
   const key = `${host}:${port}${route}`;
   if (callbackServer && callbackKey === key) return;
@@ -285,7 +290,14 @@ async function startCode({ user, found, notify, onLinked }, deps) {
   if (timer.unref) timer.unref();
   pendingAuth.set(state, { user, verifier, client, found, redirectUri, notify, onLinked, timer, deps });
   pending.set(user, { cancel: () => { clearTimeout(timer); pendingAuth.delete(state); } });
-  await notify(`🔐 *Connect Macaly*\n\n1. Open: ${url.toString()}\n2. Sign in and approve access.\n\nThis link works once and expires in about 10 minutes. ARIA never asks you to paste a token.`);
+  try {
+    await notify(`🔐 *Connect Macaly*\n\n1. Open: ${url.toString()}\n2. Sign in and approve access.\n\nThis link works once and expires in about 10 minutes. ARIA never asks you to paste a token.`);
+  } catch (err) {
+    clearTimeout(timer);
+    pendingAuth.delete(state);
+    pending.delete(user);
+    throw err;
+  }
   return { success: true, pending: true, mode: "link" };
 }
 

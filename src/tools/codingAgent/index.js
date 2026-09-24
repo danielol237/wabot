@@ -33,7 +33,11 @@ function cleanJson(text) {
   const first = Math.min(...[raw.indexOf("{"), raw.indexOf("[")].filter((n) => n >= 0));
   const last = Math.max(raw.lastIndexOf("}"), raw.lastIndexOf("]"));
   if (first < 0 || last < first) throw new Error("Coding provider returned no JSON payload");
-  return JSON.parse(raw.slice(first, last + 1));
+  try {
+    return JSON.parse(raw.slice(first, last + 1));
+  } catch (err) {
+    throw new Error(`Failed to parse coding provider JSON payload: ${err.message}`);
+  }
 }
 
 function normalizeManifest(value) {

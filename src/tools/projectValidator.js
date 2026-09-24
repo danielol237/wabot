@@ -121,7 +121,7 @@ function validateProject(root) {
   if (envNames.size) {
     checks.env = STATES.NOT_VERIFIED;
     const example = fs.existsSync(path.join(root, ".env.example")) ? fs.readFileSync(path.join(root, ".env.example"), "utf8") : "";
-    const missing = [...envNames].filter((name) => !new RegExp(`^${name}=`, "m").test(example));
+    const missing = [...envNames].filter((name) => !new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=`, "m").test(example));
     if (missing.length) warnings.push({ check: "env", message: `Environment variables are referenced without documentation: ${missing.join(", ")}` });
   }
 

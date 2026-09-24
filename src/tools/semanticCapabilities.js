@@ -3,9 +3,22 @@ const fs = require("fs");
 const { getAIResponse } = require("./ai");
 const capabilities = require("./whatsappCapabilities");
 const mcpRegistry = require("./mcpServers");
+const macalyCloud = require("./macalyCloud");
 
 const ROOT = path.resolve(__dirname, "../..");
-const ALLOWED = new Set(["send_file", "clone_website", "build_and_host_website", "publish_status", "leave_group", "set_profile_picture", "github_engineering", "list_capabilities", "use_connected_tool", "connect_app", "none"]);
+const ALLOWED = new Set(["send_file", "clone_website", "build_and_host_website", "publish_status", "leave_group", "set_profile_picture", "github_engineering", "list_capabilities", "use_connected_tool", "connect_app", "macaly", "none"]);
+
+function isSafeSendFile(targetPath) {
+  if (!targetPath) return false;
+  const resolved = path.resolve(ROOT, targetPath);
+  if (!resolved.startsWith(ROOT + path.sep) && resolved !== ROOT) return false;
+  const relative = path.relative(ROOT, resolved);
+  if (!relative) return false;
+  if (/^(?:\.env|\.git|data|node_modules|temp)(?:$|[/\\])/i.test(relative)) return false;
+  if (/\.(?:key|enc|pem|crt|db|sqlite|log|json|env)$/i.test(relative) && relative !== "package.json") return false;
+  if (/credential|session|token|secret|vault/i.test(relative)) return false;
+  return true;
+}
 const MAX_TOOLS_IN_PROMPT = 40;
 
 function clean(value, max = 500) {
@@ -78,7 +91,8 @@ Allowed capabilities:
 - set_profile_picture: change the bot's WhatsApp profile picture using the attached or quoted image
 - github_engineering: anything about the user's connected GitHub repository or ARIA's engineering system — auditing/reviewing/explaining a repo, listing repos, switching the active repo, planning/proposing/building a code change, or approving/verifying/merging a pending upgrade
 - list_capabilities: the user is asking what you can do, or asking you to list your tools/abilities
-- connect_app: the user wants to connect/link/authorize a specific outside app or service (Gmail, Slack, Notion, Calendar, etc.) to their own account with ARIA — put the app/service name in target
+- connect_app: the user wants to connect/link/authorize a specific outside app or service (Gmail, Slack, Notion, Calendar, etc., BUT NOT Macaly) to their own account with ARIA — put the app/service name in target
+${macalyCloud.CLASSIFIER_LINE}
 - use_connected_tool: the request is best served by one of this user's own live connected tools listed below
 - none: ordinary conversation or a request that is not one of these operations
 Never treat a hypothetical question as an action. Use target for a URL, repository name, upgrade id, file/app/service name, or the request itself when relevant. Use caption only for status text. Only use a "server"/"tool" pair that appears verbatim in the live tools list below — never invent one.
@@ -119,13 +133,17 @@ async function describeCapabilities(actorJid) {
   const composioHint = mcpRegistry.isConfigured()
     ? (connectedLines ? `Your connected tools (live, via Composio):\n${connectedLines}` : "Composio is available, but you have not connected any apps yet — say something like \"connect my Gmail\" and I'll send you a link.")
     : "No external app connections (Composio) are set up on this bot yet.";
-  return `🧩 *What I can actually do for you right now*\n\nBuilt in: send files, snapshot/clone a public website, build + host a new website, post to WhatsApp status, leave a group, change my profile picture, and work with your connected GitHub repo (audit, plan, approve, verify, merge upgrades) — that's your own GitHub, connected with your own link, never shared with anyone else.\n\n${composioHint}\n\nJust ask in plain language — I'll work out which of these fits, you don't need exact phrasing or a command.`;
+  return `🧩 *What I can actually do for you right now*\n\nBuilt in: send files, snapshot/clone a public website, build + host a new website, post to WhatsApp status, leave a group, change my profile picture, work with your connected GitHub repo (audit, plan, approve, verify, merge upgrades), and work in your own Macaly Cloud account (create, inspect, change, preview, deploy apps or link/unlink Macaly) — that's your own GitHub and Macaly, connected with your own links, never shared with anyone else.\n\n${composioHint}\n\nJust ask in plain language — I'll work out which of these fits, you don't need exact phrasing or a command.`;
 }
 
 async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
   const target = decision.target || "";
   const actorJid = ctx.senderJid;
   if (decision.capability === "none") return false;
+  if (decision.capability === "macaly") {
+    await macalyCloud.handleRequest({ request: ctx.text || target, quotedText, actorJid: ctx.senderJid, sock, msg, reply });
+    return true;
+  }
   // Composio tools and connections are per-user (this user's own connected
   // accounts, looked up by their own actorJid) — NOT blanket owner-gated,
   // the same reasoning github_engineering below already uses. The bot-wide
@@ -173,7 +191,10 @@ async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
   if (decision.capability === "send_file") {
     let file = null;
     if (/\b(?:repo|repository|wabot|source)\b/i.test(target)) file = await capabilities.createRepositoryArchive(ROOT);
-    else if (target && fs.existsSync(path.resolve(ROOT, target))) file = { path: path.resolve(ROOT, target), fileName: path.basename(target) };
+    else if (target && fs.existsSync(path.resolve(ROOT, target))) {
+      if (!isSafeSendFile(target)) return reply(sock, msg, "🔐 Access to that path or sensitive configuration file is restricted for security.");
+      file = { path: path.resolve(ROOT, target), fileName: path.basename(target) };
+    }
     else if (target && capabilities.extractUrl(target)) file = await capabilities.snapshotWebsite(capabilities.extractUrl(target));
     if (!file) return reply(sock, msg, "I could not identify a safe local file or generated artifact to send.");
     await capabilities.sendDocument(sock, ctx.chatId, file, msg);

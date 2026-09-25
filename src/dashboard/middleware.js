@@ -25,7 +25,8 @@ function checkAuth(req, res, next) {
   // Backward-compatibility: Check Authorization header with process.env.DASHBOARD_PASSWORD if account system has no owner yet
   if (!auth.hasOwnerAccount() && process.env.DASHBOARD_PASSWORD) {
     const authHeader = req.headers.authorization || "";
-    if (authHeader.startsWith("Bearer ") && authHeader.slice(7) === process.env.DASHBOARD_PASSWORD) {
+    const tokenVal = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : (authHeader.startsWith("Basic ") ? Buffer.from(authHeader.slice(6), "base64").toString("utf8").split(":")[1] : "");
+    if (tokenVal === process.env.DASHBOARD_PASSWORD) {
       req.user = { username: "owner", role: "owner" };
       return next();
     }

@@ -38,10 +38,6 @@ test("Credentials Verification - Scrypt password verification with timing-safe c
   const invalid = await auth.verifyCredentials("operator1", "WrongPass!");
   assert.strictEqual(invalid, null);
 
-
-  const invalid = await auth.verifyCredentials("operator1", "WrongPass!");
-  assert.strictEqual(invalid, null);
-
   const unknownUser = await auth.verifyCredentials("nonexistent", "Pass123!");
   assert.strictEqual(unknownUser, null);
 });
@@ -73,12 +69,6 @@ test("Login Throttling - Locks account after 8 failed attempts", () => {
   }
   let check = auth.checkLoginThrottled(ip, username);
   assert.strictEqual(check.throttled, false);
-
-  auth.recordLoginFailure(ip, username); // 8th attempt
-  check = auth.checkLoginThrottled(ip, username);
-  assert.strictEqual(check.throttled, true);
-  assert.ok(check.secondsLeft > 0);
-
 
   auth.recordLoginFailure(ip, username); // 8th attempt
   check = auth.checkLoginThrottled(ip, username);
@@ -188,25 +178,5 @@ test("HTTP Express Integration & Preserved Routes Regression", async () => {
     server.close();
   }
 
-  // Force exit after all assertions pass so background WhatsApp socket listeners don't keep process open
   setTimeout(() => process.exit(0), 100);
-
-    const pairingRes = await globalThis.fetch(`${baseUrl}/dashboard/api/pairing`, {
-      headers: { Cookie: sessionCookie, Accept: "application/json" }
-    });
-    assert.strictEqual(pairingRes.status, 200);
-
-    const animeRes = await globalThis.fetch(`${baseUrl}/dashboard/api/anime`, {
-      headers: { Cookie: sessionCookie, Accept: "application/json" }
-    });
-    assert.strictEqual(animeRes.status, 200);
-
-    const atlasRes = await globalThis.fetch(`${baseUrl}/dashboard/atlas`, {
-      headers: { Cookie: sessionCookie, Accept: "application/json" }
-    });
-    assert.strictEqual(atlasRes.status, 200);
-
-  } finally {
-    server.close();
-  }
 });

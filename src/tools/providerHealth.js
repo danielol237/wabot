@@ -14,6 +14,7 @@ const KEY_ENV = {
   MiniMax: "MINIMAX_API_KEY",
   ElevenLabs: "ELEVENLABS_API_KEY",
   "Z.AI": "ZHIPU_API_KEY",
+  OpenRouter: "OPENROUTER_API_KEY",
 };
 
 const PROVIDER_ALIASES = {
@@ -27,6 +28,7 @@ const PROVIDER_ALIASES = {
   agnes: "Agnes",
   groq: "Groq",
   zai: "Z.AI",
+  openrouter: "OpenRouter",
 };
 
 const FAILURE_BACKOFF_MS = 60_000;

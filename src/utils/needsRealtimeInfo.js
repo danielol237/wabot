@@ -25,6 +25,9 @@ const STATIC_KNOWLEDGE_SIGNALS = [
   "write me", "build me", "create a", "translate", "calculate",
 ];
 
+// Pre-compiled static regex to avoid dynamic RegExp compilation in hot message routing paths
+const IS_STILL_REGEX = /is .* still/;
+
 function needsRealtimeInfo(message) {
   const lower = message.toLowerCase();
 
@@ -33,8 +36,8 @@ function needsRealtimeInfo(message) {
   if (STATIC_KNOWLEDGE_SIGNALS.some((s) => lower.includes(s))) return false;
 
   return REALTIME_SIGNALS.some((signal) => {
-    if (signal.includes(".*")) {
-      return new RegExp(signal).test(lower);
+    if (signal === "is .* still") {
+      return IS_STILL_REGEX.test(lower);
     }
     return lower.includes(signal);
   });

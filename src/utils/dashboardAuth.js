@@ -287,7 +287,6 @@ function createSession(username, role, options = {}) {
   const now = Date.now();
   const ttlMs = options.rememberMe ? SESSION_TTL_REMEMBER_MS : (options.ttlMs || SESSION_TTL_STANDARD_MS);
   const expiresAt = now + ttlMs;
-  const expiresAt = now + (options.ttlMs || SESSION_TTL_MS);
 
   const session = {
     idHash: tokenHash,

@@ -2631,6 +2631,12 @@ async function handleAgent(sock, msg, args, ctx) {
 
 async function handleSelfCheck(sock, msg, args, ctx) {
   const { reply, react } = require("./baileysHelpers");
+  const argStr = String(args || "").toLowerCase();
+  if (argStr.includes("provider") || argStr.includes("ai") || argStr.includes("health")) {
+    const { formatDiagnosticReport } = require("../tools/providerHealth");
+    await react(sock, msg, "🩺");
+    return reply(sock, msg, formatDiagnosticReport());
+  }
   await react(sock, msg, "🔬");
   const result = await runSelfCheck(ctx.senderName);
   // runSelfCheck returns an OBJECT ({success, noIssues, message} or

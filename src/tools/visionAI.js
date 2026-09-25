@@ -21,7 +21,7 @@ function getAgnesVisionBaseUrl() {
   return String(process.env.AGNES_BASE_URL || "https://apihub.agnes-ai.com/v1").replace(/\/+$/, "") + "/chat/completions";
 }
 
-const GROQ_VISION_MODELS = ["qwen/qwen3.6-27b", "meta-llama/llama-4-scout"];
+const GROQ_VISION_MODELS = ["qwen-2.5-32b", "llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"];
 
 const DEFAULT_VISION_PROMPT = `Look at this media and explain what is actually happening, not just a list of objects. Cover the visible action, people or characters, expressions, any readable text, the emotional tone, and useful context clues. Distinguish what is clearly visible from what is only an inference. Talk like you're explaining it to a friend who cannot see it.`;
 

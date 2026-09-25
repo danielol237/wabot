@@ -141,7 +141,11 @@ async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
   const actorJid = ctx.senderJid;
   if (decision.capability === "none") return false;
   if (decision.capability === "macaly") {
-    await macalyCloud.handleRequest({ request: ctx.text || target, quotedText, actorJid: ctx.senderJid, sock, msg, reply });
+    const rawText = String(ctx?.text || decision?.target || "").toLowerCase();
+    if (!/\bmacaly\b/i.test(rawText)) {
+      return false; // Fall back if Macaly was selected without explicit service mention
+    }
+    await macalyCloud.handleRequest({ request: ctx.text || decision.target, quotedText, actorJid: ctx.senderJid, sock, msg, reply });
     return true;
   }
   // Composio tools and connections are per-user (this user's own connected

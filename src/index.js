@@ -16,6 +16,23 @@ const {
 const { handleMessage } = require("./handlers/messageHandler");
 const { loadPlugins } = require("./utils/pluginLoader");
 const { log, error, warn } = require("./utils/logger");
+const whatsappDecryption = require("./utils/whatsappDecryptionHandler");
+
+process.on("uncaughtException", (err) => {
+  if (whatsappDecryption.isDecryptionError(err)) {
+    whatsappDecryption.handleDecryptionError(err);
+    return;
+  }
+  error("Uncaught Exception:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  if (whatsappDecryption.isDecryptionError(reason)) {
+    whatsappDecryption.handleDecryptionError(reason);
+    return;
+  }
+  error("Unhandled Rejection:", reason);
+});
 const { startTaskPoller } = require("./tools/taskPoller");
 const whatsappPairing = require("./utils/whatsappPairing");
 const companionEvents = require("./companionEvents");

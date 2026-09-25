@@ -63,12 +63,14 @@ async function buildProject(request, senderName, chatId, onProgress = null, user
   const planStep = await actionTask.runStep(task, "plan", async () => {
     const pending = getPendingPlan(chatId);
     const plan = pending?.files ? { files: pending.files, requirements: pending.requirements } : await planProject(brief, senderName, userId);
-    if (!plan?.files?.length) throw new Error("I could not create a safe project plan.");
+    if (!plan?.files?.length) {
+      throw new Error(`CODING TASK BLOCKED\n\nStage:\nPLAN_GENERATION\n\nReason:\nThe system could not generate a valid project plan for '${brief.slice(0, 100)}'.\n\nEvidence:\n- planner response: ${plan?.error || "empty file list"}\n- workspace: ${chatId}\n\nRequired action:\nCheck AI provider credentials or refine the project brief.`);
+    }
     planned = plan.files;
     requirements = plan.requirements || null;
     return { fileCount: planned.length, files: planned.map((file) => file.path), productType: requirements?.productType || "software project" };
   }, { verify: (result) => Number(result?.fileCount) > 0 });
-  if (planStep.state !== actionTask.STATES.COMPLETED) return { success: false, task: actionTask.summary(task), error: planStep.error || "I could not create a safe project plan." };
+  if (planStep.state !== actionTask.STATES.COMPLETED) return { success: false, task: actionTask.summary(task), error: planStep.error || "CODING TASK BLOCKED at PLAN_GENERATION" };
   pendingPlans.delete(chatId);
   const files = agent.mandatoryFiles ? agent.mandatoryFiles(brief, planned) : planned;
   const project = createProject(chatId, brief, files, { workflow: "contract-first" });

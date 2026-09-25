@@ -29,6 +29,12 @@ function safeError(error) {
   const status = error?.response?.status;
   const payload = error?.response?.data;
   const detail = typeof payload === "string" ? payload : payload?.message || payload?.error?.message || error?.message;
+  if (status === 401) {
+    return `HTTP 401: invalid key - AUTHENTICATION_FAILED (${String(detail || "token expired or incorrect").slice(0, 200)})`;
+  }
+  if (status === 404) {
+    return `HTTP 404: MODEL_UNAVAILABLE - ${String(detail || "model non-existent or no access").slice(0, 200)}`;
+  }
   return `${status ? `HTTP ${status}: ` : ""}${String(detail || "Z.AI request failed").slice(0, 500)}`;
 }
 

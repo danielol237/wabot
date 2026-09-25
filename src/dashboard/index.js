@@ -68,6 +68,9 @@ router.get("/", checkAuth, async (req, res) => {
     });
   } else if (activeView === "runtime") {
     const os = require("os");
+    const loadAvg = os.loadavg ? os.loadavg()[0] : null;
+    const cpuCount = os.cpus().length || 1;
+    const estimatedCpuPercent = loadAvg !== null ? Math.min(100, Math.round((loadAvg / cpuCount) * 100)) : null;
     innerContent = components.renderRuntimeView({
       runtime: {
         nodeVersion: process.version,
@@ -78,7 +81,7 @@ router.get("/", checkAuth, async (req, res) => {
       resources: {
         memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
         memoryPercent: Math.round((process.memoryUsage().rss / os.totalmem()) * 100),
-        cpuPercent: 4
+        cpuPercent: estimatedCpuPercent
       }
     });
   } else if (activeView === "services") {

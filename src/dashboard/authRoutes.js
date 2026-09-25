@@ -34,7 +34,7 @@ router.post("/api/auth/setup", async (req, res) => {
       httpOnly: true,
       maxAge: sessionRes.ttlMs,
       sameSite: "lax",
-      secure: process.process?.env?.NODE_ENV === "production"
+      secure: process.env.NODE_ENV === "production"
     });
 
     return res.json({

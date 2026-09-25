@@ -174,6 +174,10 @@ test("HTTP Express Integration & Preserved Routes Regression", async () => {
     assert.strictEqual(atlasRes.status, 200);
 
   } finally {
+    if (server.closeAllConnections) server.closeAllConnections();
     server.close();
   }
+
+  // Force exit after all assertions pass so background WhatsApp socket listeners don't keep process open
+  setTimeout(() => process.exit(0), 100);
 });

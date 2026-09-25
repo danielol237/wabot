@@ -4,9 +4,8 @@ const assert = require("node:assert/strict");
 const router = require("../src/utils/commandRouter");
 const providerHealth = require("../src/tools/providerHealth");
 const minimax = require("../src/tools/minimax");
-const zaiMedia = require("../src/tools/zaiMedia");
 const whatsappDecryption = require("../src/utils/whatsappDecryptionHandler");
-const deliveryWorkflow = require("../src/tools/deliveryWorkflow");
+const ResultFormatter = require("../src/coding/reporting/ResultFormatter");
 
 test("Regression: 'Aria set dashboard password as daniel' routes to dashboard system and NOT Macaly", () => {
   const action = router.resolveNaturalAction("Aria set dashboard password as daniel");
@@ -45,12 +44,16 @@ test("Regression: Bad MAC errors are identified and rate limited", () => {
   assert.equal(stats.count, 1);
 });
 
-test("Regression: Delivery Report includes verified project status and stage breakdown", () => {
-  const report = deliveryWorkflow.formatDeliveryReport({
-    project: { projectName: "Test Site", verificationState: "VALID", fileCount: 5, buildVerification: "passed" },
-    deployment: { url: "https://test.vercel.app" },
-    screenshot: { success: true }
+test("Regression: Coding task result includes verified project status and evidence", () => {
+  const formatter = new ResultFormatter();
+  const report = formatter.formatCompleted({
+    id: "task_123",
+    title: "Build a barbershop website",
+    provider: "Local",
+    filesChanged: ["index.html", "style.css"],
+    verification: ["Build passed", "HTTP 200 responded"]
   });
-  assert.match(report, /ARIA finished the verified delivery workflow/);
-  assert.match(report, /Live website: https:\/\/test\.vercel\.app/);
+  assert.match(report, /ARIA Coding Agent Completed Task/);
+  assert.match(report, /Build a barbershop website/);
+  assert.match(report, /index\.html/);
 });

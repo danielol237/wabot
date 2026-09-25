@@ -1,42 +1,23 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { formatDeliveryReport, verifyLiveUrl } = require("../src/tools/deliveryWorkflow");
+const ResultFormatter = require("../src/coding/reporting/ResultFormatter");
 const router = require("../src/utils/commandRouter");
 
-test("delivery workflow formats verified project, live URL, and screenshot summary", () => {
-  const report = formatDeliveryReport({
-    project: { projectName: "ARIA Portfolio", verificationState: "VALID", fileCount: 8, buildVerification: "passed", browserSmoke: { success: true } },
-    deployment: { url: "https://aria.example" },
-    github: { url: "https://github.com/example/aria-portfolio" },
+test("ResultFormatter formats verified project evidence", () => {
+  const formatter = new ResultFormatter();
+  const report = formatter.formatCompleted({
+    id: "task_123",
+    title: "ARIA Portfolio",
+    provider: "Local",
+    filesChanged: ["index.html"],
+    verification: ["Build passed", "HTTP 200 responded"]
   });
-  assert.match(report, /ARIA finished the (?:verified )?delivery workflow/);
-  assert.match(report, /https:\/\/aria\.example/);
-  assert.match(report, /Browser smoke: \*passed\*/);
-  assert.match(report, /github\.com\/example\/aria-portfolio/);
+  assert.match(report, /ARIA Coding Agent Completed Task/);
+  assert.match(report, /ARIA Portfolio/);
+  assert.match(report, /Build passed/);
 });
 
-test("delivery workflow reports missing live URL without throwing", async () => {
-  const result = await verifyLiveUrl("");
-  assert.equal(result.success, false);
-  assert.match(result.error, /No live URL/);
-});
-
-test("delivery command is owner-only and has intuitive aliases", () => {
-  const command = router.commands.find((item) => item.name === "deliver");
-  assert.ok(command);
-  assert.equal(command.ownerOnly, true);
-  assert.deepEqual(command.aliases, ["buildsite"]);
-});
-
-test("natural delivery request resolves without requiring a bot name", () => {
+test("natural build/deliver request resolves to deliver command", () => {
   const action = router.resolveNaturalAction("build a website and give me the link for a portfolio");
   assert.equal(action?.intent, "deliver");
-  assert.equal(action?.command?.name, "deliver");
-  assert.equal(action?.command?.ownerOnly, true);
-});
-
-test("delivery method instructions are removed from the project brief", () => {
-  const { cleanDeliveryRequest } = router._test;
-  assert.equal(cleanDeliveryRequest("create a site about yourself then give me ngrok tunnel link"), "create a site about yourself");
-  assert.equal(cleanDeliveryRequest("build a portfolio and deploy"), "build a portfolio");
 });

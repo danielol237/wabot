@@ -184,12 +184,24 @@ async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
     }
   }
   if (decision.capability === "github_engineering") {
-    // engineeringSystem does its own per-user GitHub-credential and
-    // per-proposal ownership checks (each upgrade is scoped to whoever
-    // created it, using their own connected token) — that per-user model is
-    // deliberately NOT collapsed into a blanket owner-only gate here.
-    const result = await require("./engineeringSystem").handleEngineeringRequest(target || "audit my repository", ctx.senderName, ctx.chatId, ctx.senderJid);
-    await reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Done."));
+    const codingSubsystem = require("../coding");
+    const initRes = await codingSubsystem.handleCodingRequest(target || "audit my repository", {
+      userId: ctx.senderJid,
+      chatId: ctx.chatId,
+    });
+    await reply(sock, msg, initRes.message);
+    codingSubsystem.engine.taskManager.once(`task.completed`, (evt) => {
+      if (evt.taskId === initRes.taskId) {
+        const finalReport = codingSubsystem.getTaskResult(evt.taskId);
+        reply(sock, msg, finalReport).catch(() => {});
+      }
+    });
+    codingSubsystem.engine.taskManager.once(`task.failed`, (evt) => {
+      if (evt.taskId === initRes.taskId) {
+        const finalReport = codingSubsystem.getTaskResult(evt.taskId);
+        reply(sock, msg, finalReport).catch(() => {});
+      }
+    });
     return true;
   }
   if (decision.capability === "send_file") {

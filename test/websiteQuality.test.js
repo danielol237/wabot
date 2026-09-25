@@ -5,7 +5,7 @@ const os = require("os");
 const path = require("path");
 
 const { checkProject } = require("../src/tools/websiteQuality");
-const { _test: builderTest } = require("../src/tools/appBuilder");
+const WorkspacePolicy = require("../src/coding/security/WorkspacePolicy");
 
 function fixture(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aria-website-quality-"));
@@ -44,19 +44,10 @@ test("website quality gate accepts a complete small landing page", () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("builder reserves mandatory files under a full planner budget", () => {
-  const planned = Array.from({ length: 12 }, (_, i) => ({ path: `src/file${i}.js` }));
-  const mandatory = ["package.json", "index.html", "vite.config.js", "README.md"].map((path) => ({ path }));
-  const merged = builderTest.mergePlannedFiles(planned, mandatory);
-  for (const required of mandatory) assert.ok(merged.some((file) => file.path === required.path));
-  assert.ok(merged.length <= 12);
-});
-
-test("builder rejects absolute, traversal, and NUL-containing paths", () => {
-  assert.equal(builderTest.safeRelativePath("src/App.jsx"), "src/App.jsx");
-  assert.equal(builderTest.safeRelativePath("../secret"), null);
-  assert.equal(builderTest.safeRelativePath("/etc/passwd"), null);
-  assert.equal(builderTest.safeRelativePath("src/\0evil.js"), null);
+test("WorkspacePolicy prevents path traversal out of workspace", () => {
+  const policy = new WorkspacePolicy("/tmp/workspace");
+  assert.throws(() => policy.resolvePath("../secret"), /Path traversal denied/);
+  assert.equal(policy.resolvePath("src/App.jsx"), path.resolve("/tmp/workspace/src/App.jsx"));
 });
 
 test("browser smoke renders the upgraded landing template", async () => {
@@ -79,25 +70,4 @@ test("browser smoke falls back to static validation when Chromium is unavailable
     assert.match(result.warning, /Chromium/);
     assert.ok(result.textLength > 20);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-});
-
-test("builder exposes complete verified starter fallback plans", async () => {
-  assert.equal(builderTest.matchTemplate("make a focused product landing page"), "landing");
-  const starter = await builderTest.scaffoldFromTemplate("make a todo app", "todo");
-  assert.equal(starter.template, "todo");
-  assert.deepEqual(starter.files.map((file) => file.path), ["index.html", "style.css", "script.js"]);
-});
-
-test("build flow runs all files without a continuation prompt or command", () => {
-  const builderSource = fs.readFileSync(path.join(__dirname, "../src/tools/appBuilder.js"), "utf8");
-  const routerSource = fs.readFileSync(path.join(__dirname, "../src/utils/commandRouter.js"), "utf8");
-  assert.match(builderSource, /contract-first/);
-  assert.match(builderSource, /executeBuild/);
-  assert.doesNotMatch(builderSource, /continue the project|reply ["']continue["']/i);
-  assert.doesNotMatch(routerSource, /name:\s*["']continue["']/);
-});
-
-test("autonomous builder identifies briefs that benefit from research", () => {
-  assert.equal(builderTest.shouldResearchBuild("build an integrated farmer income solution"), true);
-  assert.equal(builderTest.shouldResearchBuild("build a polished static landing page for a neighborhood coffee shop with a warm editorial visual system and accessible interactions"), false);
 });

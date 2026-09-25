@@ -131,42 +131,27 @@ async function orchestrate(chatId, creator, objective) {
     let buildLink = "";
     if (isBuildTask) {
       try {
-        notify(mission, "👨‍💻 *Builder:* Writing real files, verifying, and packaging the project...");
-        const { buildProject, continueProject } = require("./appBuilder");
-        let buildResult = await buildProject(objective, "ARIA", mission.chatId, async (msg) => notify(mission, msg));
-        // If the build paused (more files than one batch), auto-continue until done.
-        let guard = 0;
-        while (buildResult && buildResult.paused && guard < 6) {
-          notify(mission, "⏩ Continuing the build...");
-          buildResult = await continueProject(mission.chatId, "ARIA", async (msg) => notify(mission, msg));
-          guard++;
-        }
-        if (buildResult && buildResult.success && buildResult.downloadUrl) {
-          built = "Built and packaged the project. Download: " + buildResult.downloadUrl;
-          buildLink = buildResult.downloadUrl;
-          mission.steps[2].result = { built: true, downloadUrl: buildResult.downloadUrl, detail: buildResult.message || "" };
-          mission.buildLink = buildResult.downloadUrl;
-          // Send the actual zip file directly to the chat so the user gets the
-          // bundled project (all files + assets) instead of just a link.
-          try {
-            if (buildResult.zipPath && fs.existsSync(buildResult.zipPath)) {
-              const sock = require("./missionSock").getSock();
-              if (sock) {
-                const buffer = fs.readFileSync(buildResult.zipPath);
-                await sock.sendMessage(mission.chatId, {
-                  document: buffer,
-                  fileName: (buildResult.files?.[0]?.split("/").pop() ? "aria-project.zip" : "aria-project.zip"),
-                  mimetype: "application/zip",
-                  caption: `📦 *Built: ${objective.slice(0, 40)}*\n${buildResult.fileCount || ""} files, all bundled. Unzip to run locally.\n\n☁️ Backup link: ${buildResult.downloadUrl}`,
-                });
-                fs.unlinkSync(buildResult.zipPath);
-              }
-            }
-          } catch (err) {
-            error("Failed to send project zip:", err.message);
-          }
+        notify(mission, "👨‍💻 *Builder:* Executing coding mission with single authoritative Coding Engine...");
+        const codingSubsystem = require("../coding");
+        const initRes = await codingSubsystem.handleCodingRequest(objective, {
+          userId: "orchestrator",
+          chatId: mission.chatId,
+        });
+
+        const taskResult = await new Promise((resolve) => {
+          codingSubsystem.engine.taskManager.once("task.completed", (evt) => {
+            if (evt.taskId === initRes.taskId) resolve({ success: true, taskId: evt.taskId });
+          });
+          codingSubsystem.engine.taskManager.once("task.failed", (evt) => {
+            if (evt.taskId === initRes.taskId) resolve({ success: false, error: evt.error });
+          });
+        });
+
+        if (taskResult.success) {
+          built = `Built task ${initRes.taskId} successfully.`;
+          mission.steps[2].result = { built: true, taskId: initRes.taskId };
         } else {
-          built = "[BUILDER] " + (buildResult?.error || "Build did not complete (may need !continue).");
+          built = "[BUILDER] " + (taskResult.error || "Build did not complete.");
         }
       } catch (err) {
         error("Mission build failed:", err.message);

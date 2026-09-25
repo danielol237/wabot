@@ -1,0 +1,349 @@
+/* ARIA Operator Workspace Stylesheet - Dark Restrained Theme (#090B0E) */
+:root {
+  --aria-bg: #090B0E;
+  --aria-surface: #0E1115;
+  --aria-elevated: #13171C;
+  --aria-border: #20262D;
+  --aria-primary: #F2F4F7;
+  --aria-secondary: #8B949E;
+  --aria-muted: #5F6872;
+
+  --aria-green: #3DCC8A;
+  --aria-amber: #F2B84B;
+  --aria-red: #F06B75;
+  --aria-blue: #57C7E8;
+
+  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--aria-bg);
+  color: var(--aria-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+a {
+  color: var(--aria-primary);
+  text-decoration: none;
+}
+
+button {
+  font-family: var(--font-ui);
+}
+
+/* App Shell Layout */
+.aria-app {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 300px;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+.aria-sidebar {
+  background: var(--aria-surface);
+  border-right: 1px solid var(--aria-border);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 20px 14px;
+  position: sticky;
+  top: 0;
+}
+
+.aria-brand {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 28px;
+  padding: 0 8px;
+}
+
+.aria-brand-mark {
+  border-radius: 8px;
+  height: 36px;
+  object-fit: contain;
+  width: 36px;
+}
+
+.aria-brand-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.aria-brand-subtitle {
+  color: var(--aria-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.aria-nav-group {
+  color: var(--aria-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  margin: 18px 0 6px 8px;
+  text-transform: uppercase;
+}
+
+.aria-nav-item {
+  align-items: center;
+  border-radius: 6px;
+  color: var(--aria-secondary);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 10px;
+  margin-bottom: 2px;
+  padding: 8px 10px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.aria-nav-item:hover {
+  background: var(--aria-elevated);
+  color: var(--aria-primary);
+}
+
+.aria-nav-item.active {
+  background: var(--aria-elevated);
+  border-left: 2px solid var(--aria-primary);
+  color: var(--aria-primary);
+  font-weight: 600;
+}
+
+.aria-sidebar-footer {
+  border-top: 1px solid var(--aria-border);
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+.aria-status-badge {
+  align-items: center;
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.aria-status-dot {
+  background-color: var(--aria-green);
+  border-radius: 50%;
+  height: 8px;
+  width: 8px;
+}
+
+.aria-status-dot.offline { background-color: var(--aria-secondary); }
+.aria-status-dot.degraded { background-color: var(--aria-amber); }
+.aria-status-dot.error { background-color: var(--aria-red); }
+
+/* Main Workspace */
+.aria-main {
+  background: var(--aria-bg);
+  min-width: 0;
+  padding: 28px 36px 64px;
+}
+
+.aria-header {
+  align-items: center;
+  border-bottom: 1px solid var(--aria-border);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  padding-bottom: 18px;
+}
+
+.aria-page-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.aria-page-sub {
+  color: var(--aria-secondary);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+/* Right Context Panel */
+.aria-context-panel {
+  background: var(--aria-surface);
+  border-left: 1px solid var(--aria-border);
+  height: 100vh;
+  overflow-y: auto;
+  padding: 24px 18px;
+  position: sticky;
+  top: 0;
+}
+
+.aria-panel-section {
+  border-bottom: 1px solid var(--aria-border);
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+}
+
+.aria-panel-title {
+  color: var(--aria-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+
+/* Data Tables & Panels */
+.aria-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.aria-table th {
+  border-bottom: 1px solid var(--aria-border);
+  color: var(--aria-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.aria-table td {
+  border-bottom: 1px solid var(--aria-border);
+  padding: 10px 12px;
+}
+
+.aria-row-card {
+  background: var(--aria-surface);
+  border: 1px solid var(--aria-border);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  padding: 14px 16px;
+}
+
+.aria-row-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.aria-badge {
+  border-radius: 4px;
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+}
+
+.aria-badge.green { background: rgba(61, 204, 138, 0.15); color: var(--aria-green); }
+.aria-badge.amber { background: rgba(242, 184, 75, 0.15); color: var(--aria-amber); }
+.aria-badge.red { background: rgba(240, 107, 117, 0.15); color: var(--aria-red); }
+.aria-badge.muted { background: var(--aria-elevated); color: var(--aria-secondary); }
+
+/* Buttons & Inputs */
+.aria-btn {
+  background: var(--aria-elevated);
+  border: 1px solid var(--aria-border);
+  border-radius: 6px;
+  color: var(--aria-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 14px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.aria-btn:hover {
+  background: var(--aria-border);
+  border-color: var(--aria-secondary);
+}
+
+.aria-btn-primary {
+  background: var(--aria-primary);
+  border-color: var(--aria-primary);
+  color: var(--aria-bg);
+}
+
+.aria-btn-primary:hover {
+  background: #E0E4E8;
+}
+
+.aria-input {
+  background: var(--aria-surface);
+  border: 1px solid var(--aria-border);
+  border-radius: 6px;
+  color: var(--aria-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  outline: none;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.aria-input:focus {
+  border-color: var(--aria-secondary);
+}
+
+/* Mobile Bottom Navigation */
+.aria-mobile-nav {
+  background: var(--aria-surface);
+  border-top: 1px solid var(--aria-border);
+  bottom: 0;
+  display: none;
+  justify-content: space-around;
+  left: 0;
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+  position: fixed;
+  right: 0;
+  z-index: 100;
+}
+
+.aria-mobile-item {
+  align-items: center;
+  color: var(--aria-secondary);
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  gap: 2px;
+}
+
+@media (max-width: 1024px) {
+  .aria-app {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+  .aria-context-panel {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .aria-app {
+    display: block;
+    padding-bottom: 60px;
+  }
+  .aria-sidebar {
+    display: none;
+  }
+  .aria-main {
+    padding: 16px;
+  }
+  .aria-mobile-nav {
+    display: flex;
+  }
+}

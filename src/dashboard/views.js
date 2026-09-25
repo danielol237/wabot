@@ -198,6 +198,23 @@ function renderShell({ user, activeView, content, csrfToken }) {
       const d = document.getElementById('aria-mobile-drawer');
       if (d) d.classList.toggle('open');
     }
+
+    if (!!window.EventSource) {
+      try {
+        const sse = new EventSource('/api/stream');
+        sse.onmessage = function(e) {
+          try {
+            const payload = JSON.parse(e.data);
+            if (payload && payload.type && payload.type.startsWith('task.')) {
+              const urlParams = new URLSearchParams(window.location.search);
+              if (urlParams.get('view') === 'missions') {
+                window.location.reload();
+              }
+            }
+          } catch (_) {}
+        };
+      } catch (_) {}
+    }
   </script>
 </body>
 </html>`;

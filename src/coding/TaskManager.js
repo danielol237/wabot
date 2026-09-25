@@ -1,8 +1,10 @@
-// Asynchronous Task Manager with Real State Progress Updates
+// Asynchronous Task Manager with Real State Progress Updates & EventBus Emission
 const EventEmitter = require("events");
 const TaskStore = require("./state/TaskStore");
 const { TASK_STATES, TERMINAL_STATES } = require("./state/TaskState");
 const { log, warn, error } = require("../utils/logger");
+const ariaEventBus = require("../utils/eventBus");
+const executionLogger = require("./logging/ExecutionLogger");
 
 class TaskManager extends EventEmitter {
   constructor(options = {}) {
@@ -37,10 +39,22 @@ class TaskManager extends EventEmitter {
     }
   }
 
+  broadcast(eventType, payload) {
+    this.emit(eventType, payload);
+    try {
+      ariaEventBus.emitEvent(eventType, payload);
+    } catch (_) {}
+    executionLogger.logEvent({
+      taskId: payload?.taskId || payload?.id,
+      stage: payload?.status || payload?.step || eventType,
+      message: payload?.request || payload?.message || `Event: ${eventType}`,
+    });
+  }
+
   submitTask(payload) {
     const task = this.store.createTask(payload);
     this.queue.push(task.id);
-    this.emit("task.created", task);
+    this.broadcast("task.created", task);
     this.processQueue();
     return task;
   }
@@ -77,7 +91,7 @@ class TaskManager extends EventEmitter {
       blockedReason: reason,
     });
 
-    this.emit("task.cancelled", { id, reason });
+    this.broadcast("task.cancelled", { taskId: id, id, reason });
     this.processQueue();
     return true;
   }
@@ -104,6 +118,7 @@ class TaskManager extends EventEmitter {
 
     if (task.status === TASK_STATES.CREATED) {
       this.store.updateTask(task.id, { status: TASK_STATES.CLASSIFIED });
+      this.broadcast("task.classified", { taskId: task.id, status: TASK_STATES.CLASSIFIED });
     }
 
     let cancelCallback = null;
@@ -120,16 +135,22 @@ class TaskManager extends EventEmitter {
 
     const progressEmitter = (event) => {
       const step = event.step;
-      if (step === "discovery_started") this.store.updateTask(task.id, { status: TASK_STATES.DISCOVERING });
-      else if (step === "planning_started") this.store.updateTask(task.id, { status: TASK_STATES.PLANNING });
-      else if (step === "plan_validated") this.store.updateTask(task.id, { status: TASK_STATES.PLAN_VALIDATED });
-      else if (step === "execution_started") this.store.updateTask(task.id, { status: TASK_STATES.EXECUTING });
-      else if (step === "testing_started") this.store.updateTask(task.id, { status: TASK_STATES.TESTING });
-      else if (step === "reviewing_started") this.store.updateTask(task.id, { status: TASK_STATES.REVIEWING });
-      else if (step === "repairing_attempt") this.store.updateTask(task.id, { status: TASK_STATES.REPAIRING });
-      else if (step === "verification_completed") this.store.updateTask(task.id, { status: TASK_STATES.VERIFYING });
+      let newStatus = null;
+      if (step === "discovery_started") newStatus = TASK_STATES.DISCOVERING;
+      else if (step === "planning_started") newStatus = TASK_STATES.PLANNING;
+      else if (step === "plan_validated") newStatus = TASK_STATES.PLAN_VALIDATED;
+      else if (step === "execution_started") newStatus = TASK_STATES.EXECUTING;
+      else if (step === "testing_started") newStatus = TASK_STATES.TESTING;
+      else if (step === "reviewing_started") newStatus = TASK_STATES.REVIEWING;
+      else if (step === "repairing_attempt") newStatus = TASK_STATES.REPAIRING;
+      else if (step === "verification_completed") newStatus = TASK_STATES.VERIFYING;
 
-      this.emit("task.progress", { taskId: task.id, ...event });
+      if (newStatus) {
+        this.store.updateTask(task.id, { status: newStatus, currentStep: step });
+      }
+
+      this.store.appendEvent(task.id, { step, ...event });
+      this.broadcast("task.progress", { taskId: task.id, currentStep: step, status: newStatus || task.status, ...event });
     };
 
     const taskExecutionPromise = (async () => {
@@ -144,7 +165,7 @@ class TaskManager extends EventEmitter {
     });
 
     try {
-      this.emit("task.started", task);
+      this.broadcast("task.started", task);
       const result = await Promise.race([
         taskExecutionPromise,
         cancelPromise,
@@ -158,7 +179,7 @@ class TaskManager extends EventEmitter {
           blockedReason: result.blockedReason || "Execution or verification failed.",
           evidence: result.evidence || null,
         });
-        this.emit("task.failed", { taskId: task.id, result });
+        this.broadcast("task.failed", { taskId: task.id, status: finalStatus, result });
       } else {
         this.store.updateTask(task.id, {
           status: TASK_STATES.COMPLETED,
@@ -166,7 +187,7 @@ class TaskManager extends EventEmitter {
           filesChanged: result?.filesChanged || task.filesChanged,
           verification: result?.verification || task.verification,
         });
-        this.emit("task.completed", { taskId: task.id, result });
+        this.broadcast("task.completed", { taskId: task.id, status: TASK_STATES.COMPLETED, result });
       }
     } catch (err) {
       const isCancel = err.message === "TASK_CANCELLED";
@@ -178,8 +199,9 @@ class TaskManager extends EventEmitter {
         errors: [...(task.errors || []), err.message],
       });
 
-      this.emit(isCancel ? "task.cancelled" : "task.failed", {
+      this.broadcast(isCancel ? "task.cancelled" : "task.failed", {
         taskId: task.id,
+        status: finalState,
         error: err.message,
       });
     } finally {

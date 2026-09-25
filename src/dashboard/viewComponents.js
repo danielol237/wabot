@@ -277,26 +277,76 @@ function renderPairingView() {
   `;
 }
 
+function renderStateMachineBar(currentStatus) {
+  const stages = [
+    "CLASSIFIED", "DISCOVERING", "PLANNING", "EXECUTING",
+    "TESTING", "REVIEWING", "VERIFYING", "COMPLETED"
+  ];
+  const currentIndex = stages.indexOf(currentStatus);
+  return `<div style="display:flex;flex-wrap:wrap;gap:4px;margin:8px 0;">` + stages.map((st, idx) => {
+    const isDone = currentIndex >= idx || currentStatus === "COMPLETED";
+    const isCurrent = currentStatus === st;
+    const bg = isCurrent ? "#3B82F6" : (isDone ? "#10B981" : "#1F2937");
+    const color = isDone || isCurrent ? "#FFFFFF" : "#9CA3AF";
+    return `<span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:${bg};color:${color};">${st}</span>`;
+  }).join("") + `</div>`;
+}
+
 function renderMissionsView(missionsData) {
   const missions = missionsData.missions || [];
+  const codingTasks = missionsData.codingTasks || [];
+
   return `
     <div style="margin-bottom:20px;">
       <div class="aria-panel-header" style="margin-bottom:12px;">
-        <span style="font-size:13px;font-weight:700;">MISSION WORKSPACE</span>
+        <span style="font-size:13px;font-weight:700;">CODING TASKS / MISSIONS (${codingTasks.length})</span>
       </div>
-      ${missions.length === 0 ? `
-        <div class="aria-panel-card"><div style="color:var(--aria-secondary);text-align:center;padding:24px;font-size:12px;">No active or past missions recorded. Issue a task to trigger ARIA mission engine.</div></div>
-      ` : missions.map(m => `
-        <div class="aria-panel-card" style="margin-bottom:10px;">
+      ${codingTasks.length === 0 ? `
+        <div class="aria-panel-card"><div style="color:var(--aria-secondary);text-align:center;padding:24px;font-size:12px;">No active or past coding tasks recorded. Send a request like "Aria build a website" in WhatsApp.</div></div>
+      ` : codingTasks.map(t => `
+        <div class="aria-panel-card" style="margin-bottom:12px;" id="card-${esc(t.id)}">
           <div class="aria-panel-header">
-            <span class="mono" style="font-weight:700;font-size:12px;">${esc(m.id)}</span>
-            <span class="aria-badge ${m.status === 'completed' ? 'green' : m.status === 'running' ? 'amber' : 'muted'}">${esc(m.status)}</span>
+            <span class="mono" style="font-weight:700;font-size:13px;color:#3B82F6;">${esc(t.id)}</span>
+            <span class="aria-badge ${t.status === 'COMPLETED' ? 'green' : t.status === 'FAILED' ? 'red' : 'amber'}">${esc(t.status)}</span>
           </div>
-          <div style="font-size:13px;font-weight:600;margin-bottom:6px;">${esc(m.title)}</div>
-          <div style="font-size:12px;color:var(--aria-secondary);margin-bottom:6px;">Current Step: ${esc(m.currentStep)}</div>
-          <div style="font-size:11px;color:var(--aria-muted);" class="mono">Started: ${esc(m.startedAt)}</div>
+          <div style="font-size:14px;font-weight:600;margin:6px 0;">"${esc(t.request || t.title)}"</div>
+
+          <div style="font-size:11px;color:var(--aria-muted);margin-bottom:4px;font-weight:700;">STATUS PIPELINE:</div>
+          ${renderStateMachineBar(t.status)}
+
+          <div style="font-size:12px;color:var(--aria-secondary);margin:6px 0;">
+            <strong>CURRENT STEP:</strong> ${esc(t.currentStep || t.statusMessage || t.status)}
+          </div>
+
+          <div style="font-size:11px;color:var(--aria-muted);margin-top:6px;">
+            <strong>CAPABILITIES:</strong> filesystem.read • filesystem.write • terminal.execute • coding.edit • coding.test
+          </div>
+
+          <details style="margin-top:8px;">
+            <summary style="font-size:11px;color:#3B82F6;cursor:pointer;font-weight:600;">View Complete Event History (${t.events?.length || 0})</summary>
+            <div style="font-family:monospace;font-size:11px;background:#0D1117;color:#D1D5DB;padding:8px;border-radius:4px;margin-top:6px;max-height:160px;overflow-y:auto;border:1px solid #1F2937;">
+              ${(t.events || []).map(e => `<div><span style="color:#6B7280;">[${esc(e.timestamp ? e.timestamp.slice(11, 19) : '12:00:00')}]</span> <strong style="color:#60A5FA;">${esc(e.state || 'EVENT')}</strong>: ${esc(e.message || e.step || '')}</div>`).join('')}
+            </div>
+          </details>
         </div>
       `).join('')}
+
+      ${missions.length > 0 ? `
+        <div class="aria-panel-header" style="margin:24px 0 12px 0;">
+          <span style="font-size:13px;font-weight:700;">BACKGROUND AGENT MISSIONS (${missions.length})</span>
+        </div>
+        ${missions.map(m => `
+          <div class="aria-panel-card" style="margin-bottom:10px;">
+            <div class="aria-panel-header">
+              <span class="mono" style="font-weight:700;font-size:12px;">${esc(m.id)}</span>
+              <span class="aria-badge ${m.status === 'completed' ? 'green' : m.status === 'running' ? 'amber' : 'muted'}">${esc(m.status)}</span>
+            </div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:6px;">${esc(m.title)}</div>
+            <div style="font-size:12px;color:var(--aria-secondary);margin-bottom:6px;">Current Step: ${esc(m.currentStep)}</div>
+            <div style="font-size:11px;color:var(--aria-muted);" class="mono">Started: ${esc(m.startedAt)}</div>
+          </div>
+        `).join('')}
+      ` : ''}
     </div>
   `;
 }

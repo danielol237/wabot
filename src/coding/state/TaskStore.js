@@ -13,6 +13,22 @@ function ensureDirectory() {
   }
 }
 
+function sanitizeData(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(sanitizeData);
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (/token|secret|password|api_?key|auth|bearer|cookie/i.test(k) && typeof v === "string") {
+      out[k] = "[REDACTED]";
+    } else if (typeof v === "object") {
+      out[k] = sanitizeData(v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 class TaskStore {
   constructor(filePath = STORE_FILE) {
     this.filePath = filePath;
@@ -147,6 +163,34 @@ class TaskStore {
     return task;
   }
 
+  listTasks(filter = {}) {
+    let list = Array.from(this.tasks.values());
+    if (filter.chatId) list = list.filter((t) => t.chatId === filter.chatId);
+    if (filter.status) list = list.filter((t) => t.status === filter.status);
+    if (filter.userId) list = list.filter((t) => t.userId === filter.userId);
+    return list;
+  }
+
+  deleteTask(id) {
+    const deleted = this.tasks.delete(id);
+    if (deleted) this.save();
+    return deleted;
+  }
+
+  appendEvent(id, eventData) {
+    const task = this.getTask(id);
+    if (!task) return null;
+    if (!Array.isArray(task.events)) task.events = [];
+    const event = {
+      timestamp: new Date().toISOString(),
+      ...sanitizeData(eventData),
+    };
+    task.events.push(event);
+    task.updatedAt = event.timestamp;
+    this.save();
+    return event;
+  }
+
   addCheckpoint(id, name, data = {}) {
     const task = this.getTask(id);
     if (!task) return null;
@@ -155,7 +199,7 @@ class TaskStore {
       timestamp: new Date().toISOString(),
       name,
       state: task.status,
-      data,
+      data: sanitizeData(data),
     };
     task.checkpoints.push(checkpoint);
     task.updatedAt = checkpoint.timestamp;

@@ -75,7 +75,7 @@ function normalizeProviderFailure(error, provider, model) {
   const label = provider === GEMINI_PROVIDER ? "Gemini" : (provider === MISTRAL_PROVIDER ? "Mistral" : "Agnes AI");
   const keyName = provider === GEMINI_PROVIDER ? "GEMINI_API_KEY" : (provider === MISTRAL_PROVIDER ? "MISTRAL_API_KEY" : "AGNES_API_KEY");
   if (status === 401 || status === 403 || /user not found|invalid api key|invalid authentication|unauthorized|authentication failed|permission denied|api key/i.test(detail)) {
-    return codingProviderError(`${label} rejected the coding credential. Check ${keyName} in Render, then redeploy ARIA.`, "CODING_PROVIDER_AUTH_FAILED", provider, model);
+    return codingProviderError(`${label} rejected the coding credential. Check ${keyName} in the bot environment, then restart ARIA.`, "CODING_PROVIDER_AUTH_FAILED", provider, model);
   }
   if (status === 404 || /model.*(?:not found|does not exist)|unknown model/i.test(detail)) {
     return codingProviderError(`${label} could not access the configured coding model ${model}. Check model availability and retry.`, "CODING_PROVIDER_MODEL_UNAVAILABLE", provider, model);

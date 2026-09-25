@@ -330,6 +330,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
   registerCommand({ name: "world", aliases: ["worldmodel", "model"], category: "dev", description: "View ARIA's world model", handler: handleWorld, ownerOnly: true });
   registerCommand({ name: "delegate", aliases: ["orbit", "orchestrate"], category: "dev", description: "Run the agent-team mission orchestrator", handler: handleDelegate, ownerOnly: true });
   registerCommand({ name: "dashboard", aliases: ["dash", "dashsetup"], category: "admin", description: "Set up dashboard owner password: !dashboard setup <password>", handler: handleDashboardCommand, ownerOnly: true });
+  registerCommand({ name: "composio", aliases: ["mcp", "connectapp"], category: "utility", description: "Manage Composio app integrations: !composio [status|connect <app>|apps]", handler: handleComposio, ownerOnly: false });
   registerCommand({ name: "grant", aliases: [], category: "admin", description: "Grant a capability to a user", handler: handleGrant, ownerOnly: true });
   registerCommand({ name: "revoke", aliases: [], category: "admin", description: "Revoke a capability", handler: handleRevoke, ownerOnly: true });
   registerCommand({ name: "caps", aliases: ["permissions"], category: "admin", description: "View granted capabilities", handler: handleCaps, ownerOnly: true });
@@ -3132,6 +3133,43 @@ async function handlePluginDisable(sock, msg, args, context) {
   const { setPluginState } = require("../tools/pluginMarket");
   setPluginState(name, false);
   return reply(sock, msg, `✅ Disabled *${name}*.`);
+}
+
+async function handleComposio(sock, msg, args, ctx) {
+  const { reply } = require("./baileysHelpers");
+  const { requestConnectLink, diagnoseComposio, listAllTools, isConfigured } = require("../tools/mcpServers");
+  const input = String(args || "").trim();
+
+  if (!isConfigured()) {
+    return reply(sock, msg, "🛠️ Composio is not configured. Add COMPOSIO_API_KEY to your bot environment.");
+  }
+
+  if (/\b(?:diagnose|health|status)\b/i.test(input)) {
+    const diag = await diagnoseComposio(ctx.senderJid);
+    return reply(sock, msg, diag);
+  }
+
+  if (/\b(?:connect|link|auth|authorize)\b/i.test(input)) {
+    const appMatch = input.match(/\b(?:connect|link|auth|authorize)\s+(.*)/i);
+    const app = appMatch?.[1]?.trim() || "gmail";
+    try {
+      const link = await requestConnectLink(ctx.senderJid, app);
+      return reply(sock, msg, link);
+    } catch (err) {
+      return reply(sock, msg, `❌ Could not connect ${app}: ${err.message}`);
+    }
+  }
+
+  if (/\b(?:apps|tools|connected|list)\b/i.test(input) || !input) {
+    const tools = await listAllTools(ctx.senderJid, { forceRefresh: true });
+    if (!tools.length) {
+      return reply(sock, msg, "🔗 No Composio apps connected for your user. Say `!composio connect gmail` or `!composio connect slack` to authorize.");
+    }
+    const lines = tools.map((t) => `• *${t.name}* — ${t.description.slice(0, 60)}`);
+    return reply(sock, msg, `🔗 *Connected Composio Tools (${tools.length}):*\n\n${lines.join("\n")}`);
+  }
+
+  return reply(sock, msg, "Usage: !composio [status|connect <app>|apps|diagnose]");
 }
 
 module.exports = {

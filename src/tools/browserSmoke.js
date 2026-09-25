@@ -100,7 +100,11 @@ function runBrowserSmoke(projectDir, options = {}) {
           if (error.code === "ENOENT") return finish(runStaticSmoke(root, "Chromium became unavailable; static HTML smoke validation was used."));
           return finish({ success: false, error: `Browser smoke failed: ${error.message}`, output: String(stderr || stdout || "").slice(-6000) });
         }
-        finish(inspectDocument(stdout, "Browser", url));
+        const browserResult = inspectDocument(stdout, "Browser", url);
+        if (!browserResult.success && /no document body/i.test(browserResult.error || "")) {
+          return finish(runStaticSmoke(root, "Headless Chromium returned no document body; static HTML smoke validation was used."));
+        }
+        finish(browserResult);
       });
     });
   });

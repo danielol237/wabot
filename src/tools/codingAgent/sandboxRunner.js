@@ -78,11 +78,13 @@ function runProcess(command, args, options = {}) {
 
 function runDocker(args, options = {}) {
   const root = path.resolve(options.cwd || process.cwd());
+  const uid = typeof process.getuid === "function" ? process.getuid() : 1000;
+  const gid = typeof process.getgid === "function" ? process.getgid() : uid;
   const configuredNetwork = String(process.env.SANDBOX_DOCKER_NETWORK || "").trim().toLowerCase();
   const network = ["none", "bridge", "host"].includes(configuredNetwork) ? configuredNetwork : (options.network || "none");
   const image = options.image || "node:22-slim";
   const command = [
-    "run", "--rm", "--network", network, "--user", "1000:1000",
+    "run", "--rm", "--network", network, "--user", `${uid}:${gid}`,
     "--read-only", "--tmpfs", "/tmp:size=256m", "--memory", "768m", "--cpus", "1",
     "--pids-limit", "128", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
     // RLIMIT_NPROC is counted against the host UID on shared-UID hosts and

@@ -1,6 +1,7 @@
 // Slimmed-down message handler — routes to commandRouter
 // Previously 1669 lines, now ~150. New commands go in commandRouter, not here.
 
+const path = require("path");
 const { getMessageText, getSenderName, reply, react, sleep, hasMedia, hasVoiceNote, downloadMediaFromMsg, downloadQuotedMedia, findQuotedMediaReference, getQuotedMessageText, isQuotingBotMessage, isBotMentioned, getBotMentionJids } = require("../utils/baileysHelpers");
 const { routeMessage, triggeredByName } = require("../utils/commandRouter");
 const { checkGroupProtection } = require("../tools/groupProtection");
@@ -205,29 +206,45 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     await humanDelay(sock, chatId, senderJid, text.length + 1);
   }
 
-  // ── ARIA CODING ENGINE ROUTING ────────────────────────────
-  // Route natural-language software engineering requests to Coding Engine
+  // ── ARIA AGENT GOAL ROUTER & MISSION ENGINE ────────────────
   try {
-    const codingSubsystem = require("../coding");
-    if (codingSubsystem.isCodingRequest(text)) {
-      await react(sock, msg, "⚡");
-      const initRes = await codingSubsystem.handleCodingRequest(text, {
-        userId: senderJid,
-        chatId,
-      });
-      await reply(sock, msg, initRes.message);
+    const GoalRouter = require("../agent/GoalRouter");
+    const MissionAgent = require("../agent/MissionAgent");
 
-      // Listen for task completion and reply to WhatsApp asynchronously
-      codingSubsystem.engine.taskManager.once(`task.completed`, (evt) => {
-        if (evt.taskId === initRes.taskId) {
-          const finalReport = codingSubsystem.getTaskResult(evt.taskId);
-          reply(sock, msg, finalReport).catch(() => {});
+    const goalRouter = new GoalRouter();
+    const intent = goalRouter.classifyIntent(text, { hasMedia: hasMedia(msg) });
+
+    if (intent.type === "MISSION") {
+      await react(sock, msg, "⚡");
+      await reply(sock, msg, `⚡ *Mission Started*\nGoal: ${text.slice(0, 100)}\n\n_Progress is being tracked autonomously..._`);
+
+      const agent = new MissionAgent();
+      agent.executeMission(text, { userId: senderJid, chatId }).then(async (result) => {
+        if (result.success) {
+          let completionMsg = `✅ *Mission Completed*\n\nSummary: ${result.summary}`;
+          if (result.artifacts && result.artifacts.length > 0) {
+            completionMsg += `\n\n📄 Artifacts generated: ${result.artifacts.length}`;
+            for (const artifactPath of result.artifacts) {
+              try {
+                await sock.sendMessage(chatId, {
+                  document: { url: artifactPath },
+                  fileName: path.basename(artifactPath),
+                  mimetype: "text/plain"
+                });
+              } catch (_) {}
+            }
+          }
+          await reply(sock, msg, completionMsg);
+        } else {
+          await reply(sock, msg, `❌ *Mission Failed*\n\nReason: ${result.error}`);
         }
+      }).catch(async (err) => {
+        await reply(sock, msg, `❌ *Mission Failed*: ${err.message}`);
       });
       return;
     }
-  } catch (codingErr) {
-    warn(`Coding Engine dispatch warning: ${codingErr.message}`);
+  } catch (agentErr) {
+    warn(`Mission Agent dispatch warning: ${agentErr.message}`);
   }
 
   // Operational requests attached to media must be handled before the visual

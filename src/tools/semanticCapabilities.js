@@ -107,7 +107,7 @@ User request: ${request}${toolSection}`;
   }
 }
 
-async function mediaFromMessage(sock, msg, helpers) {
+async function mediaFromMessage(sock, msg, helpers, chatId = null) {
   try {
     const current = await helpers.downloadMediaFromMsg(sock, msg);
     if (current?.buffer) return current;
@@ -116,6 +116,14 @@ async function mediaFromMessage(sock, msg, helpers) {
     const quoted = await helpers.downloadQuotedMedia(sock, msg);
     if (quoted?.buffer) return quoted;
   } catch (_) {}
+  if (chatId) {
+    try {
+      const vis = require("../tools/visualContext").get(chatId);
+      if (vis && vis.base64) {
+        return { buffer: Buffer.from(vis.base64, "base64"), mimetype: vis.mimeType || "image/jpeg" };
+      }
+    } catch (_) {}
+  }
   return null;
 }
 
@@ -235,10 +243,16 @@ async function execute(decision, { sock, msg, ctx, reply, quotedText = "" }) {
   }
   if (decision.capability === "set_profile_picture") {
     const helpers = require("../utils/baileysHelpers");
-    const media = await mediaFromMessage(sock, msg, helpers);
+    const media = await mediaFromMessage(sock, msg, helpers, ctx.chatId);
     if (!media?.buffer || !String(media.mimetype || "").startsWith("image/")) return reply(sock, msg, "Attach or reply to the image you want me to use as my profile picture.");
-    await sock.updateProfilePicture(sock.user?.id?.split(":")[0] || sock.user?.id, media.buffer);
-    return reply(sock, msg, "✅ My WhatsApp profile picture was updated.");
+    const targetJid = sock.user?.id ? (sock.user.id.split(":")[0] + "@s.whatsapp.net") : sock.user?.jid;
+    try {
+      await sock.updateProfilePicture(targetJid, media.buffer);
+      await reply(sock, msg, "✅ My WhatsApp profile picture has been updated.");
+    } catch (err) {
+      await reply(sock, msg, `❌ Profile picture update failed: ${err.message}`);
+    }
+    return true;
   }
   if (decision.capability === "publish_status") {
     const helpers = require("../utils/baileysHelpers");

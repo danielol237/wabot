@@ -271,8 +271,8 @@ function stopCallbackServer() {
 async function startCode({ user, found, notify, onLinked }, deps) {
   const env = deps.env || process.env;
   const redirectUri = String(env.MACALY_OAUTH_REDIRECT_URI || "").trim();
+  if (!redirectUri) return { success: false, pending: false, error: "MACALY_CONFIGURATION_REQUIRED: MACALY_OAUTH_REDIRECT_URI environment variable is missing." };
   if (!found.meta.authorization_endpoint) throw new Error("Macaly did not publish a sign-in page address.");
-  if (!redirectUri) throw new Error("Sign-in by link needs MACALY_OAUTH_REDIRECT_URI (the public address of this bot's /macaly/callback). Ask the administrator to set it.");
   const client = await ensureClient(found, { redirectUri }, deps);
   const state = b64url(crypto.randomBytes(16));
   const verifier = b64url(crypto.randomBytes(32));

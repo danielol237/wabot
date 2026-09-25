@@ -74,11 +74,18 @@ function formatDeliveryReport({ project, deployment, screenshot, github }) {
 
 async function deliverWebsite({ sock, msg, ctx, request, buildProject, deployProject, publishProjectToGitHub, reply, react }) {
   const chatId = ctx.chatId;
-  // Builder progress is useful for internal telemetry but noisy in WhatsApp.
-  // Send only the start message and the final verified result.
-  const onProgress = async () => {};
   await react(sock, msg, "🚀");
-  await reply(sock, msg, "🚀 I’m building it, running the real checks, deploying the verified result, and preparing a screenshot + link.");
+  await reply(sock, msg, "TASK RECEIVED → CLASSIFIED: Website Build\nStarting discovery & requirement analysis...");
+
+  let lastStage = "";
+  const onProgress = async (stageMessage) => {
+    if (stageMessage && stageMessage !== lastStage) {
+      lastStage = stageMessage;
+      try {
+        await reply(sock, msg, `⏳ ${stageMessage}`);
+      } catch (_) {}
+    }
+  };
 
   const project = await buildProject(request, ctx.senderName, chatId, onProgress);
   if (!project.success) return reply(sock, msg, `❌ Build and verification failed.\n\n${safeText(project.error || "The project did not pass the quality gates.", 1000)}`);

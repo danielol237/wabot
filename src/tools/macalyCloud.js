@@ -24,7 +24,7 @@ const REPLY_CHARS = 3500;
 
 // Describes the capability to the action classifier. It is a description for the
 // model, not a keyword rule: the model decides when a request belongs here.
-const CLASSIFIER_LINE = "- macaly: work in the sender's own Macaly Cloud account through its live tools - creating, changing, inspecting, debugging, previewing or publishing apps and cloud projects, including follow-ups about an app already being discussed, and connecting or disconnecting their Macaly account. Use it only when the request concerns Macaly or the sender's Macaly apps and projects";
+const CLASSIFIER_LINE = "- macaly: work in the sender's own Macaly Cloud account through its live tools. EXCLUSIVELY use this when the user explicitly mentions Macaly by name or asks for Macaly operations.";
 
 const SYSTEM_PROMPT = `You are ARIA, working in the user's own Macaly Cloud account through MCP tools. You have full access to every listed tool and can do whatever the user asks with them, however they phrase it.
 Rules:

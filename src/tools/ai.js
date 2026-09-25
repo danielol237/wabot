@@ -394,7 +394,8 @@ const { chatGPT } = require("./gpt5Cli");
           return content;
         }
       } catch (err) {
-        const errMsg = err.response?.data?.error?.message || err.response?.data?.message || err.message || "unknown MiniMax error";
+        const parsedErr = minimax.parseMinimaxError ? minimax.parseMinimaxError(err) : { formatted: err.message };
+        const errMsg = parsedErr.formatted || err.message;
         lastError = errMsg;
         markProviderFailure("MiniMax", errMsg, requestStartedAt);
         error("MiniMax error:", errMsg);

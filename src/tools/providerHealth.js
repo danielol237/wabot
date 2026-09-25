@@ -189,9 +189,50 @@ function getHealth() {
   };
 }
 
+function formatDiagnosticReport() {
+  const allProviders = [
+    { name: "Z.AI", env: "ZHIPU_API_KEY" },
+    { name: "MiniMax", env: "MINIMAX_API_KEY" },
+    { name: "Jules", env: "JULES_API_KEY" },
+    { name: "Gemini", env: "GEMINI_API_KEY" },
+    { name: "Mistral", env: "MISTRAL_API_KEY" },
+    { name: "Groq", env: "GROQ_API_KEY" },
+    { name: "Agnes", env: "AGNES_API_KEY" },
+    { name: "GitHub", env: "GITHUB_TOKEN" },
+    { name: "Macaly", env: "MACALY_MCP_URL" },
+  ];
+
+  const lines = ["🩺 *ARIA Provider Diagnostic Report*\n"];
+
+  for (const p of allProviders) {
+    const isSet = Boolean(process.env[p.env]);
+    if (!isSet) {
+      lines.push(`• *${p.name}*: NOT_CONFIGURED`);
+      continue;
+    }
+    const avail = getAvailability(p.name);
+    if (!avail.keySet) {
+      lines.push(`• *${p.name}*: NOT_CONFIGURED`);
+    } else if (avail.ok) {
+      lines.push(`• *${p.name}*: HEALTHY`);
+    } else {
+      const err = (avail.lastError || "").toLowerCase();
+      let status = "ERROR";
+      if (/auth|401|403/i.test(err)) status = "AUTHENTICATION_FAILED";
+      else if (/rate|429/i.test(err)) status = "RATE_LIMITED";
+      else if (/model|404/i.test(err)) status = "MODEL_UNAVAILABLE";
+      else if (/network|dns|unreachable|timeout/i.test(err)) status = "NETWORK_ERROR";
+      lines.push(`• *${p.name}*: CONFIGURED / ${status}${avail.lastError ? ` (${avail.lastError})` : ""}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 module.exports = {
   checkAll,
   getHealth,
+  formatDiagnosticReport,
   recordSuccess,
   recordFailure,
   isAvailable,

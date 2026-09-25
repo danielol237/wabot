@@ -55,9 +55,26 @@ async function chat(messages, options = {}) {
   };
 }
 
+function parseMinimaxError(error) {
+  const status = error.response?.status;
+  const data = error.response?.data || {};
+  const providerMsg = data.base_resp?.status_msg || data.error?.message || data.message || error.message || "Unknown error";
+  const code = data.base_resp?.status_code || data.error?.code || (status === 401 ? "AUTHENTICATION_FAILED" : status === 429 ? "RATE_LIMITED" : status === 404 ? "MODEL_NOT_FOUND" : "REQUEST_FAILED");
+  const retryable = status === 429 || status >= 500 || error.code === "ECONNABORTED" || error.code === "ETIMEDOUT";
+
+  return {
+    status: status || 500,
+    code,
+    message: providerMsg,
+    retryable,
+    formatted: `MINIMAX_REQUEST_FAILED status: ${status || 500} code: ${code} message: ${providerMsg} retryable: ${retryable}`
+  };
+}
+
 module.exports = {
   getConfig,
   configured,
   chat,
+  parseMinimaxError,
   _test: { DEFAULT_BASE_URL, DEFAULT_MODEL, extractContent },
 };

@@ -65,6 +65,7 @@ const { getAIResponse, needsLargeOutput } = require("../tools/ai");
 const { listCapabilities } = require("./capabilityCatalog");
 
 const { setReminder } = require("../tools/reminders");
+const { handleDashboardCommand } = require("../tools/dashboardSetupCommand");
 const { buildProject, deployProject, publishProjectToGitHub, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile, autoUpgradeProject } = require("../tools/appBuilder");
 const { deliverWebsite } = require("../tools/deliveryWorkflow");
 const { handleEngineeringRequest } = require("../tools/engineeringSystem");
@@ -330,6 +331,7 @@ registerCommand({ name: "alive", aliases: ["ping", "test"], category: "meta", de
   registerCommand({ name: "mission", aliases: ["missions", "msn"], category: "dev", description: "Create/resume durable background missions", handler: handleMission, ownerOnly: true });
   registerCommand({ name: "world", aliases: ["worldmodel", "model"], category: "dev", description: "View ARIA's world model", handler: handleWorld, ownerOnly: true });
   registerCommand({ name: "delegate", aliases: ["orbit", "orchestrate"], category: "dev", description: "Run the agent-team mission orchestrator", handler: handleDelegate, ownerOnly: true });
+  registerCommand({ name: "dashboard", aliases: ["dash", "dashsetup"], category: "admin", description: "Set up dashboard owner password: !dashboard setup <password>", handler: handleDashboardCommand, ownerOnly: true });
   registerCommand({ name: "grant", aliases: [], category: "admin", description: "Grant a capability to a user", handler: handleGrant, ownerOnly: true });
   registerCommand({ name: "revoke", aliases: [], category: "admin", description: "Revoke a capability", handler: handleRevoke, ownerOnly: true });
   registerCommand({ name: "caps", aliases: ["permissions"], category: "admin", description: "View granted capabilities", handler: handleCaps, ownerOnly: true });
@@ -453,6 +455,11 @@ function resolveExplicitNaturalCommand(cleaned) {
     const command = findRegisteredCommand(name);
     return command ? { handler: command.handler, intent: command.name, args, command } : null;
   };
+
+  const dashMatch = lower.match(/(?:change|set|configure|update|setup)\s+(?:my\s+)?dashboard\s+password\s+(?:to|as)\s+(.+)$/i);
+  if (dashMatch) {
+    return makeCommand("dashboard", `setup ${dashMatch[1].trim()}`);
+  }
 
   const recallPrefix = lower.match(/^(?:remember|reopen|open|load|find|show me)\s+(?:that|the|my)?\s*(.+)$/i);
   if (recallPrefix && /(?:website|web\s*app|site|project)\b/i.test(recallPrefix[1]) && !/^(?:the\s+)?(?:anime|dashboard)\b/i.test(recallPrefix[1])) {

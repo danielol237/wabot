@@ -14,7 +14,6 @@ router.get("/setup", (req, res, next) => {
 });
 
 // Public: POST /dashboard/api/auth/setup - create first owner account
-// Public: POST /api/auth/setup - create first owner account
 router.post("/api/auth/setup", async (req, res) => {
   if (auth.hasOwnerAccount()) {
     return sendSecurityError(res, req, "SECURITY_POLICY_VIOLATION", "Owner account already setup.");
@@ -34,7 +33,6 @@ router.post("/api/auth/setup", async (req, res) => {
     res.cookie("aria_session", sessionRes.rawToken, {
       httpOnly: true,
       maxAge: sessionRes.ttlMs,
-      maxAge: 12 * 60 * 60 * 1000,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production"
     });

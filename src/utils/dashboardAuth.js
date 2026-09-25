@@ -8,6 +8,7 @@ const SESSIONS_FILE = path.join(__dirname, "../../data/dashboardSessions.json");
 const SESSION_TTL_STANDARD_MS = 12 * 60 * 60 * 1000; // 12 hours
 const SESSION_TTL_REMEMBER_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const SCRYPT_KEYLEN = 64;
 const SCRYPT_COST = 16384; // N=16384, r=8, p=1
 const SCRYPT_BLOCK_SIZE = 8;
@@ -286,6 +287,7 @@ function createSession(username, role, options = {}) {
   const now = Date.now();
   const ttlMs = options.rememberMe ? SESSION_TTL_REMEMBER_MS : (options.ttlMs || SESSION_TTL_STANDARD_MS);
   const expiresAt = now + ttlMs;
+  const expiresAt = now + (options.ttlMs || SESSION_TTL_MS);
 
   const session = {
     idHash: tokenHash,

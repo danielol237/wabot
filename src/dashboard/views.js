@@ -202,6 +202,10 @@ function renderLoginPage() {
         <input type="checkbox" id="rememberMe" name="rememberMe" style="cursor:pointer;">
         <label for="rememberMe" style="font-size:12px;color:var(--aria-secondary);cursor:pointer;">Remember me for 30 days</label>
       </div>
+      <div style="text-align:left;margin-bottom:20px;">
+        <label style="font-size:11px;color:var(--aria-secondary);display:block;margin-bottom:4px;">Password</label>
+        <input class="aria-input" type="password" name="password" required placeholder="Enter password">
+      </div>
       <button class="aria-btn aria-btn-primary" style="width:100%;" type="submit">Unlock Workspace</button>
       <div id="loginError" style="color:var(--aria-red);font-size:12px;margin-top:12px;display:none;"></div>
     </form>
@@ -219,6 +223,7 @@ function renderLoginPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password, rememberMe })
+          body: JSON.stringify({ username, password })
         });
         const data = await res.json();
         if (res.ok && data.ok) {

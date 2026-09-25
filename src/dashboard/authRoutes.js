@@ -14,6 +14,7 @@ router.get("/setup", (req, res, next) => {
 });
 
 // Public: POST /dashboard/api/auth/setup - create first owner account
+// Public: POST /api/auth/setup - create first owner account
 router.post("/api/auth/setup", async (req, res) => {
   if (auth.hasOwnerAccount()) {
     return sendSecurityError(res, req, "SECURITY_POLICY_VIOLATION", "Owner account already setup.");
@@ -33,6 +34,7 @@ router.post("/api/auth/setup", async (req, res) => {
     res.cookie("aria_session", sessionRes.rawToken, {
       httpOnly: true,
       maxAge: sessionRes.ttlMs,
+      maxAge: 12 * 60 * 60 * 1000,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production"
     });
@@ -62,6 +64,10 @@ router.get("/login", (req, res, next) => {
 router.post("/api/auth/login", async (req, res) => {
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
   const { username, password, rememberMe } = req.body || {};
+// Public: POST /api/auth/login - authenticate user
+router.post("/api/auth/login", async (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const { username, password } = req.body || {};
 
   const throttle = auth.checkLoginThrottled(ip, username);
   if (throttle.throttled) {
@@ -87,6 +93,11 @@ router.post("/api/auth/login", async (req, res) => {
     res.cookie("aria_session", sessionRes.rawToken, {
       httpOnly: true,
       maxAge: sessionRes.ttlMs,
+    const sessionRes = auth.createSession(verified.username, verified.role, { ip, userAgent });
+
+    res.cookie("aria_session", sessionRes.rawToken, {
+      httpOnly: true,
+      maxAge: 12 * 60 * 60 * 1000,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production"
     });

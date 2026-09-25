@@ -1,5 +1,6 @@
 const axios = require("axios");
 const providerConfig = require("../utils/providerConfig");
+const jules = require("../providers/jules");
 
 const GEMINI_PROVIDER = "gemini";
 function getGeminiModel() {
@@ -36,7 +37,7 @@ function resolvedCredential(provider) {
 }
 
 function configured() {
-  return resolvedCredential("gemini").configured || resolvedCredential("mistral").configured || resolvedCredential("agnes").configured;
+  return jules.isAvailable() || resolvedCredential("gemini").configured || resolvedCredential("mistral").configured || resolvedCredential("agnes").configured;
 }
 
 function providerStatus() {
@@ -195,6 +196,14 @@ async function generateCodingText(prompt, options = {}) {
 
   if (!gemini.configured && !mistral.configured && !agnes.configured) {
     throw codingProviderError("No coding provider is configured. Set GEMINI_API_KEY, MISTRAL_API_KEY, or AGNES_API_KEY in the bot runtime, then restart ARIA.", "CODING_PROVIDER_NOT_CONFIGURED", "coding", null);
+  }
+
+  if (jules.isAvailable()) {
+    try {
+      return await jules.executeCodingTask(prompt, { history, system: options.system });
+    } catch (julesErr) {
+      console.warn(`[Jules Provider] Task execution failed: ${julesErr.message}. Falling back to standard coding models.`);
+    }
   }
 
   let errors = [];

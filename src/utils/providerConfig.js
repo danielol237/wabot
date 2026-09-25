@@ -2,6 +2,7 @@
 // at call time so a process restart is the only required refresh after Render edits.
 
 const PROVIDERS = Object.freeze([
+  { id: "jules", label: "Jules API", key: "JULES_API_KEY", aliases: [], role: "autonomous coding agent" },
   { id: "gemini", label: "Gemini", key: "GEMINI_API_KEY", aliases: ["GOOGLE_GEMINI_API_KEY"], role: "primary chat, coding, vision" },
   { id: "mistral", label: "Mistral", key: "MISTRAL_API_KEY", aliases: [], role: "chat, coding, vision fallback" },
   { id: "agnes", label: "Agnes AI", key: "AGNES_API_KEY", aliases: [], role: "chat, vision fallback" },

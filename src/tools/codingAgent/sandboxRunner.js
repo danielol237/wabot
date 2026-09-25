@@ -107,7 +107,10 @@ async function verifyPackageInSandbox(projectDir) {
   if (!fs.existsSync(packagePath)) return { success: true, skipped: true, sandbox: "not_required" };
   const install = await runSandboxCommand(projectDir, ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"], "npm install", { timeout: 120000, network: "bridge" });
   if (!install.success) return install;
-  const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  let pkg = {};
+  try {
+    pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  } catch (_) {}
   if (pkg.scripts?.build) {
     const build = await runNpmScriptInSandbox(projectDir, "build", { timeout: 120000, network: "none" });
     if (!build.success) return build;

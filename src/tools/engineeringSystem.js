@@ -138,7 +138,11 @@ function extractJson(text) {
   let cleaned = String(text || "").replace(/```json|```/gi, "").trim();
   const objectMatch = cleaned.match(/\{[\s\S]*\}/);
   if (objectMatch) cleaned = objectMatch[0];
-  return JSON.parse(cleaned);
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    throw new Error(`Failed to parse engineering response JSON: ${err.message}`);
+  }
 }
 
 function normalizePlan(raw, objective) {

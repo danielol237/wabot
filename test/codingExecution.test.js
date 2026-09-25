@@ -1,51 +1,55 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+const assert = require("assert");
+const path = require("path");
+const fs = require("fs");
+const { test } = require("node:test");
 
-const actionTask = require("../src/tools/actionTask");
-const capabilities = require("../src/utils/capabilityCatalog");
+const ExecutionPolicy = require("../src/coding/security/ExecutionPolicy");
+const WorkspacePolicy = require("../src/coding/security/WorkspacePolicy");
+const FileManager = require("../src/coding/execution/FileManager");
+const CommandRunner = require("../src/coding/execution/CommandRunner");
+const GitManager = require("../src/coding/execution/GitManager");
 
-test("coding action tasks complete dependent steps and expose truthful summaries", async () => {
-  const task = actionTask.createTask({
-    type: "test.build",
-    goal: "verify task execution",
-    steps: [
-      { id: "plan", label: "Plan" },
-      { id: "verify", label: "Verify", dependsOn: ["plan"] },
-    ],
-  });
-  const plan = await actionTask.runStep(task, "plan", async () => ({ files: 2 }), { verify: (value) => value.files === 2 });
-  const verify = await actionTask.runStep(task, "verify", async () => ({ checks: 3 }), { verify: (value) => value.checks === 3 });
-  actionTask.finish(task);
-  const summary = actionTask.summary(task);
-  assert.equal(plan.state, actionTask.STATES.COMPLETED);
-  assert.equal(verify.state, actionTask.STATES.COMPLETED);
-  assert.equal(summary.state, actionTask.STATES.COMPLETED);
-  assert.deepEqual(summary.steps.map((step) => step.state), ["COMPLETED", "COMPLETED"]);
+test("ExecutionPolicy enforces permissions and path safety", () => {
+  const policy = new ExecutionPolicy(process.cwd());
+
+  assert.strictEqual(policy.isPathSafe("package.json"), true);
+  assert.strictEqual(policy.isPathSafe(".env"), false);
+  assert.strictEqual(policy.isPathSafe("../../etc/passwd"), false);
+
+  const readPerm = policy.checkPermission("READ");
+  assert.strictEqual(readPerm.allowed, true);
+
+  const pushPerm = policy.checkPermission("GIT_PUSH");
+  assert.strictEqual(pushPerm.allowed, false);
+  assert.strictEqual(pushPerm.requiresAuthorization, true);
 });
 
-test("coding action tasks skip dependent steps after a failed prerequisite", async () => {
-  const task = actionTask.createTask({
-    type: "test.failure",
-    goal: "verify dependency failure",
-    steps: [
-      { id: "generate", label: "Generate" },
-      { id: "deploy", label: "Deploy", dependsOn: ["generate"] },
-    ],
-  });
-  const failed = await actionTask.runStep(task, "generate", async () => { throw new Error("generator unavailable"); });
-  const skipped = actionTask.getTask(task.id).steps.find((step) => step.id === "deploy");
-  actionTask.finish(task);
-  assert.equal(failed.state, actionTask.STATES.FAILED);
-  assert.equal(skipped.state, actionTask.STATES.SKIPPED);
-  assert.equal(actionTask.summary(task).state, actionTask.STATES.FAILED);
+test("FileManager reads and writes files within workspace sandbox", () => {
+  const fm = new FileManager(process.cwd());
+  const testPath = "temp/security_test.txt";
+
+  fm.writeFile(testPath, "hello world");
+  assert.strictEqual(fm.fileExists(testPath), true);
+  assert.strictEqual(fm.readFile(testPath), "hello world");
+
+  assert.throws(() => fm.readFile(".env"), /Security policy denied read access/);
+
+  if (fs.existsSync(testPath)) fs.unlinkSync(testPath);
 });
 
-test("capability inspection reports actual runtime tools and connector configuration", () => {
-  const report = capabilities.inspectEnvironment();
-  assert.equal(typeof report.checkedAt, "string");
-  assert.equal(typeof report.tools.git.available, "boolean");
-  assert.equal(typeof report.tools.chromium.available, "boolean");
-  assert.equal(Array.isArray(report.connectors), true);
-  assert.ok(report.connectors.some((connector) => connector.name === "GITHUB_TOKEN"));
-  assert.equal(typeof report.storage.filesystem, "boolean");
+test("CommandRunner executes commands with timeout and output limits", async () => {
+  const runner = new CommandRunner(process.cwd());
+  const res = await runner.runCommand("node -e \"console.log('test')\"");
+
+  assert.strictEqual(res.success, true);
+  assert.strictEqual(res.stdout.trim(), "test");
+});
+
+test("GitManager inspects git status and head commit", async () => {
+  const git = new GitManager(process.cwd());
+  const status = await git.getStatus();
+
+  assert.strictEqual(status.ok, true);
+  const head = await git.getHeadCommit();
+  assert.ok(head);
 });

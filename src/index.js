@@ -156,6 +156,9 @@ app.use("/preview", checkAuth, express.static(path.join(__dirname, "../data/proj
 const animeBrowserRouter = require("./animeBrowser");
 app.use("/dashboard/anime", checkAuth, animeBrowserRouter);
 
+// Specific media sub-routes (discovery recommendations)
+app.get("/anime/recommend", (req, res, next) => require("./mediaAppRouter")(req, res, next));
+
 // ARIA Anime — standalone PUBLIC streaming/download site (separate from dashboard).
 const animeSiteRouter = require("./animeSite");
 app.use("/anime", animeSiteRouter);

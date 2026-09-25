@@ -15,7 +15,8 @@ class WorkspacePolicy {
 
   resolvePath(relPath) {
     const resolved = path.resolve(this.workspacePath, relPath);
-    if (!resolved.startsWith(this.workspacePath)) {
+    const relative = path.relative(this.workspacePath, resolved);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
       throw new Error(`Path traversal denied: '${relPath}' is outside workspace '${this.workspacePath}'`);
     }
     return resolved;

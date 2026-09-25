@@ -31,7 +31,6 @@ async function checkGitHubHealth() {
         "User-Agent": "ARIA-Operator-Console"
       },
       signal: AbortSignal.timeout(3000)
-      }
     });
     const latencyMs = Date.now() - start;
     if (!res.ok) throw new Error(`GitHub API HTTP ${res.status}`);

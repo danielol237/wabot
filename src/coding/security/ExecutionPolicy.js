@@ -30,10 +30,11 @@ class ExecutionPolicy {
   isPathSafe(targetPath) {
     if (!targetPath) return false;
     const resolved = path.resolve(this.workspacePath, targetPath);
-    if (!resolved.startsWith(this.workspacePath)) {
+    const relative = path.relative(this.workspacePath, resolved);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
       return false;
     }
-    const rel = path.relative(this.workspacePath, resolved).replace(/\\/g, "/");
+    const rel = relative.replace(/\\/g, "/");
     const segments = rel.split("/");
 
     // Deny exact sensitive files and directories

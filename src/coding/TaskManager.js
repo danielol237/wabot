@@ -83,22 +83,12 @@ class TaskManager extends EventEmitter {
   }
 
   async processQueue() {
-    if (this.runningTasks.size >= this.maxConcurrentTasks) {
-      return;
+    while (this.runningTasks.size < this.maxConcurrentTasks && this.queue.length > 0) {
+      const taskId = this.queue.shift();
+      const task = this.store.getTask(taskId);
+      if (!task || TERMINAL_STATES.has(task.status)) continue;
+      void this.executeTask(task);
     }
-
-    if (this.queue.length === 0) {
-      return;
-    }
-
-    const taskId = this.queue.shift();
-    const task = this.store.getTask(taskId);
-    if (!task || TERMINAL_STATES.has(task.status)) {
-      setImmediate(() => this.processQueue());
-      return;
-    }
-
-    this.executeTask(task);
   }
 
   async executeTask(task) {
@@ -108,6 +98,7 @@ class TaskManager extends EventEmitter {
         status: TASK_STATES.FAILED,
         statusMessage: "No execution engine registered.",
       });
+      this.processQueue();
       return;
     }
 

@@ -287,7 +287,6 @@ function createSession(username, role, options = {}) {
   const now = Date.now();
   const ttlMs = options.rememberMe ? SESSION_TTL_REMEMBER_MS : (options.ttlMs || SESSION_TTL_STANDARD_MS);
   const expiresAt = now + ttlMs;
-  const expiresAt = now + (options.ttlMs || SESSION_TTL_MS);
 
   const session = {
     idHash: tokenHash,
@@ -382,7 +381,10 @@ function generateCsrfToken(rawSessionToken) {
 function validateCsrfToken(rawSessionToken, csrfGiven) {
   if (!csrfGiven || !rawSessionToken) return false;
   const expected = generateCsrfToken(rawSessionToken);
-  return crypto.timingSafeEqual(Buffer.from(csrfGiven), Buffer.from(expected));
+  const givenBuffer = Buffer.from(String(csrfGiven));
+  const expectedBuffer = Buffer.from(expected);
+  if (givenBuffer.length !== expectedBuffer.length) return false;
+  return crypto.timingSafeEqual(givenBuffer, expectedBuffer);
 }
 
 module.exports = {

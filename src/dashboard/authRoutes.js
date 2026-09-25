@@ -64,10 +64,6 @@ router.get("/login", (req, res, next) => {
 router.post("/api/auth/login", async (req, res) => {
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
   const { username, password, rememberMe } = req.body || {};
-// Public: POST /api/auth/login - authenticate user
-router.post("/api/auth/login", async (req, res) => {
-  const ip = req.ip || req.socket?.remoteAddress || "unknown";
-  const { username, password } = req.body || {};
 
   const throttle = auth.checkLoginThrottled(ip, username);
   if (throttle.throttled) {
@@ -93,11 +89,6 @@ router.post("/api/auth/login", async (req, res) => {
     res.cookie("aria_session", sessionRes.rawToken, {
       httpOnly: true,
       maxAge: sessionRes.ttlMs,
-    const sessionRes = auth.createSession(verified.username, verified.role, { ip, userAgent });
-
-    res.cookie("aria_session", sessionRes.rawToken, {
-      httpOnly: true,
-      maxAge: 12 * 60 * 60 * 1000,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production"
     });
@@ -113,6 +104,11 @@ router.post("/api/auth/login", async (req, res) => {
 });
 
 // Protected session endpoints
+router.get("/api/csrf", checkAuth, (req, res) => {
+  const token = req.cookies?.["aria_session"] || (req.legacyDashboardAuth ? process.env.DASHBOARD_PASSWORD : "");
+  return res.json({ csrf: auth.generateCsrfToken(token) });
+});
+
 router.get("/api/auth/session", checkAuth, (req, res) => {
   const token = req.cookies?.["aria_session"];
   const csrfToken = auth.generateCsrfToken(token);

@@ -162,6 +162,10 @@ app.use("/anime", animeSiteRouter);
 // ARIA Movies — curated OTT-style movie discovery with official availability guidance.
 app.use("/movies", require("./movieSite"));
 
+// ARIA Unified Media Routers
+app.use("/", require("./mediaAppRouter"));
+app.use("/api/media", require("./mediaApiRouter"));
+
 app.get("/preview", checkAuth, (req, res) => {
   const projectsDir = path.join(__dirname, "../data/projects");
   if (!fs.existsSync(projectsDir)) return res.send("No projects built yet.");

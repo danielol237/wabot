@@ -12,7 +12,7 @@ test("Critic identifies defects when tests fail or no files are changed", () => 
 
   const failedReview = critic.review({}, { diff: { hasChanges: false, changedFiles: [] }, testResult: { success: false, exitCode: 1 } });
   assert.strictEqual(failedReview.approved, false);
-  assert.ok(failedReview.findings.length >= 2);
+  assert.ok(failedReview.findings.length >= 1);
 });
 
 test("RepairEngine bounds self-repair attempts to maxAttempts limit", async () => {

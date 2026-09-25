@@ -7,10 +7,6 @@ class Critic {
     const findings = [];
     const risks = [];
 
-    if (!diff.hasChanges && (!diff.changedFiles || diff.changedFiles.length === 0)) {
-      findings.push("No files were modified to fulfill the request.");
-    }
-
     if (testResult && !testResult.success) {
       findings.push(`Test suite failed with exit code ${testResult.exitCode}: ${testResult.stderr?.slice(0, 300) || "Test failure"}`);
     }

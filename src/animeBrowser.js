@@ -301,7 +301,6 @@ async function downloadsPage(req) {
       ${j.steps.length ? `<div class="steps">${j.steps.slice(-10).map((s) => `<div class="${s.ok ? "step-ok" : "step-no"}">${s.ok ? "✓" : "✗"} ${esc(s.provider)} ${esc(s.stage)} — ${esc(s.message)}</div>`).join("")}</div>` : ""}
       ${j.status === "failed" ? `<form method="post" action="/dashboard/anime/retry" style="margin-top:10px">${csrfField(req)}<input type="hidden" name="id" value="${esc(j.id)}" /><button class="watch">↻ Retry</button></form>` : ""}
     </div>`;
-  const active = [...snap.current, ...snap.queued];
   let html = `<h1>Downloads</h1><div class="sub">Live anime pipeline · active ${active.length} · done ${snap.counts.done} · failed ${snap.counts.failed}</div>`;
   html += active.length ? active.map(jobCard).join("") : `<div class="empty">No active downloads.</div>`;
   if (recent.length) { html += `<div class="section-h">Recent</div>` + recent.slice(0, 8).map(jobCard).join(""); }

@@ -178,6 +178,5 @@ test("HTTP Express Integration & Preserved Routes Regression", async () => {
     server.close();
   }
 
-  // Force exit after all assertions pass so background WhatsApp socket listeners don't keep process open
   setTimeout(() => process.exit(0), 100);
 });

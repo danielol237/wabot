@@ -1,5 +1,5 @@
 // Template loader — loads project templates from files instead of hardcoding
-// them inside appBuilder.js. Add a new template by creating a folder under
+// them inside coding providers. Add a new template by creating a folder under
 // src/templates/ with at minimum an index.html.
 
 const fs = require("fs");

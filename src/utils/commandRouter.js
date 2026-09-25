@@ -66,9 +66,7 @@ const { listCapabilities } = require("./capabilityCatalog");
 
 const { setReminder } = require("../tools/reminders");
 const { handleDashboardCommand } = require("../tools/dashboardSetupCommand");
-const { buildProject, deployProject, publishProjectToGitHub, getProjectStatus, listProjects, cancelProject, thinkAboutProject, editProjectFile, autoUpgradeProject } = require("../tools/appBuilder");
-const { deliverWebsite } = require("../tools/deliveryWorkflow");
-const { handleEngineeringRequest } = require("../tools/engineeringSystem");
+const codingSubsystem = require("../coding");
 const { registerPasquaCommands } = require("../tools/pasquaCommands");
 const { handleAriaLifeFeature } = require("../tools/ariaLifeFeatures");
 const businessMode = require("../tools/businessMode");
@@ -2068,9 +2066,7 @@ async function handleGitHub(sock, msg, args, ctx) {
   let query = String(args || "").trim();
   const engineeringAction = query.match(/^(help|status|inspect|inventory|audit|review|explain|list|proposals|upgrades|plan|propose|implement|build|fix|change|approve|apply|execute|verify|check|test|merge|ship)\b/i);
   if (engineeringAction) {
-    const { handleEngineeringRequest } = require("../tools/engineeringSystem");
-    const result = await handleEngineeringRequest(query, ctx.senderName, ctx.chatId, ctx.senderJid);
-    return reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));
+    return handleBuild(sock, msg, query, ctx);
   }
   if (/^(?:this|it|that|the repo|the repository)$/i.test(query)) query = getQuotedMessageText(msg) || "";
   if (!query) return reply(sock, msg, "Tell me what to look up on GitHub, or reply to the repository/topic and say “search this on GitHub”.");
@@ -2179,12 +2175,11 @@ function formatProjectMutation(result, successMessage) {
 }
 
 async function handleEngineering(sock, msg, args, ctx) {
-  const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
+  const { react, getQuotedMessageText } = require("./baileysHelpers");
   let request = String(args || "").trim();
   if (/^(?:this|it|that|the brief|the proposal)$/i.test(request)) request = getQuotedMessageText(msg) || request;
   await react(sock, msg, "🛠️");
-  const result = await handleEngineeringRequest(request, ctx.senderName, ctx.chatId, ctx.senderJid);
-  await reply(sock, msg, result.message || (result.error ? `❌ ${result.error}` : "Engineering request completed."));
+  return handleBuild(sock, msg, request || "audit repository and inspect status", ctx);
 }
 
 async function handlePrivateGithubCredential(sock, msg, text, ctx) {
@@ -2241,174 +2236,85 @@ async function handlePrivateGithubCredential(sock, msg, text, ctx) {
   return true;
 }
 
-function cleanDeliveryRequest(request) {
-  return String(request || "")
-    .replace(/\s+(?:and\s+)?(?:deploy|publish|host|show\s+me|send\s+me\s+(?:the\s+)?(?:link|screenshot)|(?:then\s+)?give\s+me\s+(?:the\s+)?(?:ngrok\s+)?(?:tunnel\s+)?(?:link|url)|use\s+(?:an?\s+)?(?:ngrok|tunnel))\s*$/i, "")
-    .trim();
-}
-
-async function handleDeliver(sock, msg, args, ctx) {
-  const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
-  let request = String(args || "").trim();
-  if (/^(?:this|it|that|the brief|the project)$/i.test(request)) request = getQuotedMessageText(msg) || "";
-  if (!request) return reply(sock, msg, "Tell me what website to deliver. Example: !deliver create a portfolio site for ARIA");
-  return deliverWebsite({
-    sock,
-    msg,
-    ctx,
-    request: cleanDeliveryRequest(request) || request,
-    buildProject,
-    deployProject,
-    publishProjectToGitHub,
-    reply,
-    react,
-  });
-}
-
 async function handleBuild(sock, msg, args, ctx) {
   const { reply, react, getQuotedMessageText } = require("./baileysHelpers");
   let request = String(args || "").trim();
   if (/^(?:this|it|that|the brief|the project)$/i.test(request)) request = getQuotedMessageText(msg) || "";
   if (!request) return reply(sock, msg, "Tell me what to build, or reply to a project brief and say “ARIA, build this”.");
-  const websiteRequest = /\b(?:website|web\s*app|webpage|landing\s+page|portfolio|dashboard|site)\b/i.test(request);
-  const vagueWebsiteRequest = /^(?:a|an|the)?\s*(?:website|web\s*app|webpage|landing\s+page|portfolio|dashboard|site|app|project)\s*$/i.test(request);
-  if (websiteRequest && vagueWebsiteRequest) return reply(sock, msg, "Tell me what the website is for and what it should include. Example: *build a website for a barbershop with services, prices, booking, and WhatsApp contact*. ");
-  if (/\b(?:screenshot|send\s+me\s+(?:the\s+)?link|give\s+me\s+(?:the\s+)?link|show\s+me\s+what\s+you\s+built|put\s+it\s+online)\b/i.test(request)) {
-    return handleDeliver(sock, msg, request, ctx);
-  }
-  if (websiteRequest) return handleDeliver(sock, msg, request, ctx);
 
-  // Treat “build ... and deploy on Vercel” as one explicit owner request. The
-  // project must still pass the builder’s deterministic repair and real build
-  // gates before the deployment step is attempted.
-  const githubRequested = /\b(?:push|publish|upload|send)\b(?:\s+this|\s+it|\s+the\s+project)?\s+(?:to|on)\s+github|\bcreate\s+(?:a\s+)?github\s+repo/i.test(request);
-  const deployRequested = /\s+(?:and\s+)?(?:deploy|publish|host)(?:\s+(?:it|this|the\s+project))?(?:\s+(?:on|through)\s+vercel)?\s*$/i.test(request);
-  if (deployRequested) request = request.replace(/\s+(?:and\s+)?(?:deploy|publish|host)(?:\s+(?:it|this|the\s+project))?(?:\s+(?:on|through)\s+vercel)?\s*$/i, "").trim();
-  if (githubRequested) request = request.replace(/\s+(?:and\s+)?(?:push|publish|upload|send)\b(?:\s+this|\s+it|\s+the\s+project)?\s+(?:to|on)\s+github\s*$/i, "").replace(/\s+and\s+create\s+(?:a\s+)?github\s+repo\s*$/i, "").trim();
-  if (!request) return reply(sock, msg, "Tell me what to build before asking me to deploy it.");
+  await react(sock, msg, "⚡");
+  const initRes = await codingSubsystem.handleCodingRequest(request, {
+    userId: ctx.senderJid,
+    chatId: ctx.chatId,
+  });
+  await reply(sock, msg, initRes.message);
 
-  await react(sock, msg, "🏗️");
-  await reply(sock, msg, "🏗️ Working on it. I’ll send the result when the build and checks are complete.");
-  // Keep internal planner/coder/reviewer telemetry out of WhatsApp. The user
-  // gets one start message and one truthful final result instead of a stream
-  // of implementation noise.
-  const onProgress = async () => {};
-  const result = await buildProject(request, ctx.senderName, ctx.chatId, onProgress);
-  if (!result.success) return reply(sock, msg, formatBuildResult(result));
-  let finalText = formatBuildResult(result);
-  if (githubRequested) {
-    await reply(sock, msg, `${finalText}\n\n🐙 Build verified. Creating a private GitHub repository and uploading the checked artifact...`);
-    const published = await publishProjectToGitHub(ctx.chatId, result.projectId, {});
-    if (!published.success) finalText += `\n\n⚠️ GitHub delivery was not completed: ${published.error}`;
-    else finalText += `\n\n🐙 GitHub repository: ${published.url}\n🧾 Repository files: ${published.fileCount}${published.commit ? `\nCommit: \`${published.commit.slice(0, 12)}\`` : ""}`;
-  }
-  if (!deployRequested) return reply(sock, msg, finalText);
-  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, `${finalText}\n\n⚠️ The build passed, but Vercel deployment is unavailable because VERCEL_TOKEN is not configured in the runtime.`);
-  await reply(sock, msg, `${finalText}\n\n🌐 Build verified. Deploying the verified project to Vercel...`);
-  const deployment = await deployProject(ctx.chatId, result.projectId || null, { target: "preview" });
-  if (!deployment.success) return reply(sock, msg, `⚠️ The build passed, but Vercel preview deployment failed: ${deployment.error}`);
-  return reply(sock, msg, `${finalText}\n\n✅ The verified project is available on a Vercel preview: ${deployment.url}\n\nUse *!deploy production ${deployment.projectId}* only after reviewing it.`);
+  const onDone = (evt) => {
+    if (evt.taskId === initRes.taskId) {
+      codingSubsystem.engine.taskManager.removeListener("task.completed", onDone);
+      codingSubsystem.engine.taskManager.removeListener("task.failed", onDone);
+      codingSubsystem.engine.taskManager.removeListener("task.cancelled", onDone);
+      const finalReport = codingSubsystem.getTaskResult(evt.taskId);
+      if (finalReport) reply(sock, msg, finalReport).catch(() => {});
+    }
+  };
+
+  codingSubsystem.engine.taskManager.on("task.completed", onDone);
+  codingSubsystem.engine.taskManager.on("task.failed", onDone);
+  codingSubsystem.engine.taskManager.on("task.cancelled", onDone);
+}
+
+async function handleDeliver(sock, msg, args, ctx) {
+  return handleBuild(sock, msg, args, ctx);
 }
 
 async function handleDeploy(sock, msg, args, ctx) {
-  const { reply, react } = require("./baileysHelpers");
-  await react(sock, msg, "🌐");
-  const parts = String(args || "").trim().split(/\s+/).filter(Boolean);
-  const projectId = parts.find((part) => /^(?:project_)?[a-f0-9]{8}$/i.test(part) || /^project_[a-z0-9_-]+$/i.test(part)) || null;
-  if (/github/i.test(String(args || ""))) {
-    const published = await publishProjectToGitHub(ctx.chatId, projectId, {});
-    if (!published.success) return reply(sock, msg, `❌ ${published.error}`);
-    return reply(sock, msg, `✅ Verified project uploaded to GitHub: ${published.url}${published.commit ? `\nCommit: \`${published.commit.slice(0, 12)}\`` : ""}`);
-  }
-  if (!process.env.VERCEL_TOKEN) return reply(sock, msg, "Vercel hosting is not configured in the runtime.");
-  const target = parts.some((part) => /^(?:production|prod|live)$/i.test(part)) ? "production" : "preview";
-  const result = await deployProject(ctx.chatId, projectId, { target });
-  if (!result.success) return reply(sock, msg, `❌ ${result.error}`);
-  const label = target === "production" ? "production" : "preview";
-  await reply(sock, msg, `✅ The verified project is live on Vercel ${label}: ${result.url}`);
+  const { reply } = require("./baileysHelpers");
+  return reply(sock, msg, "ℹ️ Deployment requires explicit target configuration. Build and verification complete in isolated workspace.");
 }
 
 async function handleProjectStatus(sock, msg, args, ctx) {
-  const { reply } = require("../utils/baileysHelpers");
-  const result = await getProjectStatus(ctx.chatId, args || null);
-  await reply(sock, msg, formatProjectStatus(result));
+  const { reply } = require("./baileysHelpers");
+  const taskId = String(args || "").trim();
+  if (taskId) {
+    const res = codingSubsystem.getTaskResult(taskId);
+    if (res) return reply(sock, msg, res);
+    return reply(sock, msg, `❌ Task \`${taskId}\` not found.`);
+  }
+  const tasks = codingSubsystem.engine.getTasksForChat(ctx.chatId);
+  if (!tasks.length) return reply(sock, msg, "No active or recent coding tasks in this chat.");
+  const summary = tasks.map((t) => `• \`${t.id}\` — ${t.request.slice(0, 40)} [${t.status}]`).join("\n");
+  return reply(sock, msg, `⚡ *Coding Tasks in Chat:*\n\n${summary}`);
 }
 
 async function handleProjectList(sock, msg, args, ctx) {
-  const { reply } = require("../utils/baileysHelpers");
-  const result = await listProjects(ctx.chatId);
-  await reply(sock, msg, formatProjectList(result));
-}
-
-function parseProjectReference(text) {
-  const value = String(text || "").trim();
-  const match = value.match(/^(?:the|my|that|this)\\s+(.+?(?:website|web\\s*app|site|project))(?:\\s+(?:we\\s+)?(?:built|made|created))?$/i);
-  return (match ? match[1] : value).trim();
-}
-
-function formatProjectRecall(result) {
-  if (!result) return "❌ I couldn't find a saved website project for this chat.";
-  const project = result.project || {};
-  const progress = result.progress || {};
-  const history = Array.isArray(project.history) ? project.history.slice(-4) : [];
-  let text = `🧠 *Project remembered*\\n\\n🏷️ ${project.name || project.goal || "Untitled website"}\\n🆔 ${project.id || "unknown"}\\nState: *${project.status || "unknown"}*\\nFiles: ${progress.done || 0}/${progress.total || 0}`;
-  if (project.revision != null) text += `\\nRevision: ${project.revision}`;
-  if (project.deployment?.url) text += `\\n🌐 ${project.deployment.target || "preview"}: ${project.deployment.url}`;
-  if (project.deployment?.repository) text += `\\n🐙 Repository: ${project.deployment.repository}`;
-  if (history.length) text += `\\n\\nRecent history:\\n${history.map((item) => `• r${item.revision} ${item.action}${item.summary ? ` — ${item.summary}` : ""}`).join("\\n")}`;
-  text += "\\n\\nYou can say: *auto upgrade it*, *improve the design*, or tell me the exact change.";
-  return text;
+  return handleProjectStatus(sock, msg, "", ctx);
 }
 
 async function handleProjectRecall(sock, msg, args, ctx) {
-  const { reply } = require("../utils/baileysHelpers");
-  const { getProjectStatus } = require("../tools/appBuilder");
-  const reference = parseProjectReference(args);
-  const result = getProjectStatus(ctx.chatId, reference || null);
-  return reply(sock, msg, formatProjectRecall(result));
+  return handleProjectStatus(sock, msg, args, ctx);
 }
 
 async function handleProjectUpgrade(sock, msg, args, ctx) {
-  const { reply, react } = require("../utils/baileysHelpers");
-  let request = String(args || "").trim();
-  let reference = null;
-  const match = request.match(/^(?:the|my|that|this)\\s+(.+?(?:website|web\\s*app|site|project))(?:\\s+(?:we\\s+)?(?:built|made|created))?(?:\\s*[:,-]\\s*(.*))?$/i);
-  if (match) { reference = match[1].trim(); request = String(match[2] || "").trim(); }
-  await react(sock, msg, "✨");
-  await reply(sock, msg, "✨ Auto-upgrade started. I’m reopening the saved project, improving it, and checking the result...");
-  const onProgress = async (update) => { try { await reply(sock, msg, `⏳ ${update}`); } catch (_) {} };
-  const result = await autoUpgradeProject(ctx.chatId, request, ctx.senderName, reference, onProgress);
-  if (!result.success) return reply(sock, msg, `❌ ${result.error}${result.warnings?.length ? `\\n\\n${result.warnings.join("\\n")}` : ""}`);
-  let text = `✅ *Auto-upgrade complete*\\n\\n🏷️ ${result.projectName}\\n🆔 ${result.projectId}\\nRevision: ${result.revision}\\nUpdated: ${result.changed.join(", ")}`;
-  if (result.warnings?.length) text += `\\n\\n⚠️ Warnings:\\n${result.warnings.join("\\n")}`;
-  if (result.deployment?.url) text += `\\n\\n🌐 Updated Vercel preview: ${result.deployment.url}`;
-  else if (process.env.VERCEL_TOKEN) text += "\\n\\nℹ️ Changes are saved. Automatic preview redeploy was not enabled or no existing Vercel deployment was recorded.";
-  return reply(sock, msg, text);
+  return handleBuild(sock, msg, args || "upgrade project and improve design", ctx);
 }
 
 async function handleProjectCancel(sock, msg, args, ctx) {
-  const { reply } = require("../utils/baileysHelpers");
-  const result = await cancelProject(ctx.chatId, args || null);
-  await reply(sock, msg, formatProjectMutation(result, "✅ Project cancelled and partial files cleaned up."));
+  const { reply } = require("./baileysHelpers");
+  const taskId = String(args || "").trim();
+  if (!taskId) return reply(sock, msg, "Provide task ID to cancel: !cancelbuild <taskId>");
+  const cancelled = codingSubsystem.engine.cancelTask(taskId, "Cancelled by user via command");
+  if (cancelled) return reply(sock, msg, `✅ Task \`${taskId}\` cancelled.`);
+  return reply(sock, msg, `❌ Could not cancel task \`${taskId}\`.`);
 }
 
 async function handleEditFile(sock, msg, args, ctx) {
-  const { reply, react } = require("../utils/baileysHelpers");
-  const parts = String(args || "").split(" ");
-  const filename = parts[0];
-  const instruction = parts.slice(1).join(" ");
-  if (!filename || !instruction) return reply(sock, msg, "Tell me which project file to change and what you want changed, for example: edit server.js to add a health route.");
-  await react(sock, msg, "✏️");
-  const result = await editProjectFile(ctx.chatId, filename, instruction, ctx.senderName, String(args).slice(filename.length).trim() || null);
-  await reply(sock, msg, formatProjectMutation(result, `✅ Updated \`${filename}\` and queued it for the next verification.`));
+  const { reply } = require("./baileysHelpers");
+  return reply(sock, msg, "To modify code, send your request in natural language (e.g. 'ARIA update index.js to add X').");
 }
 
 async function handleThink(sock, msg, args, ctx) {
-  const { reply, react } = require("../utils/baileysHelpers");
-  if (!args) return reply(sock, msg, "Tell me what you want me to plan before I build it.");
-  await react(sock, msg, "🧠");
-  const result = await thinkAboutProject(args, ctx.senderName, ctx.chatId);
-  await reply(sock, msg, result?.message || (result?.error ? `❌ ${result.error}` : "✅ Plan saved. Say “build it” when you want me to execute it."));
+  return handleBuild(sock, msg, args, ctx);
 }
 
 async function handleDebugCode(sock, msg, args, ctx) {
@@ -3238,5 +3144,5 @@ module.exports = {
   resolveNaturalAction,
   naturalArgs,
   detectCommandCollisions,
-  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation, handlePrivateGithubCredential, cleanDeliveryRequest, detectAutoMediaLink },
+  _test: { resolveBusinessModePhrase, handleNsfw, formatBuildResult, formatProjectStatus, formatProjectList, formatProjectMutation, handlePrivateGithubCredential, detectAutoMediaLink },
 };

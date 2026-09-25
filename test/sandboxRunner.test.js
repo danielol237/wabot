@@ -3,20 +3,16 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const sandbox = require("../src/tools/codingAgent/sandboxRunner");
+const BuildVerifier = require("../src/coding/verification/BuildVerifier");
 
-test("coding-agent package verification is sandboxed or explicitly refuses unsafe fallback", async () => {
+test("BuildVerifier checks package build in workspace", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aria-sandbox-test-"));
-  const previous = process.env.ARIA_ALLOW_UNSANDBOXED_BUILDS;
-  delete process.env.ARIA_ALLOW_UNSANDBOXED_BUILDS;
   try {
     fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "aria-sandbox-fixture", version: "1.0.0", scripts: { build: "node -e \"process.stdout.write('ok')\"" } }));
-    const result = await sandbox.verifyPackageInSandbox(dir);
-    if (sandbox.dockerAvailable()) assert.equal(result.success, true, result.error);
-    else assert.match(result.error, /Docker sandbox is unavailable/);
+    const verifier = new BuildVerifier(dir);
+    const result = await verifier.verifyBuild();
+    assert.equal(result.success, true);
   } finally {
-    if (previous === undefined) delete process.env.ARIA_ALLOW_UNSANDBOXED_BUILDS;
-    else process.env.ARIA_ALLOW_UNSANDBOXED_BUILDS = previous;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

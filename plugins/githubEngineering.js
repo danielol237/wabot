@@ -1,5 +1,3 @@
-const engineering = require("../src/tools/engineeringSystem");
-
 const HELP = `🛠️ *ARIA GitHub Engineering*
 
 I work in four guarded stages:

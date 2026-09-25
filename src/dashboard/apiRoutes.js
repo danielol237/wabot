@@ -337,4 +337,27 @@ router.get("/events/stream", checkAuth, (req, res) => {
   });
 });
 
+// 18. GET /api/coding/tasks
+router.get("/coding/tasks", checkAuth, requirePermission("dashboard.read"), (req, res) => {
+  const codingSubsystem = tryRequire("../coding");
+  if (!codingSubsystem || !codingSubsystem.engine) {
+    return res.json({ tasks: [] });
+  }
+  const tasks = codingSubsystem.engine.store.getAllTasks();
+  return res.json({ tasks });
+});
+
+// 19. GET /api/coding/tasks/:id
+router.get("/coding/tasks/:id", checkAuth, requirePermission("dashboard.read"), (req, res) => {
+  const codingSubsystem = tryRequire("../coding");
+  if (!codingSubsystem || !codingSubsystem.engine) {
+    return res.status(404).json({ error: "Coding engine unavailable" });
+  }
+  const task = codingSubsystem.engine.getTask(req.params.id);
+  if (!task) {
+    return res.status(404).json({ error: "Task not found" });
+  }
+  return res.json({ task });
+});
+
 module.exports = router;

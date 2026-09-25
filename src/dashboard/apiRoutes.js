@@ -21,10 +21,17 @@ router.get("/dashboard/overview", checkAuth, requirePermission("dashboard.read")
   const stats = botAdmin ? botAdmin.getStats() : null;
 
   const durable = tryRequire("../tools/durableMissions");
+  const codingSubsystem = tryRequire("../coding");
   const allMissions = durable && durable.getAllMissions ? durable.getAllMissions() : [];
-  const activeMissions = allMissions.filter((m) => m.status === "running" || m.status === "pending").length;
-  const completedMissions = allMissions.filter((m) => m.status === "completed").length;
-  const failedMissions = allMissions.filter((m) => m.status === "failed").length;
+  const codingTasks = codingSubsystem && codingSubsystem.engine ? codingSubsystem.engine.store.getAllTasks() : [];
+
+  const activeCodingTasks = codingTasks.filter((t) => !["COMPLETED", "FAILED", "CANCELLED"].includes(t.status)).length;
+  const completedCodingTasks = codingTasks.filter((t) => t.status === "COMPLETED").length;
+  const failedCodingTasks = codingTasks.filter((t) => t.status === "FAILED").length;
+
+  const activeMissions = allMissions.filter((m) => m.status === "running" || m.status === "pending").length + activeCodingTasks;
+  const completedMissions = allMissions.filter((m) => m.status === "completed").length + completedCodingTasks;
+  const failedMissions = allMissions.filter((m) => m.status === "failed").length + failedCodingTasks;
 
   const registry = await connectorRegistry.getConnectorRegistrySummary();
 

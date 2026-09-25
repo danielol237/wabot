@@ -153,8 +153,10 @@ async function fetchOverviewData(req) {
 
 function fetchMissionsData() {
   const durable = tryRequire("../tools/durableMissions");
+  const codingSubsystem = tryRequire("../coding");
   const allMissions = durable && durable.getAllMissions ? durable.getAllMissions() : [];
-  return { missions: allMissions };
+  const codingTasks = codingSubsystem && codingSubsystem.engine ? codingSubsystem.engine.store.getAllTasks() : [];
+  return { missions: allMissions, codingTasks };
 }
 
 function tryRequire(mod) {

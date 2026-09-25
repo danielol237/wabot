@@ -46,7 +46,14 @@ function runProcess(command, args, options = {}) {
     const state = { output: "" };
     const child = spawn(command, args, {
       cwd,
-      env: { ...process.env, CI: "1", HOST: "127.0.0.1", PORT: "0", npm_config_cache: path.join(os.tmpdir(), "aria-sandbox-npm-cache") },
+    env: {
+      ...process.env,
+      CI: "1",
+      HOST: "127.0.0.1",
+      PORT: "0",
+      HOME: process.env.HOME || os.tmpdir(),
+      npm_config_cache: path.join(os.tmpdir(), "aria-sandbox-npm-cache"),
+    },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let settled = false;
@@ -81,7 +88,8 @@ function runDocker(args, options = {}) {
     // RLIMIT_NPROC is counted against the host UID on shared-UID hosts and
     // can prevent npm/node from starting. The container pids limit remains active.
     "--ulimit", "nofile=256:256",
-    "-e", "CI=1", "-e", "HOST=127.0.0.1", "-e", "PORT=0", "-e", "NPM_CONFIG_CACHE=/tmp/npm-cache",
+    "-e", "CI=1", "-e", "HOST=127.0.0.1", "-e", "PORT=0",
+    "-e", "HOME=/tmp/home", "-e", "NPM_CONFIG_CACHE=/tmp/npm-cache", "-e", "NPM_CONFIG_USERCONFIG=/tmp/npmrc",
     "-v", `${root}:/workspace:rw`, "-w", "/workspace", image, ...args,
   ];
   return runProcess("docker", command, { ...options, sandbox: "docker" });

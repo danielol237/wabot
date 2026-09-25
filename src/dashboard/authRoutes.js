@@ -102,6 +102,11 @@ router.post("/api/auth/login", async (req, res) => {
 });
 
 // Protected session endpoints
+router.get("/api/csrf", checkAuth, (req, res) => {
+  const token = req.cookies?.["aria_session"] || (req.legacyDashboardAuth ? process.env.DASHBOARD_PASSWORD : "");
+  return res.json({ csrf: auth.generateCsrfToken(token) });
+});
+
 router.get("/api/auth/session", checkAuth, (req, res) => {
   const token = req.cookies?.["aria_session"];
   const csrfToken = auth.generateCsrfToken(token);

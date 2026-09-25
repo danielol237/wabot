@@ -20,6 +20,17 @@ function safeBrowserError(res, scope, err) {
   return res.status(500).send("This dashboard page is temporarily unavailable. Please try again.");
 }
 
+function userScope(req) {
+  return req.user?.username || "legacy";
+}
+
+function safeRedirect(url) {
+  if (typeof url === "string" && url.startsWith("/dashboard/anime/") && !url.includes("//") && !url.includes("\\")) {
+    return url;
+  }
+  return "/dashboard/anime/watchlist";
+}
+
 router.use(express.urlencoded({ extended: true }));
 
 // Cookie reader (mirrors the dashboard's lightweight approach).
@@ -182,9 +193,10 @@ function continueGrid(items) {
 }
 
 async function homePage(req) {
+  const userId = userScope(req);
   const [trending, latest] = await Promise.all([service.getTrending(), service.getLatest()]);
-  const watchlist = service.loadWatchlist();
-  const continuing = service.getContinueWatching(8);
+  const watchlist = service.loadWatchlist(userId);
+  const continuing = service.getContinueWatching(8, userId);
   let html = "";
   if (continuing.length) html += `<div class="section-h">▶ Continue Watching</div>${continueGrid(continuing)}`;
   html += `<div class="section-h">🔥 Trending</div>${cardGrid(trending)}`;
@@ -217,7 +229,9 @@ async function browsePage(req) {
   return layout("Browse", { html });
 }
 
-async function schedulePage(day = new Date().getDay()) {
+async function schedulePage(dayInput) {
+  const parsedDay = Number.parseInt(dayInput, 10);
+  const day = Number.isInteger(parsedDay) && parsedDay >= 0 && parsedDay <= 6 ? parsedDay : new Date().getDay();
   const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const items = await service.getSchedule(day).catch(() => []);
   let html = `<h1>Schedule — ${DAYS[Number(day)]}</h1><div class="sub">Airings for the next 7 days on this weekday</div>`;
@@ -249,7 +263,8 @@ async function latestPage() {
 }
 
 async function watchlistPage(req) {
-  const list = service.loadWatchlist();
+  const userId = userScope(req);
+  const list = service.loadWatchlist(userId);
   let html = `<h1>Watchlist</h1><div class="sub">${list.length ? "Saved titles" : "Add titles from any anime page."}</div>`;
   html += list.length
     ? `<div class="grid">${list.map((a) => `
@@ -269,7 +284,11 @@ async function watchlistPage(req) {
 }
 
 async function downloadsPage(req) {
+  const userId = userScope(req);
   const snap = snapshot();
+  const filterByOwner = (list) => (Array.isArray(list) ? list.filter((j) => !j.ownerId || j.ownerId === userId) : []);
+  const active = filterByOwner([...snap.current, ...snap.queued]);
+  const recent = filterByOwner(snap.recent);
   const jobCard = (j) => `
     <div class="job">
       <div class="row"><span class="v">${esc(j.name)} — Ep ${j.episode}</span><span class="badge b-${j.status === "done" ? "status" : j.status === "failed" ? "score" : "prov"}">${esc(j.status)}</span></div>
@@ -277,7 +296,7 @@ async function downloadsPage(req) {
       ${j.progress ? `<div style="margin-top:8px"><div style="background:var(--panel2);border-radius:6px;height:10px;overflow:hidden"><div style="background:linear-gradient(90deg,var(--accent),var(--accent2));height:100%;width:${Math.min(100, Math.round(j.progress.percent||0))}%"></div></div><div style="color:var(--muted);font-size:11px;margin-top:4px">${Math.round(j.progress.percent||0)}% ${j.progress.speed?"· "+esc(j.progress.speed):""}${j.progress.eta?" · ETA "+esc(j.progress.eta):""}</div></div>` : ""}
       ${j.current ? `<div class="row" style="margin-top:4px"><span class="k">stage</span><span class="v">${esc(j.current.provider)} · ${esc(j.current.stage)}</span></div>` : ""}
       ${j.result ? `<div class="row" style="margin-top:4px"><span class="k">result</span><span class="v">${(j.result.size / 1048576).toFixed(1)} MB · ${esc(j.result.provider)}</span></div>` : ""}
-      ${j.result && j.source === "browser" && issueFileToken(j.id) ? `<a class="watch" style="margin-top:10px" href="/dashboard/anime/file/${esc(j.id)}?t=${encodeURIComponent(issueFileToken(j.id))}">⬇️ Download file</a>` : ""}
+      ${j.result && j.source === "browser" && issueFileToken(j.id, undefined, userId) ? `<a class="watch" style="margin-top:10px" href="/dashboard/anime/file/${esc(j.id)}?t=${encodeURIComponent(issueFileToken(j.id, undefined, userId))}">⬇️ Download file</a>` : ""}
       ${j.error ? `<div class="row" style="margin-top:4px"><span class="k" style="color:var(--red)">error</span><span class="v" style="color:var(--red)">${esc(j.error.code)}: ${esc(j.error.message)}</span></div>` : ""}
       ${j.steps.length ? `<div class="steps">${j.steps.slice(-10).map((s) => `<div class="${s.ok ? "step-ok" : "step-no"}">${s.ok ? "✓" : "✗"} ${esc(s.provider)} ${esc(s.stage)} — ${esc(s.message)}</div>`).join("")}</div>` : ""}
       ${j.status === "failed" ? `<form method="post" action="/dashboard/anime/retry" style="margin-top:10px">${csrfField(req)}<input type="hidden" name="id" value="${esc(j.id)}" /><button class="watch">↻ Retry</button></form>` : ""}
@@ -285,23 +304,24 @@ async function downloadsPage(req) {
   const active = [...snap.current, ...snap.queued];
   let html = `<h1>Downloads</h1><div class="sub">Live anime pipeline · active ${active.length} · done ${snap.counts.done} · failed ${snap.counts.failed}</div>`;
   html += active.length ? active.map(jobCard).join("") : `<div class="empty">No active downloads.</div>`;
-  if (snap.recent.length) { html += `<div class="section-h">Recent</div>` + snap.recent.slice(0, 8).map(jobCard).join(""); }
+  if (recent.length) { html += `<div class="section-h">Recent</div>` + recent.slice(0, 8).map(jobCard).join(""); }
   // Auto-refresh only while jobs are active, so progress/speed update live.
   if (active.length) { html += `<script>setTimeout(()=>location.reload(),4000)</script>`; }
   return layout("Downloads", { html });
 }
 
 async function detailPage(provider, id, req) {
+  const userId = userScope(req);
   const entry = { provider, id, title: "" };
   // Try to enrich from the watchlist (may have metadata).
-  const wl = service.loadWatchlist().find((e) => e.id === id && e.provider === provider);
+  const wl = service.loadWatchlist(userId).find((e) => e.id === id && e.provider === provider);
   Object.assign(entry, wl || {});
   const d = await service.getDetails(entry);
   if (!service.isCatalogSafe(d)) return layout("Title unavailable", { html: `<div class="empty"><h1>Title unavailable</h1><p>This title is excluded from the catalog policy.</p><a class="watch" href="/dashboard/anime/browse">Back to browse</a></div>` });
   const eps = await service.getEpisodes(entry);
   const inWl = wl ? true : false;
   // Remember the last quality picked for this title.
-  const prog = service.getContinueWatching(50).find((e) => e.id === id && e.provider === provider);
+  const prog = service.getContinueWatching(50, userId).find((e) => e.id === id && e.provider === provider);
   const defaultQuality = prog?.quality || "best";
 
   const qualitySelect = `<select name="quality" style="background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:4px 8px;border-radius:8px;font-size:12px;margin-top:6px">
@@ -383,8 +403,9 @@ router.get("/random", async (req, res) => {
 // Serve a finished browser-job file.
 router.get("/file/:id", (req, res) => {
   try {
+    const userId = userScope(req);
     const jobId = String(req.params.id);
-    if (!verifyFileToken(req.query.t, jobId)) return res.status(401).send("This download link has expired. Return to Downloads and try again.");
+    if (!verifyFileToken(req.query.t, jobId, userId)) return res.status(401).send("This download link has expired or belongs to another session. Return to Downloads and try again.");
     const job = snapshot().recent.find((j) => j.id === jobId) || (() => { try { return require("./tools/animeJobManager").getJob(jobId); } catch (_) { return null; } })();
     if (!job?.result?.filePath || !job.result.size) return res.status(404).send("File not found or not ready.");
     const fs = require("fs");
@@ -401,10 +422,12 @@ router.get("/file/:id", (req, res) => {
 // an embedded player. `/proxy` relays the m3u8 + segments so protected streams
 // (referer/UA-gated) actually play in the browser.
 async function watchPage(provider, id, req) {
+  const userId = userScope(req);
   const entry = { provider, id, title: "" };
-  const wl = service.loadWatchlist().find((e) => e.id === id && e.provider === provider);
+  const wl = service.loadWatchlist(userId).find((e) => e.id === id && e.provider === provider);
   Object.assign(entry, wl || {});
   const d = await service.getDetails(entry);
+  if (!service.isCatalogSafe(d)) return layout("Title unavailable", { html: `<div class="empty"><h1>Title unavailable</h1><p>This title is excluded from the catalog policy.</p><a class="watch" href="/dashboard/anime/browse">Back to browse</a></div>` });
   const ep = Number(req.query.ep) || 1;
   const quality = req.query.quality || "best";
 
@@ -473,8 +496,11 @@ router.get("/:provider/:id", async (req, res) => {
 // Enqueue a download job (same engine as WhatsApp).
 router.post("/download", async (req, res) => {
   try {
+    const userId = userScope(req);
     const { provider, id, title, episode, quality } = req.body || {};
     if (!title || !episode) return res.redirect("/dashboard/anime?err=missing");
+    const details = await service.getDetails({ provider, id, title });
+    if (!service.isCatalogSafe(details)) return res.redirect("/dashboard/anime?err=unsafe");
     const q = QUALITY_OPTIONS.includes(quality) ? quality : "best";
     const job = enqueueAnimeJob({
       name: title,
@@ -482,9 +508,12 @@ router.post("/download", async (req, res) => {
       preferred: provider === "jikan" ? null : provider,
       quality: q,
       sock: null, chatId: null, quotedMsg: null,
+      ownerId: userId,
+      sessionId: userId,
+      createdBy: "dashboard-anime",
     });
     // Track Continue Watching progress (with the picked quality).
-    service.trackProgress({ id, provider, title, episode: Number(episode) || 1, quality: q, status: "watching" });
+    service.trackProgress({ id, provider, title, episode: Number(episode) || 1, quality: q, status: "watching" }, userId);
     res.redirect(`/dashboard/anime/downloads?job=${job.id}&ok=1`);
   } catch (e) { res.redirect(`/dashboard/anime?err=${encodeURIComponent(e.message)}`); }
 });
@@ -499,18 +528,21 @@ router.post("/retry", async (req, res) => {
 
 router.post("/watchlist/toggle", async (req, res) => {
   try {
+    const userId = userScope(req);
     const { provider, id, title, cover, rating, episodes, redirect } = req.body || {};
-    const existing = service.loadWatchlist().find((e) => e.id === id && e.provider === provider);
-    if (existing) service.removeFromWatchlist(id, provider);
-    else service.addToWatchlist({ id, provider, title, cover, rating, episodes });
-    res.redirect(redirect || "/dashboard/anime/watchlist");
+    const targetRedirect = safeRedirect(redirect);
+    const existing = service.loadWatchlist(userId).find((e) => e.id === id && e.provider === provider);
+    if (existing) service.removeFromWatchlist(id, provider, userId);
+    else service.addToWatchlist({ id, provider, title, cover, rating, episodes }, userId);
+    res.redirect(targetRedirect);
   } catch (e) { res.redirect("/dashboard/anime?err=1"); }
 });
 
 router.post("/watchlist/remove", async (req, res) => {
   try {
+    const userId = userScope(req);
     const { id, provider } = req.body || {};
-    service.removeFromWatchlist(id, provider);
+    service.removeFromWatchlist(id, provider, userId);
     res.redirect("/dashboard/anime/watchlist");
   } catch (e) { res.redirect("/dashboard/anime/watchlist?err=1"); }
 });

@@ -14,7 +14,9 @@ function getOwnerId(req) {
 }
 
 function cardComponent(item) {
-  const href = item.type === "anime" ? `/anime/title/${encodeURIComponent(item.id)}` : `/movies/title/${encodeURIComponent(item.id)}`;
+  const href = item.type === "anime"
+    ? `/anime/title/${encodeURIComponent(item.id)}`
+    : `/movies/title/${encodeURIComponent(item.id)}`;
   return `<a class="media-card" href="${esc(href)}" style="display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; text-decoration: none; transition: transform 0.15s ease;">
     <div style="aspect-ratio: 2/3; background: var(--surface-2); position: relative; overflow: hidden;">
       <img src="${esc(item.poster || item.cover || "/aria-mark.png")}" alt="${esc(item.title)}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy">
@@ -38,6 +40,14 @@ function mediaGrid(items) {
     ${items.map(cardComponent).join("")}
   </div>`;
 }
+
+// Global Search
+router.get("/media/search", async (req, res) => {
+  const query = String(req.query.q || "").trim();
+  const results = query ? await mediaEngine.searchGlobal(query) : [];
+  const html = `<h1 style="font-size: 24px; font-weight: 800; margin-bottom: 16px;">Search Results ${query ? `for “${esc(query)}”` : ""}</h1>` + mediaGrid(results);
+  res.send(mediaLayout("Search Results", "home", html));
+});
 
 // ARIA Media Unified Home
 router.get(["/", "/media"], async (req, res) => {
@@ -90,7 +100,7 @@ router.get(["/kids"], async (req, res) => {
   res.send(mediaLayout("Kids", "kids", html));
 });
 
-// Anime Recommendations & Discovery System (/anime/recommend)
+// Recommendations & Discovery Engine
 router.get(["/anime/recommend", "/recommend"], async (req, res) => {
   const genres = req.query.genres ? [].concat(req.query.genres) : [];
   const mood = req.query.mood ? [].concat(req.query.mood) : [];

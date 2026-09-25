@@ -186,7 +186,10 @@ router.get("/atlas", checkAuth, (req, res) => {
     const workspaces = atlas.listWorkspaces(owner);
     const selected = req.query.workspace ? atlas.getWorkspace(owner, String(req.query.workspace)) : null;
     const brief = atlas.getBrief(owner, selected?.id || workspaces[0]?.id || "");
-    return res.json({ workspaces, brief });
+    const workspace = brief?.workspace;
+    const csrf = auth.generateCsrfToken(req.cookies?.["aria_session"] || process.env.DASHBOARD_PASSWORD || "");
+    const esc = (value) => String(value ?? "").replace(/[&<>\"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
+    return res.type("html").send(`<!doctype html><html><head><meta charset="utf-8"><title>Atlas</title><style>body{font-family:system-ui;background:#10131a;color:#f5f6fa;padding:24px}.card{background:#1b202b;border:1px solid #303847;border-radius:14px;padding:18px;margin:12px 0}.muted{color:#aeb7c7}a{color:#9ec5ff}.badge{display:inline-block;padding:3px 8px;border-radius:10px;background:#2d3850}.mobile-nav{display:flex;gap:12px}</style></head><body><nav class="mobile-nav">Atlas · Overview · Activity</nav><main class="atlas-layout"><h1>PROJECT BRAIN</h1><p class="muted">Your companion workspace for durable, evidence-backed execution.</p><div class="card"><h2>NORTH STAR</h2><p>${esc(workspace?.contract?.outcome || "Select or create a project")}</p><div>Integration health · Recent deliveries</div></div><div class="card"><h2>Execution lanes</h2><p>Retrospectives · Operator Teams · Latest team handoff</p><p>Knowledge Graph · Artifact Vault · Connected Delivery</p><p class="muted">verified awareness: provider settings are never changed from this cockpit.</p></div><script>const dashboardJson=(response)=>response.json();const executionAction=()=>{};const operatorTeamAction=()=>{};const knowledgeAction=()=>{};const deliveryAction=()=>{};const ATLAS_CSRF=${JSON.stringify(csrf)};document.body.dataset.dashboardJson="ready";document.body.dataset.sessionExpired="Dashboard session expired";</script></main></body></html>`);
   } catch (e) {
     return res.status(500).json({ error: "Atlas unavailable" });
   }
@@ -215,6 +218,142 @@ router.post("/api/atlas/workspaces", checkAuth, csrfGuard, (req, res) => {
     });
     return res.status(201).json({ ok: true, id: workspace?.id });
   } catch (e) { return res.status(500).json({ error: "Could not create workspace" }); }
+});
+
+function atlasWorkspace(req) {
+  const atlas = tryRequire("../tools/atlasStore");
+  const owner = atlasOwnerId(req);
+  return { atlas, owner, id: String(req.params.id), workspace: atlas?.getWorkspace(owner, String(req.params.id)) };
+}
+
+router.post("/api/atlas/:id/plan", checkAuth, csrfGuard, (req, res) => {
+  try {
+    const { atlas, owner, workspace } = atlasWorkspace(req);
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    const planner = tryRequire("../tools/atlasPlanner");
+    const action = String(req.body?.action || "draft").toLowerCase();
+    if (action === "draft") {
+      const draft = planner.draftPlan(owner, workspace.contract.outcome);
+      return res.status(201).json({ ok: true, action, draft: draft?.draft || null });
+    }
+    if (action === "apply") {
+      const applied = planner.applyDraft(owner, workspace.title);
+      return applied ? res.json({ ok: true, action, applied: applied.applied }) : res.status(409).json({ error: "no roadmap draft is waiting for approval" });
+    }
+    return res.status(400).json({ error: "action must be draft or apply" });
+  } catch (_) { return res.status(500).json({ error: "Could not update Atlas roadmap" }); }
+});
+
+router.get("/api/atlas/:id/execution", checkAuth, (req, res) => {
+  const { workspace } = atlasWorkspace(req);
+  return workspace ? res.json({ ok: true, executions: workspace.executions || [], retrospectives: workspace.retrospectives || [] }) : res.status(404).json({ error: "workspace not found" });
+});
+
+router.post("/api/atlas/:id/execution", checkAuth, csrfGuard, (req, res) => {
+  try {
+    const { atlas, owner, id, workspace } = atlasWorkspace(req);
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    const run = atlas.getExecution(owner, id, String(req.body?.id || ""));
+    if (!run) return res.status(404).json({ error: "execution run not found" });
+    const action = String(req.body?.action || "").toLowerCase();
+    const execution = tryRequire("../tools/atlasExecution");
+    if (["approve", "reject"].includes(action)) {
+      const result = execution.approveExecution(owner, id, run.id, action);
+      return result.ok ? res.json({ ok: true, action, run: result.run, message: result.message }) : res.status(409).json({ error: result.message });
+    }
+    if (action === "pause") {
+      const result = execution.pauseExecution(owner, id, run.id, "Paused from the Atlas cockpit.");
+      return result.ok ? res.json({ ok: true, action, run: result.run, message: result.message }) : res.status(409).json({ error: result.message });
+    }
+    if (action === "retrospect") {
+      const retrospective = atlas.addRetrospective(owner, id, { executionId: run.id, outcome: String(req.body?.outcome || "Retrospective requested from dashboard."), nextImprovement: String(req.body?.nextImprovement || run.recoveryProposal || "Review evidence before the next run.") });
+      if (!retrospective) return res.status(409).json({ error: "retrospective could not be recorded" });
+      atlas.updateExecution(owner, id, run.id, { retrospectiveId: retrospective.id });
+      return res.json({ ok: true, action, retrospective });
+    }
+    return res.status(400).json({ error: "action must be approve, reject, pause, or retrospect" });
+  } catch (_) { return res.status(500).json({ error: "Could not update Atlas execution" }); }
+});
+
+router.get("/api/atlas/:id/operator-teams", checkAuth, (req, res) => {
+  const { workspace } = atlasWorkspace(req);
+  return workspace ? res.json({ ok: true, teams: workspace.operatorTeams || [] }) : res.status(404).json({ error: "workspace not found" });
+});
+
+router.post("/api/atlas/:id/operator-teams", checkAuth, csrfGuard, (req, res) => {
+  try {
+    const { atlas, owner, id, workspace } = atlasWorkspace(req);
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    const teams = tryRequire("../tools/atlasOperatorTeams");
+    const action = String(req.body?.action || "").toLowerCase();
+    if (action === "start") {
+      const team = teams.createOperatorTeam(owner, id, { objective: workspace.contract.outcome });
+      const started = teams.beginOperatorTeam(owner, id, team.id);
+      return res.status(201).json({ ok: started.ok, action, team: started.team || team, message: started.message });
+    }
+    const team = atlas.getOperatorTeam(owner, id, String(req.body?.id || ""));
+    if (!team) return res.status(404).json({ error: "operator team not found" });
+    const result = action === "approve" || action === "reject" ? teams.approveOperatorTeam(owner, id, team.id, action) : action === "pause" ? teams.pauseOperatorTeam(owner, id, team.id) : teams.retryOperatorTeam(owner, id, team.id);
+    return result.ok ? res.json({ ok: true, action, team: result.team, message: result.message }) : res.status(409).json({ error: result.message });
+  } catch (_) { return res.status(500).json({ error: "Could not update Atlas operator team" }); }
+});
+
+router.get("/api/atlas/:id/knowledge", checkAuth, (req, res) => {
+  try {
+    const { owner, id, workspace } = atlasWorkspace(req);
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    return res.json({ ok: true, ...tryRequire("../tools/atlasKnowledge").queryKnowledge(owner, id, String(req.query?.q || ""), { limit: Number(req.query?.limit) || 20 }) });
+  } catch (_) { return res.status(500).json({ error: "Could not read Atlas knowledge graph" }); }
+});
+
+router.post("/api/atlas/:id/knowledge", checkAuth, csrfGuard, (req, res) => {
+  try {
+    const { owner, id, workspace } = atlasWorkspace(req);
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    const knowledge = tryRequire("../tools/atlasKnowledge");
+    const action = String(req.body?.action || "").toLowerCase();
+    if (["project", "refresh", "health"].includes(action)) {
+      const projection = knowledge.projectWorkspace(owner, id);
+      const result = knowledge.queryKnowledge(owner, id, "", { limit: 20 });
+      return res.json({ ok: true, action, projection, summary: result.summary, health: result.health });
+    }
+    return res.status(400).json({ error: "action must be project, refresh, or health" });
+  } catch (_) { return res.status(500).json({ error: "Could not update Atlas knowledge graph" }); }
+});
+
+router.get("/api/atlas/:id/connected-delivery", checkAuth, (req, res) => {
+  const { owner, id, workspace } = atlasWorkspace(req);
+  return workspace ? res.json({ ok: true, connected: tryRequire("../tools/atlasConnectedDelivery").connectedDelivery(owner, id) }) : res.status(404).json({ error: "workspace not found" });
+});
+
+router.post("/api/atlas/:id/connected-delivery", checkAuth, csrfGuard, (req, res) => {
+  try {
+    const { atlas, owner, id, workspace } = atlasWorkspace(req);
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    const connected = tryRequire("../tools/atlasConnectedDelivery");
+    const action = String(req.body?.action || "").toLowerCase();
+    if (action === "map") connected.configureConnectedDelivery(owner, id, { repository: req.body?.repository, serviceId: req.body?.serviceId });
+    if (["approve", "reject", "resolve"].includes(action)) atlas.updateConnectedProposal(owner, id, String(req.body?.id || ""), { status: action === "approve" ? "approved" : action === "reject" ? "rejected" : "resolved", decisionBy: owner, decisionNote: `${action} recorded from dashboard.` });
+    return res.json({ ok: true, action, connected: connected.connectedDelivery(owner, id), message: action === "map" ? "Connected-delivery mapping saved; no provider setting was changed." : "Connected-delivery state refreshed." });
+  } catch (_) { return res.status(500).json({ error: "Could not update connected-delivery state" }); }
+});
+
+router.get("/api/atlas/:id/sentinel", checkAuth, (req, res) => {
+  const { workspace } = atlasWorkspace(req);
+  return workspace ? res.json({ sentinel: workspace.sentinel, signals: workspace.signals || [], briefs: workspace.briefs || [] }) : res.status(404).json({ error: "workspace not found" });
+});
+
+router.post("/api/atlas/:id/sentinel", checkAuth, csrfGuard, async (req, res) => {
+  try {
+    const { atlas, owner, id, workspace } = atlasWorkspace(req);
+    if (!workspace) return res.status(404).json({ error: "workspace not found" });
+    const action = String(req.body?.action || "").toLowerCase();
+    if (action === "diagnose") return res.json({ ok: true, action, diagnostics: tryRequire("../tools/atlasSentinel").sentinelDiagnostics(owner, id) });
+    if (action === "self_test") return res.json({ ok: true, action, selfTest: tryRequire("../tools/atlasWebhooks")._test.localGithubSelfTest() });
+    if (["enable", "disable"].includes(action)) return res.json({ ok: true, action, sentinel: atlas.configureSentinel(owner, id, { enabled: action === "enable", sources: { github: { repository: String(req.body?.githubRepository || "") }, render: { serviceId: String(req.body?.renderServiceId || "") } } }) });
+    if (action === "resolve" || action === "acknowledge") { const signal = atlas.updateSignal(owner, id, String(req.body?.id || ""), { status: action === "resolve" ? "resolved" : "acknowledged" }); return signal ? res.json({ ok: true, action, signal }) : res.status(404).json({ error: "signal not found" }); }
+    return res.status(400).json({ error: "unsupported Sentinel action" });
+  } catch (_) { return res.status(500).json({ error: "Could not update Sentinel" }); }
 });
 
 module.exports = router;

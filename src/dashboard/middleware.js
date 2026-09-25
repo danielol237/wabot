@@ -23,11 +23,21 @@ function checkAuth(req, res, next) {
   const token = req.cookies?.["aria_session"];
 
   // Backward-compatibility: Check Authorization header with process.env.DASHBOARD_PASSWORD if account system has no owner yet
-  if (!auth.hasOwnerAccount() && process.env.DASHBOARD_PASSWORD) {
+  if (process.env.DASHBOARD_PASSWORD) {
     const authHeader = req.headers.authorization || "";
-    const tokenVal = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : (authHeader.startsWith("Basic ") ? Buffer.from(authHeader.slice(6), "base64").toString("utf8").split(":")[1] : "");
-    if (tokenVal === process.env.DASHBOARD_PASSWORD) {
+    const legacyCredential = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : authHeader.startsWith("Basic ")
+        ? (() => {
+          try {
+            const decoded = Buffer.from(authHeader.slice(6), "base64").toString("utf8");
+            return decoded.includes(":") ? decoded.slice(decoded.indexOf(":") + 1) : "";
+          } catch (_) { return ""; }
+        })()
+        : "";
+    if (legacyCredential === process.env.DASHBOARD_PASSWORD) {
       req.user = { username: "owner", role: "owner" };
+      req.legacyDashboardAuth = true;
       return next();
     }
   }
@@ -43,7 +53,10 @@ function checkAuth(req, res, next) {
 
   // Check if API request
   if (req.path.startsWith("/api/") || String(req.headers.accept || "").includes("application/json")) {
-    return sendSecurityError(res, req, "AUTHENTICATION_REQUIRED");
+    if (String(req.originalUrl || "").startsWith("/api/platform")) {
+      return res.status(401).json({ ok: false, error: "Authentication required.", code: "auth_required" });
+    }
+    return res.status(401).json({ code: "auth_required", error: { code: "AUTHENTICATION_REQUIRED", message: "Authentication is required." } });
   }
 
   // Redirect browser to setup if no owner account exists, else to login
@@ -69,7 +82,10 @@ function csrfGuard(req, res, next) {
   const token = req.cookies?.["aria_session"];
   const given = req.body?._csrf || req.headers["x-csrf-token"] || req.query?._csrf || "";
 
-  if (!token || !given || !auth.validateCsrfToken(token, given)) {
+  const legacyToken = process.env.DASHBOARD_PASSWORD || "";
+  const validLegacyCsrf = req.legacyDashboardAuth && legacyToken && auth.validateCsrfToken(legacyToken, given);
+  if ((!token && !validLegacyCsrf) || !given || (!validLegacyCsrf && !auth.validateCsrfToken(token, given))) {
+    if (req.legacyDashboardAuth) return res.status(403).json({ code: "csrf_invalid", error: { code: "csrf_invalid", message: "CSRF token is invalid." } });
     return sendSecurityError(res, req, "CSRF_VALIDATION_FAILED");
   }
   next();

@@ -7,6 +7,7 @@ const axios = require("axios");
 
 const KEY_ENV = {
   Jules: "JULES_API_KEY",
+  OpenRouter: "OPENROUTER_API_KEY",
   Gemini: "GEMINI_API_KEY",
   Mistral: "MISTRAL_API_KEY",
   Agnes: "AGNES_API_KEY",
@@ -19,6 +20,7 @@ const KEY_ENV = {
 
 const PROVIDER_ALIASES = {
   jules: "Jules",
+  openrouter: "OpenRouter",
   gpt5: "GPT-5",
   "gemini-unofficial": "Gemini-web",
   openapis: "OpenAPIs",

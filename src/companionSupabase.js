@@ -86,14 +86,7 @@ async function verifySupabaseAccessToken(accessToken) {
       error.status = response.status;
       throw error;
     }
-    let user;
-    try {
-      user = JSON.parse(body);
-    } catch (_) {
-      const error = new Error("Supabase returned an invalid JSON response.");
-      error.code = "SUPABASE_RESPONSE_INVALID";
-      throw error;
-    }
+    const user = JSON.parse(body);
     if (!user?.id) {
       const error = new Error("Supabase did not return a valid user.");
       error.code = "SUPABASE_USER_INVALID";

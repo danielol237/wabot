@@ -46,7 +46,14 @@ function runProcess(command, args, options = {}) {
     const state = { output: "" };
     const child = spawn(command, args, {
       cwd,
-      env: { ...process.env, CI: "1", HOST: "127.0.0.1", PORT: "0", npm_config_cache: path.join(os.tmpdir(), "aria-sandbox-npm-cache") },
+    env: {
+      ...process.env,
+      CI: "1",
+      HOST: "127.0.0.1",
+      PORT: "0",
+      HOME: process.env.HOME || os.tmpdir(),
+      npm_config_cache: path.join(os.tmpdir(), "aria-sandbox-npm-cache"),
+    },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let settled = false;
@@ -71,17 +78,20 @@ function runProcess(command, args, options = {}) {
 
 function runDocker(args, options = {}) {
   const root = path.resolve(options.cwd || process.cwd());
+  const uid = typeof process.getuid === "function" ? process.getuid() : 1000;
+  const gid = typeof process.getgid === "function" ? process.getgid() : uid;
   const configuredNetwork = String(process.env.SANDBOX_DOCKER_NETWORK || "").trim().toLowerCase();
   const network = ["none", "bridge", "host"].includes(configuredNetwork) ? configuredNetwork : (options.network || "none");
   const image = options.image || "node:22-slim";
   const command = [
-    "run", "--rm", "--network", network, "--user", "1000:1000",
+    "run", "--rm", "--network", network, "--user", `${uid}:${gid}`,
     "--read-only", "--tmpfs", "/tmp:size=256m", "--memory", "768m", "--cpus", "1",
     "--pids-limit", "128", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
     // RLIMIT_NPROC is counted against the host UID on shared-UID hosts and
     // can prevent npm/node from starting. The container pids limit remains active.
     "--ulimit", "nofile=256:256",
-    "-e", "CI=1", "-e", "HOST=127.0.0.1", "-e", "PORT=0", "-e", "NPM_CONFIG_CACHE=/tmp/npm-cache",
+    "-e", "CI=1", "-e", "HOST=127.0.0.1", "-e", "PORT=0",
+    "-e", "HOME=/tmp/home", "-e", "NPM_CONFIG_CACHE=/tmp/npm-cache", "-e", "NPM_CONFIG_USERCONFIG=/tmp/npmrc",
     "-v", `${root}:/workspace:rw`, "-w", "/workspace", image, ...args,
   ];
   return runProcess("docker", command, { ...options, sandbox: "docker" });
@@ -107,10 +117,7 @@ async function verifyPackageInSandbox(projectDir) {
   if (!fs.existsSync(packagePath)) return { success: true, skipped: true, sandbox: "not_required" };
   const install = await runSandboxCommand(projectDir, ["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"], "npm install", { timeout: 120000, network: "bridge" });
   if (!install.success) return install;
-  let pkg = {};
-  try {
-    pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
-  } catch (_) {}
+  const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
   if (pkg.scripts?.build) {
     const build = await runNpmScriptInSandbox(projectDir, "build", { timeout: 120000, network: "none" });
     if (!build.success) return build;

@@ -33,7 +33,7 @@ router.get("/login", (req, res) => {
 });
 
 router.get("/", checkAuth, async (req, res) => {
-  const activeView = String(req.query.view || "home").toLowerCase();
+  const activeView = String(req.query.view || req.query.pane || "home").toLowerCase();
   const token = req.cookies?.["aria_session"];
   const csrfToken = auth.generateCsrfToken(token);
 
@@ -119,12 +119,13 @@ router.get("/", checkAuth, async (req, res) => {
     innerContent = components.renderHomeView(data);
   }
 
-  return res.send(views.renderShell({
+  const shell = views.renderShell({
     user: req.user,
     activeView,
     content: innerContent,
     csrfToken
-  }));
+  });
+  return res.send(shell.replace("</body>", `<script>const INITIAL_PANE="${activeView}";</script></body>`));
 });
 
 async function fetchOverviewData(req) {

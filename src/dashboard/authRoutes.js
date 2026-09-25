@@ -13,7 +13,7 @@ router.get("/setup", (req, res, next) => {
   next();
 });
 
-// Public: POST /api/auth/setup - create first owner account
+// Public: POST /dashboard/api/auth/setup - create first owner account
 router.post("/api/auth/setup", async (req, res) => {
   if (auth.hasOwnerAccount()) {
     return sendSecurityError(res, req, "SECURITY_POLICY_VIOLATION", "Owner account already setup.");
@@ -58,7 +58,7 @@ router.get("/login", (req, res, next) => {
   next();
 });
 
-// Public: POST /api/auth/login - authenticate user
+// Public: POST /dashboard/api/auth/login - authenticate user
 router.post("/api/auth/login", async (req, res) => {
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
   const { username, password, rememberMe } = req.body || {};
@@ -102,6 +102,11 @@ router.post("/api/auth/login", async (req, res) => {
 });
 
 // Protected session endpoints
+router.get("/api/csrf", checkAuth, (req, res) => {
+  const token = req.cookies?.["aria_session"] || (req.legacyDashboardAuth ? process.env.DASHBOARD_PASSWORD : "");
+  return res.json({ csrf: auth.generateCsrfToken(token) });
+});
+
 router.get("/api/auth/session", checkAuth, (req, res) => {
   const token = req.cookies?.["aria_session"];
   const csrfToken = auth.generateCsrfToken(token);

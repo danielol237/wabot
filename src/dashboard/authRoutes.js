@@ -13,6 +13,7 @@ router.get("/setup", (req, res, next) => {
   next();
 });
 
+// Public: POST /dashboard/api/auth/setup - create first owner account
 // Public: POST /api/auth/setup - create first owner account
 router.post("/api/auth/setup", async (req, res) => {
   if (auth.hasOwnerAccount()) {
@@ -32,6 +33,7 @@ router.post("/api/auth/setup", async (req, res) => {
 
     res.cookie("aria_session", sessionRes.rawToken, {
       httpOnly: true,
+      maxAge: sessionRes.ttlMs,
       maxAge: 12 * 60 * 60 * 1000,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production"
@@ -58,6 +60,10 @@ router.get("/login", (req, res, next) => {
   next();
 });
 
+// Public: POST /dashboard/api/auth/login - authenticate user
+router.post("/api/auth/login", async (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const { username, password, rememberMe } = req.body || {};
 // Public: POST /api/auth/login - authenticate user
 router.post("/api/auth/login", async (req, res) => {
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
@@ -82,6 +88,11 @@ router.post("/api/auth/login", async (req, res) => {
 
     auth.clearLoginFailures(ip, username);
     const userAgent = req.headers["user-agent"] || "";
+    const sessionRes = auth.createSession(verified.username, verified.role, { ip, userAgent, rememberMe: !!rememberMe });
+
+    res.cookie("aria_session", sessionRes.rawToken, {
+      httpOnly: true,
+      maxAge: sessionRes.ttlMs,
     const sessionRes = auth.createSession(verified.username, verified.role, { ip, userAgent });
 
     res.cookie("aria_session", sessionRes.rawToken, {

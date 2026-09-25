@@ -29,6 +29,8 @@ async function checkGitHubHealth() {
       headers: {
         Authorization: `Bearer ${token}`,
         "User-Agent": "ARIA-Operator-Console"
+      },
+      signal: AbortSignal.timeout(3000)
       }
     });
     const latencyMs = Date.now() - start;

@@ -194,6 +194,14 @@ function renderLoginPage() {
         <label style="font-size:11px;color:var(--aria-secondary);display:block;margin-bottom:4px;">Username</label>
         <input class="aria-input" type="text" name="username" required autofocus placeholder="e.g. owner">
       </div>
+      <div style="text-align:left;margin-bottom:16px;">
+        <label style="font-size:11px;color:var(--aria-secondary);display:block;margin-bottom:4px;">Password</label>
+        <input class="aria-input" type="password" name="password" required placeholder="Enter password">
+      </div>
+      <div style="text-align:left;margin-bottom:20px;display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="rememberMe" name="rememberMe" style="cursor:pointer;">
+        <label for="rememberMe" style="font-size:12px;color:var(--aria-secondary);cursor:pointer;">Remember me for 30 days</label>
+      </div>
       <div style="text-align:left;margin-bottom:20px;">
         <label style="font-size:11px;color:var(--aria-secondary);display:block;margin-bottom:4px;">Password</label>
         <input class="aria-input" type="password" name="password" required placeholder="Enter password">
@@ -209,10 +217,12 @@ function renderLoginPage() {
       err.style.display = 'none';
       const username = e.target.username.value;
       const password = e.target.password.value;
+      const rememberMe = e.target.rememberMe.checked;
       try {
         const res = await fetch('/dashboard/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password, rememberMe })
           body: JSON.stringify({ username, password })
         });
         const data = await res.json();

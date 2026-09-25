@@ -5,6 +5,9 @@ const path = require("path");
 const ACCOUNTS_FILE = path.join(__dirname, "../../data/dashboardAccounts.json");
 const SESSIONS_FILE = path.join(__dirname, "../../data/dashboardSessions.json");
 
+const SESSION_TTL_STANDARD_MS = 12 * 60 * 60 * 1000; // 12 hours
+const SESSION_TTL_REMEMBER_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const SCRYPT_KEYLEN = 64;
 const SCRYPT_COST = 16384; // N=16384, r=8, p=1
@@ -282,6 +285,8 @@ function createSession(username, role, options = {}) {
   const rawToken = generateToken();
   const tokenHash = hashToken(rawToken);
   const now = Date.now();
+  const ttlMs = options.rememberMe ? SESSION_TTL_REMEMBER_MS : (options.ttlMs || SESSION_TTL_STANDARD_MS);
+  const expiresAt = now + ttlMs;
   const expiresAt = now + (options.ttlMs || SESSION_TTL_MS);
 
   const session = {
@@ -291,6 +296,7 @@ function createSession(username, role, options = {}) {
     createdAt: now,
     expiresAt,
     lastSeenAt: now,
+    rememberMe: !!options.rememberMe,
     userAgent: options.userAgent || "",
     ip: options.ip || ""
   };
@@ -300,6 +306,7 @@ function createSession(username, role, options = {}) {
 
   return {
     rawToken,
+    ttlMs,
     session
   };
 }
@@ -396,6 +403,8 @@ module.exports = {
   generateCsrfToken,
   validateCsrfToken,
   hashToken,
+  SESSION_TTL_STANDARD_MS,
+  SESSION_TTL_REMEMBER_MS,
   // exported for testing
   _resetForTesting: () => {
     accountsMap.clear();

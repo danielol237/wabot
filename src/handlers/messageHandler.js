@@ -205,6 +205,31 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     await humanDelay(sock, chatId, senderJid, text.length + 1);
   }
 
+  // ── ARIA CODING ENGINE ROUTING ────────────────────────────
+  // Route natural-language software engineering requests to Coding Engine
+  try {
+    const codingSubsystem = require("../coding");
+    if (codingSubsystem.isCodingRequest(text)) {
+      await react(sock, msg, "⚡");
+      const initRes = await codingSubsystem.handleCodingRequest(text, {
+        userId: senderJid,
+        chatId,
+      });
+      await reply(sock, msg, initRes.message);
+
+      // Listen for task completion and reply to WhatsApp asynchronously
+      codingSubsystem.engine.taskManager.once(`task.completed`, (evt) => {
+        if (evt.taskId === initRes.taskId) {
+          const finalReport = codingSubsystem.getTaskResult(evt.taskId);
+          reply(sock, msg, finalReport).catch(() => {});
+        }
+      });
+      return;
+    }
+  } catch (codingErr) {
+    warn(`Coding Engine dispatch warning: ${codingErr.message}`);
+  }
+
   // Operational requests attached to media must be handled before the visual
   // conversation branch below. Otherwise a request such as “use this for my
   // status/profile” is answered by vision AI and never reaches the executor.

@@ -1,46 +1,59 @@
-// Goal Classifier & Intent Router for ARIA Agentic Pipeline
-const capabilityRegistry = require("./CapabilityRegistry");
+/**
+ * src/agent/GoalRouter.js
+ *
+ * Central Goal / Intent Classification Entry Point for ARIA.
+ * Analyzes incoming user requests to classify them into:
+ * - CONVERSATIONAL: Simple chat/questions ("hello", "what time is it?") -> light response
+ * - DIRECT_CAPABILITY: Single-step deterministic capabilities ("leave group", "set pfp") -> direct execution
+ * - MISSION: Multi-step, complex objectives requiring dynamic planning, composition, coding, research, security testing, or verification.
+ */
 
 class GoalRouter {
-  classifyGoal(text, context = {}) {
-    const clean = String(text || "").trim();
-    if (!clean) {
-      return { type: "CONVERSATIONAL", reason: "Empty message" };
+  constructor(options = {}) {
+    this.options = options;
+  }
+
+  /**
+   * Classify user request intent.
+   * @param {string} text
+   * @param {Object} context
+   */
+  classifyIntent(text, context = {}) {
+    const requestText = String(text || "").trim();
+    if (!requestText) {
+      return { type: "CONVERSATIONAL", reason: "Empty input" };
     }
 
-    // 1. Check if simple conversational / greeting / QA
-    if (
-      /^(?:hi|hello|hey|wassup|sup|thanks|thank you|good morning|good evening|who are you|what is\s+[^?]+(?:\?|$))\b/i.test(clean) &&
-      !/\b(?:build|inspect|fix|scan|commit|deploy|create|update|pull|run)\b/i.test(clean)
-    ) {
-      return { type: "CONVERSATIONAL", reason: "Conversational greeting or general Q&A" };
+    const lower = requestText.toLowerCase();
+
+    // 1. Direct Single-Step Commands / Capabilities
+    if (/^(?:set\s+pfp|set\s+profile\s+picture|change\s+pfp)\b/i.test(lower)) {
+      return { type: "DIRECT_CAPABILITY", capability: "whatsapp.set_profile_picture", reason: "Direct WhatsApp PFP update" };
+    }
+    if (/^(?:leave\s+group|exit\s+group)\b/i.test(lower)) {
+      return { type: "DIRECT_CAPABILITY", capability: "whatsapp.leave_group", reason: "Direct WhatsApp Leave Group" };
+    }
+    if (/^(?:sticker|make\s+sticker|s)\b/i.test(lower) && context.hasMedia) {
+      return { type: "DIRECT_CAPABILITY", capability: "whatsapp.create_sticker", reason: "Direct Sticker Generation" };
     }
 
-    // 2. Check if direct capability command
-    if (
-      /^(?:show git status|git status|pm2 status|node -v|npm -v|check server logs|git log)\b/i.test(clean)
-    ) {
-      return {
-        type: "DIRECT_CAPABILITY",
-        capabilityName: clean.includes("git status") ? "git.status" : "terminal.observe",
-        args: { command: clean },
-      };
+    // 2. Multi-Step / Goal-Oriented Missions
+    const isMission = (
+      /\b(?:pentest|security\s+assessment|security\s+report|audit\s+security|scan\s+app|find\s+security\s+issues)\b/i.test(lower) ||
+      /\b(?:build|create)\s+(?:a\s+)?(?:website|web\s+app|application|service|dashboard)\b/i.test(lower) ||
+      /\b(?:inspect|check|fix|debug)\s+.*?\b(?:repo|repository|app|deployed\s+app|code|tests|website)\b/i.test(lower) ||
+      /\b(?:research|investigate)\s+.*?\s+(?:and|then)\s+(?:create|write|send)\s+(?:a\s+)?(?:report|pdf|document|file)\b/i.test(lower) ||
+      /\b(?:connect|use)\s+(?:my\s+)?(?:gmail|slack|composio|notion)\b/i.test(lower) ||
+      (lower.includes("and send") && (lower.includes("report") || lower.includes("file") || lower.includes("result")))
+    );
+
+    if (isMission) {
+      return { type: "MISSION", reason: "Multi-step complex goal requiring MissionAgent dynamic composition." };
     }
 
-    // 3. Multi-step complex or autonomous goals -> MISSION
-    if (
-      /\b(?:inspect|scan|audit|find|fix|build|deploy|write a report|create|commit|repair)\b/i.test(clean) ||
-      (/\b(?:check|analyze|investigate|run|test|diagnose|upgrade|update)\b/i.test(clean) &&
-        /\b(?:server|website|app|logs|pm2|git|security|docker|tests|bugs?|errors?)\b/i.test(clean))
-    ) {
-      return {
-        type: "MISSION",
-        reason: "Multi-step complex autonomous goal",
-      };
-    }
-
-    return { type: "CONVERSATIONAL", reason: "Default fallback to conversation" };
+    // Default conversational / direct answer
+    return { type: "CONVERSATIONAL", reason: "Simple inquiry or general chat conversation." };
   }
 }
 
-module.exports = new GoalRouter();
+module.exports = GoalRouter;

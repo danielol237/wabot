@@ -205,6 +205,42 @@ async function handleMessage(sock, msg, loadedPlugins = []) {
     await humanDelay(sock, chatId, senderJid, text.length + 1);
   }
 
+  // ── GOAL ROUTER & MISSION AGENT INTEGRATION ──────────────
+  try {
+    const goalRouter = require("../agent/GoalRouter");
+    const goalClassification = goalRouter.classifyGoal(text, { userId: senderJid, chatId });
+
+    if (goalClassification.type === "MISSION") {
+      await react(sock, msg, "🚀");
+      const MissionAgent = require("../agent/MissionAgent");
+      const agent = new MissionAgent();
+
+      await reply(sock, msg, `🚀 *ARIA Mission Started*\n\nObjective: "${text}"\nARIA Agent is analyzing the goal and composing capabilities...`);
+
+      const missionRes = await agent.executeMission(text, {
+        userId: senderJid,
+        chatId,
+        sock,
+      });
+
+      await reply(sock, msg, missionRes.message || "✅ *ARIA Mission Completed*");
+      return;
+    } else if (goalClassification.type === "DIRECT_CAPABILITY") {
+      await react(sock, msg, "⚡");
+      const registry = require("../agent/CapabilityRegistry");
+      const capResult = await registry.executeCapability(
+        goalClassification.capabilityName,
+        goalClassification.args || {},
+        { userId: senderJid, chatId, sock }
+      );
+      const outputText = typeof capResult === "string" ? capResult : JSON.stringify(capResult, null, 2);
+      await reply(sock, msg, `⚡ *Capability Output*\n\n\`\`\`\n${outputText.slice(0, 3000)}\n\`\`\``);
+      return;
+    }
+  } catch (missionErr) {
+    warn(`Mission Agent dispatch warning: ${missionErr.message}`);
+  }
+
   // ── ARIA CODING ENGINE ROUTING ────────────────────────────
   // Route natural-language software engineering requests to Coding Engine
   try {

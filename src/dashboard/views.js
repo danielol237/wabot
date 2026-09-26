@@ -201,7 +201,7 @@ function renderShell({ user, activeView, content, csrfToken }) {
 
     if (!!window.EventSource) {
       try {
-        const sse = new EventSource('/api/stream');
+        const sse = new EventSource('/api/events/stream');
         sse.onmessage = function(e) {
           try {
             const payload = JSON.parse(e.data);

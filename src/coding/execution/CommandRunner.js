@@ -10,15 +10,15 @@ class CommandRunner {
     this.maxBufferBytes = options.maxBufferBytes || 1024 * 1024; // 1MB
   }
 
-  runCommand(commandStr, timeoutMs = this.defaultTimeoutMs) {
+  runCommand(commandStr, timeoutMs = this.defaultTimeoutMs, options = {}) {
     return new Promise((resolve) => {
-      // Basic sanity check to prevent dangerous operations
-      if (/\b(?:rm -rf \/|mkfs|dd if=)\b/i.test(commandStr)) {
+      const perm = this.policy.checkCommandPermission(commandStr, options.userAuthorized || false);
+      if (!perm.allowed) {
         return resolve({
           success: false,
           exitCode: -1,
           stdout: "",
-          stderr: "Command denied by security policy.",
+          stderr: this.policy.sanitizeOutput(perm.reason || "Command denied by security policy."),
           timedOut: false,
         });
       }
@@ -34,15 +34,15 @@ class CommandRunner {
         },
         (err, stdout, stderr) => {
           const duration = Date.now() - startTime;
-          const timedOut = err && err.killed && err.signal === "SIGTERM";
+          const timedOut = err && (err.killed || err.signal === "SIGTERM" || err.code === "ETIMEDOUT");
 
           resolve({
             success: !err,
             exitCode: err ? err.code || 1 : 0,
-            stdout: String(stdout || "").slice(0, 10000), // Bounded output
-            stderr: String(stderr || "").slice(0, 10000),
+            stdout: this.policy.sanitizeOutput(String(stdout || "").slice(0, 10000)), // Bounded output
+            stderr: this.policy.sanitizeOutput(String(stderr || "").slice(0, 10000)),
             duration,
-            timedOut,
+            timedOut: Boolean(timedOut),
           });
         }
       );

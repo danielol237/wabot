@@ -1,4 +1,4 @@
-// ARIA Media Web Application Router — Hubs, Recommendations, Player, and Library
+// ARIA Unified Public Media Router — Hubs, Titles, Episodes, Player, Discovery, Library & Downloads
 
 const express = require("express");
 const router = express.Router();
@@ -14,7 +14,9 @@ function getOwnerId(req) {
 }
 
 function cardComponent(item) {
-  const href = item.type === "anime" ? `/anime/title/${encodeURIComponent(item.id)}` : `/movies/title/${encodeURIComponent(item.id)}`;
+  const href = item.type === "anime"
+    ? `/anime/title/${encodeURIComponent(item.id)}`
+    : `/movies/title/${encodeURIComponent(item.id)}`;
   return `<a class="media-card" href="${esc(href)}" style="display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; text-decoration: none; transition: transform 0.15s ease;">
     <div style="aspect-ratio: 2/3; background: var(--surface-2); position: relative; overflow: hidden;">
       <img src="${esc(item.poster || item.cover || "/aria-mark.png")}" alt="${esc(item.title)}" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy">
@@ -38,6 +40,14 @@ function mediaGrid(items) {
     ${items.map(cardComponent).join("")}
   </div>`;
 }
+
+// Global Search
+router.get("/media/search", async (req, res) => {
+  const query = String(req.query.q || "").trim();
+  const results = query ? await mediaEngine.searchGlobal(query) : [];
+  const html = `<h1 style="font-size: 24px; font-weight: 800; margin-bottom: 16px;">Search Results ${query ? `for “${esc(query)}”` : ""}</h1>` + mediaGrid(results);
+  res.send(mediaLayout("Search Results", "home", html));
+});
 
 // ARIA Media Unified Home
 router.get(["/", "/media"], async (req, res) => {
@@ -90,7 +100,7 @@ router.get(["/kids"], async (req, res) => {
   res.send(mediaLayout("Kids", "kids", html));
 });
 
-// Anime Recommendations & Discovery System (/anime/recommend)
+// Recommendations & Discovery Engine
 router.get(["/anime/recommend", "/recommend"], async (req, res) => {
   const genres = req.query.genres ? [].concat(req.query.genres) : [];
   const mood = req.query.mood ? [].concat(req.query.mood) : [];
@@ -129,6 +139,30 @@ router.get(["/anime/recommend", "/recommend"], async (req, res) => {
 
   const html = formHtml + `<h2 style="font-size: 18px; font-weight: 800; margin-bottom: 16px;">Matching Titles (${results.length})</h2>` + mediaGrid(results);
   res.send(mediaLayout("Anime Discovery", "recommend", html));
+});
+
+// Title Detail Pages for Movies and General Media
+router.get("/movies/title/:id", async (req, res) => {
+  const { id } = req.params;
+  const details = await mediaEngine.getDetails("movie", id);
+
+  const html = `<div style="display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 32px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 24px; margin-bottom: 32px;">
+    <img src="${esc(details.poster || "/aria-mark.png")}" alt="${esc(details.title)}" style="width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: 12px; background: var(--surface-2);">
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="font-size: 11px; font-weight: 800; color: var(--accent); text-transform: uppercase;">Movie Profile · ${esc(details.year || "")}</div>
+      <h1 style="font-size: 32px; font-weight: 800; line-height: 1.1;">${esc(details.title)}</h1>
+      <div style="font-size: 12px; color: var(--muted); display: flex; gap: 12px;">
+        <span>★ ${esc(details.rating || "N/A")}</span>
+        <span>${esc(details.runtime || "")}</span>
+      </div>
+      <p style="font-size: 14px; color: var(--text); line-height: 1.6; margin-top: 8px;">${esc(details.synopsis || "No description available.")}</p>
+      <div style="display: flex; gap: 12px; margin-top: 16px;">
+        <a href="/movies" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font-size: 12px; font-weight: 700; padding: 10px 18px; border-radius: 8px;">Back to Movies</a>
+      </div>
+    </div>
+  </div>`;
+
+  res.send(mediaLayout(details.title || "Movie Details", "movies", html));
 });
 
 // Library Workspace
